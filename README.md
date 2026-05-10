@@ -58,6 +58,18 @@ cp .env .env
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
+> ⚠️ Для LoRA-обучения нужна CUDA-сборка PyTorch. Дефолтный wheel из
+> `requirements.txt` на Windows ставится в CPU-only режиме, и обучение упадёт
+> с `CUDA is not available`. Переустанови torch под свою версию драйвера:
+>
+> ```bash
+> pip uninstall -y torch torchvision torchaudio
+> pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+> ```
+>
+> (или `cu124` / `cu118` под нужную версию). Проверь:
+> `python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"`.
+
 ### 3. Frontend
 
 ```bash

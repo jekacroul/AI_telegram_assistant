@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
+import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -32,22 +35,108 @@ def _format_alpaca(example: dict) -> str:
     )
 
 
+def _detect_nvidia_gpu() -> tuple[bool, str | None]:
+    """Return (gpu_present, driver_cuda_version) by probing nvidia-smi."""
+    nvsmi = shutil.which("nvidia-smi")
+    if not nvsmi:
+        return False, None
+    try:
+        out = subprocess.run(
+            [nvsmi, "--query-gpu=driver_version,name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0 or not out.stdout.strip():
+            return False, None
+    except (OSError, subprocess.SubprocessError):
+        return False, None
+
+    cuda_version = None
+    try:
+        ver = subprocess.run(
+            [nvsmi], capture_output=True, text=True, timeout=5,
+        )
+        for line in ver.stdout.splitlines():
+            if "CUDA Version" in line:
+                cuda_version = line.split("CUDA Version:")[-1].strip().split()[0]
+                break
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return True, cuda_version
+
+
+def _cuda_wheel_index(driver_cuda: str | None) -> str:
+    """Pick a PyTorch wheel index URL compatible with the installed driver."""
+    if not driver_cuda:
+        return "https://download.pytorch.org/whl/cu121"
+    try:
+        major, minor = (int(x) for x in driver_cuda.split(".")[:2])
+    except (ValueError, IndexError):
+        return "https://download.pytorch.org/whl/cu121"
+    if (major, minor) >= (12, 4):
+        return "https://download.pytorch.org/whl/cu124"
+    if (major, minor) >= (12, 1):
+        return "https://download.pytorch.org/whl/cu121"
+    if (major, minor) >= (11, 8):
+        return "https://download.pytorch.org/whl/cu118"
+    return "https://download.pytorch.org/whl/cu121"
+
+
 def _preflight() -> None:
     try:
         import torch
     except ImportError as e:
-        emit({"phase": "error", "error": f"PyTorch is not installed: {e}"})
-        sys.exit(2)
-    if not torch.cuda.is_available():
         emit({
             "phase": "error",
             "error": (
-                "CUDA is not available. LoRA training with 4-bit quantization "
-                "requires an NVIDIA GPU with a working CUDA build of PyTorch. "
-                "Install a CUDA-enabled torch wheel and verify torch.cuda.is_available()."
+                f"PyTorch is not installed: {e}. Install a CUDA-enabled wheel, "
+                f"for example: pip install torch --index-url "
+                f"https://download.pytorch.org/whl/cu121"
             ),
         })
         sys.exit(2)
+
+    if torch.cuda.is_available():
+        return
+
+    torch_version = getattr(torch, "__version__", "unknown")
+    torch_cuda_build = getattr(torch.version, "cuda", None)  # type: ignore[attr-defined]
+    gpu_present, driver_cuda = _detect_nvidia_gpu()
+    index_url = _cuda_wheel_index(driver_cuda)
+    py = "python" if platform.system() == "Windows" else sys.executable
+
+    lines = ["CUDA is not available — LoRA training with 4-bit quantization needs an NVIDIA GPU."]
+    lines.append(f"Installed torch: {torch_version} (cuda build: {torch_cuda_build or 'cpu-only'}).")
+
+    if not gpu_present:
+        lines.append(
+            "nvidia-smi was not found, so either there is no NVIDIA GPU or "
+            "the GPU driver is not installed. Install the latest NVIDIA driver "
+            "from https://www.nvidia.com/Download/index.aspx and reboot."
+        )
+    else:
+        lines.append(
+            f"NVIDIA GPU detected (driver CUDA {driver_cuda or 'unknown'}), "
+            f"but the installed PyTorch wheel is CPU-only."
+        )
+        lines.append(
+            "Reinstall PyTorch with CUDA support:\n"
+            f"  {py} -m pip uninstall -y torch torchvision torchaudio\n"
+            f"  {py} -m pip install torch torchvision torchaudio --index-url {index_url}"
+        )
+        lines.append(
+            "Then verify in a Python shell: "
+            "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+        )
+
+    emit({
+        "phase": "error",
+        "error": "\n".join(lines),
+        "torch_version": torch_version,
+        "torch_cuda_build": torch_cuda_build,
+        "gpu_detected": gpu_present,
+        "driver_cuda": driver_cuda,
+    })
+    sys.exit(2)
 
 
 def run_training(
