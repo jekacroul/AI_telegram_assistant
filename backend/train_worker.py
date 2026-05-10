@@ -207,6 +207,7 @@ def run_training(
     import bitsandbytes as bnb
     log(f"  bitsandbytes {bnb.__version__}")
 
+    emit({"phase": "loading_tokenizer", "base_model": base_model})
     log(f"step:tokenizer base_model={base_model}")
     tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
     if tokenizer.pad_token is None:
@@ -220,6 +221,8 @@ def run_training(
         bnb_4bit_use_double_quant=True,
     )
 
+    emit({"phase": "loading_model", "base_model": base_model,
+          "note": "first run downloads ~14 GB from HF Hub; subsequent runs use cache"})
     log("step:load_model (this is the most common crash point)")
     try:
         log("  trying with flash_attention_2")
@@ -238,6 +241,7 @@ def run_training(
             device_map="cuda:0",
         )
     log("step:model_loaded")
+    emit({"phase": "model_loaded"})
 
     log("step:prepare_for_kbit_training")
     model = prepare_model_for_kbit_training(model)
@@ -303,6 +307,7 @@ def run_training(
                 ctrl.should_training_stop = True
             return ctrl
 
+    emit({"phase": "preparing_trainer"})
     log("step:build_trainer")
     trainer = SFTTrainer(
         model=model,
