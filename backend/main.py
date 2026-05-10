@@ -476,6 +476,13 @@ class TestIn(BaseModel):
     text: str = "Привет, как дела?"
 
 
+@app.get("/api/llm/models")
+async def llm_models() -> dict:
+    client = get_client()
+    models = await client.list_models()
+    return {"models": models, "current": client.model}
+
+
 @app.post("/api/llm/test")
 async def llm_test(payload: TestIn, session: AsyncSession = Depends(get_session)) -> dict:
     profile = await get_latest_profile(session)

@@ -66,6 +66,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
+  listModels: () => request("/api/llm/models"),
   webhookInfo: () => request("/api/webhook/info"),
   setWebhook: (url) =>
     request("/api/webhook/set", {
