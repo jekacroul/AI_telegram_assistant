@@ -1,5 +1,6 @@
 import subprocess
 import re
+import sys
 import time
 import httpx
 import os
@@ -11,6 +12,23 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PROJECT_ROOT = "D:\\AI model\\AI_telegram_assistant"
 
+# Backend (and the training subprocess it spawns) must run on the venv
+# interpreter, otherwise torch/transformers/bitsandbytes will be missing.
+_venv_python_win = os.path.join(PROJECT_ROOT, ".venv", "Scripts", "python.exe")
+_venv_python_nix = os.path.join(PROJECT_ROOT, ".venv", "bin", "python")
+if os.path.isfile(_venv_python_win):
+    BACKEND_PYTHON = _venv_python_win
+elif os.path.isfile(_venv_python_nix):
+    BACKEND_PYTHON = _venv_python_nix
+else:
+    print(
+        "❌ Не найден интерпретатор venv в "
+        f"{os.path.join(PROJECT_ROOT, '.venv')}.\n"
+        "   Создай venv (py -3.11 -m venv .venv), активируй его, "
+        "поставь зависимости и CUDA-сборку torch."
+    )
+    sys.exit(1)
+
 tunnel_url = None
 
 def stream_output(process, prefix=""):
@@ -21,9 +39,9 @@ def stream_output(process, prefix=""):
             print(f"{prefix} {line}")
 
 def start_backend():
-    print("🔧 Запускаю бэкенд...")
+    print(f"🔧 Запускаю бэкенд ({BACKEND_PYTHON})...")
     process = subprocess.Popen(
-        ["python", "-m", "backend.main"],
+        [BACKEND_PYTHON, "-u", "-m", "backend.main"],
         cwd=PROJECT_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
