@@ -58,11 +58,25 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
-      <div className="card flex items-center justify-between">
-        <div className="flex items-center gap-6">
+      <div className="card flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-6">
           <StatusDot ok={!!status.ollama} label="Ollama" />
           <StatusDot ok={!!status.bot} label="Bot" />
           <StatusDot ok={!!status.db} label="DB" />
+          <div className="text-xs text-muted">
+            апдейтов: <span className="text-white">{status.update_count ?? 0}</span>
+            {status.last_update_at && (
+              <>
+                {" · последний: "}
+                <span className="text-white">
+                  {new Date(status.last_update_at).toLocaleTimeString()}
+                </span>
+                {status.last_update_kind && (
+                  <span className="text-muted"> ({status.last_update_kind})</span>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted">Авто-ответ</span>
@@ -76,6 +90,23 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {status.last_error && (
+        <div className="card border-bad/40 text-sm text-bad">
+          Последняя ошибка: {status.last_error}
+        </div>
+      )}
+
+      {status.bot && (status.update_count ?? 0) === 0 && (
+        <div className="card text-sm text-muted">
+          ⚠️ Апдейтов от Telegram пока не приходило. Проверь:
+          <ul className="list-disc ml-5 mt-1 space-y-0.5">
+            <li>webhook установлен (Настройки → блок Webhook → Info)</li>
+            <li>в Telegram → Settings → Business → Chatbots бот подключён, и в Manage messages выбраны нужные чаты</li>
+            <li>backend доступен по HTTPS снаружи (ngrok/cloudflared)</li>
+          </ul>
+        </div>
+      )}
 
       <div className="text-sm text-muted">
         Лента сообщений ({messages.length})

@@ -14,7 +14,17 @@ from aiogram.types import Update
 from sqlalchemy import select
 
 from .config import settings
-from .database import Message, SessionLocal, get_setting, set_setting
+from .database import Message, SessionLocal, get_setting
+
+ALLOWED_UPDATES = [
+    "message",
+    "edited_message",
+    "business_connection",
+    "business_message",
+    "edited_business_message",
+    "deleted_business_messages",
+    "callback_query",
+]
 from .event_bus import message_bus
 from .llm_engine import OllamaUnavailableError, get_client
 from .style_engine import get_latest_profile, reanalyze_and_store
@@ -30,6 +40,10 @@ class TelegramService:
         self._token: str = ""
         self._lock = asyncio.Lock()
         self._messages_since_reanalyze = 0
+        self.last_update_at: Optional[datetime] = None
+        self.last_update_kind: str = ""
+        self.update_count: int = 0
+        self.last_error: str = ""
 
     @property
     def is_configured(self) -> bool:
@@ -59,7 +73,23 @@ class TelegramService:
 
         @dp.message()
         async def on_message(message: TgMessage) -> None:
+            self._mark_update("message")
             await self.handle_incoming(message)
+
+        @dp.business_message()
+        async def on_business_message(message: TgMessage) -> None:
+            self._mark_update("business_message")
+            await self.handle_incoming(message)
+
+        @dp.edited_business_message()
+        async def on_business_edit(message: TgMessage) -> None:
+            self._mark_update("edited_business_message")
+            await self.handle_incoming(message)
+
+    def _mark_update(self, kind: str) -> None:
+        self.last_update_at = datetime.utcnow()
+        self.last_update_kind = kind
+        self.update_count += 1
 
     async def handle_incoming(self, tg_msg: TgMessage) -> None:
         try:
@@ -70,21 +100,34 @@ class TelegramService:
             if not tg_msg.text or not tg_msg.text.strip():
                 return
 
-            chat_id = tg_msg.chat.id
-            chat_name = (
-                tg_msg.chat.title
-                or tg_msg.chat.username
-                or (tg_msg.from_user.full_name if tg_msg.from_user else str(chat_id))
-            )
+            business_connection_id = getattr(tg_msg, "business_connection_id", None)
+            is_business = business_connection_id is not None
+
+            me = None
+            if self.bot:
+                try:
+                    me = await self.bot.me()
+                except Exception:  # noqa: BLE001
+                    me = None
+
+            owner_id = await self._business_owner_id(business_connection_id) if is_business else None
             sender = tg_msg.from_user
             sender_id = sender.id if sender else 0
             sender_name = sender.full_name if sender else "unknown"
 
-            should_reply = True
-            me = None
-            if self.bot:
-                me = await self.bot.me()
-            if tg_msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            is_mine = bool(
+                is_business and owner_id is not None and sender_id == owner_id
+            )
+
+            chat_id = tg_msg.chat.id
+            chat_name = (
+                tg_msg.chat.title
+                or tg_msg.chat.username
+                or (sender.full_name if sender else str(chat_id))
+            )
+
+            should_reply = not is_mine
+            if not is_business and tg_msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
                 mentioned = False
                 if me and tg_msg.text and f"@{me.username}" in tg_msg.text:
                     mentioned = True
@@ -102,8 +145,8 @@ class TelegramService:
                     chat_id=chat_id,
                     chat_name=chat_name,
                     sender_id=sender_id,
-                    sender_name=sender_name,
-                    is_mine=False,
+                    sender_name=settings.user_name if is_mine else sender_name,
+                    is_mine=is_mine,
                     text=tg_msg.text,
                     timestamp=datetime.utcnow(),
                     message_id=tg_msg.message_id,
@@ -132,12 +175,18 @@ class TelegramService:
                 "id": msg_id,
                 "chat_id": chat_id,
                 "chat_name": chat_name,
-                "sender_name": sender_name,
+                "sender_name": row.sender_name,
                 "text": tg_msg.text,
+                "is_mine": is_mine,
+                "business": is_business,
                 "timestamp": datetime.utcnow().isoformat(),
                 "auto_reply": auto_reply,
                 "will_reply": should_reply,
             })
+
+            if is_mine:
+                await self._maybe_reanalyze()
+                return
 
             if not should_reply:
                 return
@@ -148,18 +197,42 @@ class TelegramService:
                         tg_msg.text, sender_name, chat_id
                     )
                     chosen = variants[0] if variants else "ок"
-                    await self.send_reply(chat_id, chosen, reply_to=tg_msg.message_id)
+                    await self.send_reply(
+                        chat_id, chosen,
+                        reply_to=tg_msg.message_id,
+                        business_connection_id=business_connection_id,
+                    )
                     await self._record_reply(msg_id, chosen, sender_name, chat_id, chat_name)
                 except OllamaUnavailableError as e:
                     log.warning("Ollama unavailable: %s", e)
+                    self.last_error = str(e)
                 except Exception as e:  # noqa: BLE001
                     log.exception("auto reply failed: %s", e)
+                    self.last_error = str(e)
             else:
                 await message_bus.publish("pending", {"id": msg_id})
 
             await self._maybe_reanalyze()
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            self.last_error = str(e)
             log.exception("handle_incoming error")
+
+    async def _business_owner_id(self, connection_id: Optional[str]) -> Optional[int]:
+        if not connection_id or not self.bot:
+            return None
+        cache = getattr(self, "_business_owner_cache", None)
+        if cache is None:
+            cache = {}
+            self._business_owner_cache = cache
+        if connection_id in cache:
+            return cache[connection_id]
+        try:
+            conn = await self.bot.get_business_connection(connection_id)
+            owner_id = conn.user.id if conn and conn.user else None
+        except Exception:  # noqa: BLE001
+            owner_id = None
+        cache[connection_id] = owner_id
+        return owner_id
 
     async def _generate_variants(
         self, text: str, sender_name: str, chat_id: int
@@ -216,16 +289,31 @@ class TelegramService:
             "original_id": original_id,
         })
 
-    async def send_reply(self, chat_id: int, text: str, reply_to: Optional[int] = None) -> None:
+    async def send_reply(
+        self,
+        chat_id: int,
+        text: str,
+        reply_to: Optional[int] = None,
+        business_connection_id: Optional[str] = None,
+    ) -> None:
         if not self.bot:
             raise RuntimeError("Bot is not configured")
-        await self.bot.send_message(chat_id, text, reply_to_message_id=reply_to)
+        kwargs: dict = {}
+        if reply_to is not None:
+            kwargs["reply_to_message_id"] = reply_to
+        if business_connection_id is not None:
+            kwargs["business_connection_id"] = business_connection_id
+        await self.bot.send_message(chat_id, text, **kwargs)
 
     async def send_and_record(
         self, chat_id: int, text: str, reply_to: Optional[int] = None,
         original_id: Optional[int] = None,
+        business_connection_id: Optional[str] = None,
     ) -> None:
-        await self.send_reply(chat_id, text, reply_to=reply_to)
+        await self.send_reply(
+            chat_id, text, reply_to=reply_to,
+            business_connection_id=business_connection_id,
+        )
         async with SessionLocal() as session:
             chat_name = ""
             if original_id is not None:
@@ -261,7 +349,26 @@ class TelegramService:
     async def set_webhook(self, url: str) -> None:
         if not self.bot:
             raise RuntimeError("Bot not configured")
-        await self.bot.set_webhook(url, drop_pending_updates=False)
+        await self.bot.set_webhook(
+            url,
+            drop_pending_updates=False,
+            allowed_updates=ALLOWED_UPDATES,
+        )
+
+    async def get_webhook_info(self) -> dict:
+        if not self.bot:
+            raise RuntimeError("Bot not configured")
+        info = await self.bot.get_webhook_info()
+        return {
+            "url": info.url,
+            "has_custom_certificate": info.has_custom_certificate,
+            "pending_update_count": info.pending_update_count,
+            "ip_address": info.ip_address,
+            "last_error_date": info.last_error_date.isoformat() if info.last_error_date else None,
+            "last_error_message": info.last_error_message,
+            "max_connections": info.max_connections,
+            "allowed_updates": info.allowed_updates,
+        }
 
     async def remove_webhook(self) -> None:
         if not self.bot:
@@ -271,7 +378,7 @@ class TelegramService:
     async def start_polling(self) -> None:
         if not (self.dp and self.bot):
             raise RuntimeError("Bot not configured")
-        await self.dp.start_polling(self.bot)
+        await self.dp.start_polling(self.bot, allowed_updates=ALLOWED_UPDATES)
 
     async def _maybe_reanalyze(self) -> None:
         self._messages_since_reanalyze += 1

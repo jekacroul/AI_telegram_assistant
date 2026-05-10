@@ -66,6 +66,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
+  webhookInfo: () => request("/api/webhook/info"),
+  setWebhook: (url) =>
+    request("/api/webhook/set", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  removeWebhook: () => request("/api/webhook/remove", { method: "POST" }),
 };
 
 export function streamEvents(path, onEvent) {

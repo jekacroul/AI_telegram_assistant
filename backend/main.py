@@ -94,7 +94,21 @@ async def status() -> dict:
         "auto_reply": auto_reply,
         "ollama_model": ollama_model,
         "user_name": settings.user_name,
+        "last_update_at": (
+            telegram_service.last_update_at.isoformat()
+            if telegram_service.last_update_at else None
+        ),
+        "last_update_kind": telegram_service.last_update_kind,
+        "update_count": telegram_service.update_count,
+        "last_error": telegram_service.last_error,
     }
+
+
+@app.get("/api/webhook/info")
+async def webhook_info() -> dict:
+    if not telegram_service.is_configured:
+        raise HTTPException(400, "bot not configured")
+    return await telegram_service.get_webhook_info()
 
 
 @app.get("/api/chats")

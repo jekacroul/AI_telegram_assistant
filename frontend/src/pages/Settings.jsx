@@ -16,6 +16,9 @@ export default function Settings() {
   const [test, setTest] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [webhook, setWebhook] = useState(null);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookBusy, setWebhookBusy] = useState(false);
 
   const refresh = async () => {
     const [cs, st] = await Promise.all([api.chats(), api.getSettings()]);
@@ -150,6 +153,65 @@ export default function Settings() {
           Test model
         </button>
         {error && <span className="text-bad text-sm self-center">{error}</span>}
+      </div>
+
+      <div className="card">
+        <div className="label">Webhook</div>
+        <div className="flex gap-2 mt-2">
+          <input
+            className="input"
+            placeholder="https://your-host/webhook/<TOKEN>"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+          />
+          <button
+            className="btn-primary"
+            disabled={webhookBusy || !webhookUrl}
+            onClick={async () => {
+              setWebhookBusy(true);
+              try {
+                await api.setWebhook(webhookUrl);
+                setWebhook(await api.webhookInfo());
+              } catch (e) {
+                setError(e.message);
+              } finally {
+                setWebhookBusy(false);
+              }
+            }}
+          >
+            Установить
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={async () => {
+              try {
+                setWebhook(await api.webhookInfo());
+              } catch (e) {
+                setError(e.message);
+              }
+            }}
+          >
+            Info
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={async () => {
+              await api.removeWebhook();
+              setWebhook(null);
+            }}
+          >
+            Удалить
+          </button>
+        </div>
+        {webhook && (
+          <pre className="mt-3 text-xs bg-bg p-2 rounded overflow-auto">
+            {JSON.stringify(webhook, null, 2)}
+          </pre>
+        )}
+        <div className="text-xs text-muted mt-2">
+          Для Telegram Premium «Chat Automation» нужен публичный HTTPS.
+          Локально — через ngrok / cloudflared.
+        </div>
       </div>
 
       {test && (
