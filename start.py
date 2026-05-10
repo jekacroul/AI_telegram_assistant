@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-PROJECT_ROOT = "D:\\AI model\\AI_telegram_assistant"
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Backend (and the training subprocess it spawns) must run on the venv
 # interpreter, otherwise torch/transformers/bitsandbytes will be missing.
