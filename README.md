@@ -53,7 +53,7 @@ ollama pull mistral:7b
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
+cp .env .env
 # отредактируй .env: TELEGRAM_BOT_TOKEN, USER_NAME, при желании HF_BASE_MODEL
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
