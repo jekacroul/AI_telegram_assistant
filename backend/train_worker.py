@@ -21,11 +21,18 @@ import traceback
 from pathlib import Path
 
 # Windows: torch ships libiomp5md.dll while pyarrow (pulled in by `datasets`)
-# brings vcomp140.dll. Both register OpenMP runtimes in the same process and
-# the second loader hits an access violation (exit code 3221225477) when the
-# first runtime has already taken over thread-local slots. Telling Intel OMP
-# to tolerate the duplicate is the standard workaround.
+# brings vcomp140.dll. The second runtime to load hits an access violation
+# (exit code 3221225477) when the first has already claimed thread-local
+# slots. KMP_DUPLICATE_LIB_OK covers Intel-vs-Intel collisions; for the
+# Intel-vs-MSVC case we have to preload pyarrow before torch ever gets in.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+# Force-load pyarrow first so its OpenMP/CRT wins before torch loads. Must
+# happen before any other native import in this process.
+try:
+    import pyarrow  # noqa: F401
+    import pyarrow.lib  # noqa: F401
+except ImportError:
+    pass  # surfaced later by _preflight / run_training
 
 EVENT_PREFIX = "__TRAIN_EVENT__ "
 
