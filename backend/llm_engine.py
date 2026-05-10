@@ -54,24 +54,54 @@ def build_system_prompt(
     )
 
 
-def _coerce_variant(value) -> str:
-    if value is None:
+_NAME_TEXT_FRAGMENT_RE = re.compile(
+    r'^\s*["\']?([^"\':\n{}\[\]]{1,64})["\']?\s*:\s*["\'](.+)["\']\s*[,;]?\s*$',
+    re.DOTALL,
+)
+
+
+def _coerce_variant(value, _depth: int = 0) -> str:
+    if _depth > 4 or value is None:
         return ""
     if isinstance(value, dict):
         for key in ("text", "message", "content", "reply", "answer", "variant"):
             inner = value.get(key)
-            if isinstance(inner, str) and inner.strip():
-                return inner.strip()
+            if inner not in (None, ""):
+                coerced = _coerce_variant(inner, _depth + 1)
+                if coerced:
+                    return coerced
+        string_values = [v for v in value.values() if isinstance(v, str) and v.strip()]
+        if len(string_values) == 1:
+            return _coerce_variant(string_values[0], _depth + 1)
         return ""
     if isinstance(value, list):
-        parts = [_coerce_variant(v) for v in value]
+        parts = [_coerce_variant(v, _depth + 1) for v in value]
         return " ".join(p for p in parts if p)
-    text = str(value).strip()
-    if text.startswith("{") and text.endswith("}"):
+
+    text = str(value).strip().rstrip(",;").strip()
+    if not text:
+        return ""
+
+    if (text.startswith("{") and text.endswith("}")) or (
+        text.startswith("[") and text.endswith("]")
+    ):
         try:
-            return _coerce_variant(json.loads(text))
+            return _coerce_variant(json.loads(text), _depth + 1)
         except json.JSONDecodeError:
             pass
+
+    fragment = _NAME_TEXT_FRAGMENT_RE.match(text)
+    if fragment:
+        return _coerce_variant(fragment.group(2), _depth + 1)
+
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'"):
+        try:
+            unquoted = json.loads(text)
+        except json.JSONDecodeError:
+            unquoted = text[1:-1]
+        if isinstance(unquoted, str) and unquoted.strip() and unquoted.strip() != text:
+            return _coerce_variant(unquoted, _depth + 1)
+
     return text
 
 
