@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 from typing import Iterable, Optional
 
@@ -10,6 +11,35 @@ import httpx
 from .config import settings
 
 log = logging.getLogger(__name__)
+
+
+_SENTENCE_END_CHARS = set('.!?…:;)]}»"\'`')
+_EMOJI_RANGES = (
+    (0x2600, 0x27BF),
+    (0x1F300, 0x1FAFF),
+)
+
+
+def _looks_complete(variant: str) -> bool:
+    s = (variant or "").rstrip()
+    if not s:
+        return False
+    last = s[-1]
+    if last in _SENTENCE_END_CHARS:
+        return True
+    code = ord(last)
+    return any(lo <= code <= hi for lo, hi in _EMOJI_RANGES)
+
+
+def pick_auto_variant(variants: list[str]) -> Optional[str]:
+    """Pick a variant for auto-reply, preferring ones that don't look truncated."""
+    if not variants:
+        return None
+    complete = [v for v in variants if _looks_complete(v)]
+    if complete:
+        return random.choice(complete)
+    log.warning("all %d LLM variants look truncated; falling back", len(variants))
+    return random.choice(variants)
 
 
 class LLMUnavailableError(RuntimeError):

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -28,7 +27,7 @@ ALLOWED_UPDATES = [
     "callback_query",
 ]
 from .event_bus import message_bus
-from .llm_engine import LLMUnavailableError, get_client
+from .llm_engine import LLMUnavailableError, get_client, pick_auto_variant
 from .style_engine import get_latest_profile, reanalyze_and_store
 
 
@@ -257,7 +256,7 @@ class TelegramService:
                     variants = await self._generate_variants(
                         content_text, sender_name, chat_id
                     )
-                    chosen = random.choice(variants) if variants else "ок"
+                    chosen = pick_auto_variant(variants) or "ок"
                     await self.send_reply(
                         chat_id, chosen,
                         reply_to=tg_msg.message_id,
