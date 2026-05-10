@@ -199,10 +199,9 @@ def run_training(
         AutoTokenizer,
         BitsAndBytesConfig,
         TrainerCallback,
-        TrainingArguments,
     )
     log("step:import_trl")
-    from trl import SFTTrainer
+    from trl import SFTConfig, SFTTrainer
     log("step:import_bitsandbytes")
     import bitsandbytes as bnb
     log(f"  bitsandbytes {bnb.__version__}")
@@ -263,7 +262,7 @@ def run_training(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     log("step:training_args")
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=str(output_dir),
         num_train_epochs=3,
         per_device_train_batch_size=4,
@@ -274,6 +273,8 @@ def run_training(
         report_to=[],
         fp16=True,
         optim="paged_adamw_8bit",
+        dataset_text_field="text",
+        max_seq_length=1024,
     )
 
     state: dict = {"loss": None, "step": 0, "epoch": 0.0, "start": time.time()}
@@ -313,9 +314,7 @@ def run_training(
         model=model,
         args=training_args,
         train_dataset=ds,
-        tokenizer=tokenizer,
-        dataset_text_field="text",
-        max_seq_length=1024,
+        processing_class=tokenizer,
         callbacks=[StreamCallback()],
     )
 
