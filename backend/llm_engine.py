@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Iterable, Optional
 
 import httpx
 
 from .config import settings
+
+log = logging.getLogger(__name__)
 
 
 class OllamaUnavailableError(RuntimeError):
@@ -164,6 +167,18 @@ def _parse_numbered_list(raw: str) -> list[str]:
         if candidate and not _looks_like_json_garbage(candidate):
             items.append(candidate)
     return items
+
+
+def _fallback_from_raw(raw: str, user_name: str | None) -> str:
+    """Last-resort cleanup: use the raw model output as a single variant."""
+    if not raw:
+        return ""
+    text = _coerce_variant(raw)
+    if not text:
+        text = raw.strip()
+    text = _strip_speaker_prefix(text, user_name)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 def _extract_variants(raw: str, user_name: str | None = None) -> list[str]:
@@ -326,8 +341,18 @@ class OllamaClient:
         )
         raw = await self.generate_raw(system, prompt)
         variants = _extract_variants(raw, user_name=effective_name)
+        if not variants:
+            fallback = _fallback_from_raw(raw, effective_name)
+            log.warning(
+                "LLM response did not match expected format; using raw output as fallback. "
+                "model=%s raw=%r",
+                self.model,
+                raw,
+            )
+            if fallback:
+                variants = [fallback]
         while len(variants) < 3:
-            variants.append(variants[-1] if variants else "ок")
+            variants.append(variants[-1] if variants else "…")
         return variants[:3]
 
 
