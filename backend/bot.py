@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -232,7 +233,7 @@ class TelegramService:
                     variants = await self._generate_variants(
                         content_text, sender_name, chat_id
                     )
-                    chosen = variants[0] if variants else "ок"
+                    chosen = random.choice(variants) if variants else "ок"
                     await self.send_reply(
                         chat_id, chosen,
                         reply_to=tg_msg.message_id,
