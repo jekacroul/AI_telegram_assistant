@@ -8,6 +8,7 @@ from typing import Optional
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message as TgMessage
 from aiogram.types import Update
@@ -150,6 +151,7 @@ class TelegramService:
                     text=tg_msg.text,
                     timestamp=datetime.utcnow(),
                     message_id=tg_msg.message_id,
+                    business_connection_id=business_connection_id,
                 )
                 session.add(row)
                 await session.commit()
@@ -206,6 +208,21 @@ class TelegramService:
                 except OllamaUnavailableError as e:
                     log.warning("Ollama unavailable: %s", e)
                     self.last_error = str(e)
+                except TelegramBadRequest as e:
+                    if "BUSINESS_PEER_INVALID" in str(e):
+                        log.warning(
+                            "auto reply blocked by business privacy for chat %s: %s",
+                            chat_id, e,
+                        )
+                        self.last_error = (
+                            "Telegram business privacy blocks the bot for this chat "
+                            "(BUSINESS_PEER_INVALID). Check Settings → Business → "
+                            "Chatbots and include this contact."
+                        )
+                        await message_bus.publish("pending", {"id": msg_id})
+                    else:
+                        log.exception("auto reply failed: %s", e)
+                        self.last_error = str(e)
                 except Exception as e:  # noqa: BLE001
                     log.exception("auto reply failed: %s", e)
                     self.last_error = str(e)

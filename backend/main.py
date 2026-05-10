@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
+from aiogram.exceptions import TelegramBadRequest
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -266,9 +267,13 @@ async def approve_reply(
         raise HTTPException(404, "message not found")
     if not telegram_service.is_configured:
         raise HTTPException(400, "bot not configured")
-    await telegram_service.send_and_record(
-        msg.chat_id, payload.text, reply_to=msg.message_id, original_id=msg.id
-    )
+    try:
+        await telegram_service.send_and_record(
+            msg.chat_id, payload.text, reply_to=msg.message_id, original_id=msg.id,
+            business_connection_id=msg.business_connection_id,
+        )
+    except TelegramBadRequest as e:
+        raise HTTPException(400, _telegram_error_message(e))
     session.add(TrainingPair(
         input_text=msg.text,
         output_text=payload.text,
@@ -285,17 +290,42 @@ class SendIn(BaseModel):
     text: str
     reply_to: Optional[int] = None
     original_id: Optional[int] = None
+    business_connection_id: Optional[str] = None
 
 
 @app.post("/api/reply/send")
 async def send_reply(payload: SendIn) -> dict:
     if not telegram_service.is_configured:
         raise HTTPException(400, "bot not configured")
-    await telegram_service.send_and_record(
-        payload.chat_id, payload.text,
-        reply_to=payload.reply_to, original_id=payload.original_id,
-    )
+    business_connection_id = payload.business_connection_id
+    if business_connection_id is None and payload.original_id is not None:
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Message).where(Message.id == payload.original_id)
+            )
+            original = result.scalar_one_or_none()
+            if original:
+                business_connection_id = original.business_connection_id
+    try:
+        await telegram_service.send_and_record(
+            payload.chat_id, payload.text,
+            reply_to=payload.reply_to, original_id=payload.original_id,
+            business_connection_id=business_connection_id,
+        )
+    except TelegramBadRequest as e:
+        raise HTTPException(400, _telegram_error_message(e))
     return {"ok": True}
+
+
+def _telegram_error_message(exc: TelegramBadRequest) -> str:
+    raw = str(exc)
+    if "BUSINESS_PEER_INVALID" in raw:
+        return (
+            "Telegram business privacy blocks the bot for this chat "
+            "(BUSINESS_PEER_INVALID). Open Telegram → Settings → Business → "
+            "Chatbots and make sure this contact is included."
+        )
+    return raw
 
 
 class FeedbackIn(BaseModel):
@@ -318,7 +348,10 @@ async def reply_feedback(
     if payload.feedback == "bad" and payload.corrected_text:
         if telegram_service.is_configured:
             try:
-                await telegram_service.send_reply(msg.chat_id, payload.corrected_text)
+                await telegram_service.send_reply(
+                    msg.chat_id, payload.corrected_text,
+                    business_connection_id=msg.business_connection_id,
+                )
             except Exception:  # noqa: BLE001
                 log.exception("re-send failed")
         msg.reply_text = payload.corrected_text
