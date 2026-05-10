@@ -276,7 +276,7 @@ class LLMClient:
         system: str,
         prompt: str,
         temperature: float = 0.8,
-        num_predict: int = 512,
+        num_predict: int | None = None,
         json_format: bool = False,
     ) -> str:  # pragma: no cover - overridden
         raise NotImplementedError
@@ -363,10 +363,12 @@ class OllamaClient(LLMClient):
         system: str,
         prompt: str,
         temperature: float = 0.8,
-        num_predict: int = 512,
+        num_predict: int | None = None,
         json_format: bool = False,
     ) -> str:
         await self._ensure_alive()
+        if num_predict is None:
+            num_predict = settings.llm_max_tokens
         payload = {
             "model": self.model,
             "system": system,
@@ -435,10 +437,12 @@ class OpenAICompatibleClient(LLMClient):
         system: str,
         prompt: str,
         temperature: float = 0.8,
-        num_predict: int = 512,
+        num_predict: int | None = None,
         json_format: bool = False,
     ) -> str:
         await self._ensure_alive()
+        if num_predict is None:
+            num_predict = settings.llm_max_tokens
         payload: dict = {
             "model": self.model,
             "messages": [

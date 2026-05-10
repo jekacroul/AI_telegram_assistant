@@ -35,6 +35,30 @@ from .style_engine import get_latest_profile, reanalyze_and_store
 log = logging.getLogger(__name__)
 
 
+TELEGRAM_MESSAGE_LIMIT = 4096
+
+
+def _split_for_telegram(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
+    """Split text into chunks that fit in a single Telegram message."""
+    if not text:
+        return [""]
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = remaining.rfind(" ", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
 class TelegramService:
     def __init__(self) -> None:
         self.bot: Optional[Bot] = None
@@ -355,7 +379,9 @@ class TelegramService:
             kwargs["reply_to_message_id"] = reply_to
         if business_connection_id is not None:
             kwargs["business_connection_id"] = business_connection_id
-        await self.bot.send_message(chat_id, text, **kwargs)
+        for chunk in _split_for_telegram(text):
+            await self.bot.send_message(chat_id, chunk, **kwargs)
+            kwargs.pop("reply_to_message_id", None)
 
     async def send_and_record(
         self, chat_id: int, text: str, reply_to: Optional[int] = None,

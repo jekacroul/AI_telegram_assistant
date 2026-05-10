@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     webhook_base_url: Optional[str] = Field(default=None, alias="WEBHOOK_BASE_URL")
     user_name: str = Field(default="Я", alias="USER_NAME")
     hf_base_model: str = Field(default="mistralai/Mistral-7B-Instruct-v0.2", alias="HF_BASE_MODEL")
+    llm_max_tokens: int = Field(default=2048, alias="LLM_MAX_TOKENS")
 
     @property
     def db_url(self) -> str:
