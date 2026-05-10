@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-import time
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import settings
 from .database import SessionLocal, TrainingPair, TrainingRun
 from .event_bus import training_bus
+from .train_worker import EVENT_PREFIX
 
 
 log = logging.getLogger(__name__)
@@ -27,12 +29,16 @@ class TrainingState:
         self.cancelled: bool = False
         self.current_run_id: Optional[int] = None
         self.last_event: dict = {}
+        self.cancel_file: Optional[Path] = None
+        self.process: Optional[asyncio.subprocess.Process] = None
 
     def reset(self) -> None:
         self.running = False
         self.cancelled = False
         self.current_run_id = None
         self.last_event = {}
+        self.cancel_file = None
+        self.process = None
 
 
 training_state = TrainingState()
@@ -62,134 +68,6 @@ async def _load_pairs(session: AsyncSession) -> list[dict]:
         }
         for p in pairs
     ]
-
-
-def _format_alpaca(example: dict) -> str:
-    return (
-        f"### Инструкция:\n{example['instruction']}\n\n"
-        f"### Вход:\n{example['input']}\n\n"
-        f"### Ответ:\n{example['output']}"
-    )
-
-
-def _train_blocking(
-    pairs: list[dict],
-    output_dir: Path,
-    on_event,
-    is_cancelled,
-) -> dict:
-    import torch
-    from datasets import Dataset
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-    from transformers import (
-        AutoModelForCausalLM,
-        AutoTokenizer,
-        BitsAndBytesConfig,
-        TrainerCallback,
-        TrainingArguments,
-    )
-    from trl import SFTTrainer
-
-    model_name = settings.hf_base_model
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True,
-    )
-
-    attn = "flash_attention_2"
-    try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=bnb_config,
-            device_map="cuda:0",
-            attn_implementation=attn,
-        )
-    except Exception:  # noqa: BLE001
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=bnb_config,
-            device_map="cuda:0",
-        )
-
-    model = prepare_model_for_kbit_training(model)
-
-    lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        target_modules=["q_proj", "v_proj"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
-    model = get_peft_model(model, lora_config)
-
-    texts = [_format_alpaca(p) for p in pairs]
-    ds = Dataset.from_dict({"text": texts})
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    training_args = TrainingArguments(
-        output_dir=str(output_dir),
-        num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
-        learning_rate=2e-4,
-        logging_steps=1,
-        save_strategy="no",
-        report_to=[],
-        fp16=True,
-        optim="paged_adamw_8bit",
-    )
-
-    state: dict = {"loss": None, "step": 0, "epoch": 0.0, "start": time.time()}
-
-    class StreamCallback(TrainerCallback):
-        def on_log(self, args, ctrl, st, logs=None, **kw):  # type: ignore[override]
-            if logs is None:
-                return
-            step = st.global_step
-            total = max(st.max_steps, 1)
-            if "loss" in logs:
-                state["loss"] = float(logs["loss"])
-            state["step"] = step
-            state["epoch"] = float(logs.get("epoch", st.epoch or 0.0))
-            elapsed = time.time() - state["start"]
-            eta = (elapsed / step) * (total - step) if step > 0 else None
-            on_event({
-                "epoch": state["epoch"],
-                "step": step,
-                "max_steps": total,
-                "loss": state["loss"],
-                "eta_seconds": eta,
-                "phase": "training",
-            })
-
-        def on_step_end(self, args, ctrl, st, **kw):  # type: ignore[override]
-            if is_cancelled():
-                ctrl.should_training_stop = True
-            return ctrl
-
-    trainer = SFTTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=ds,
-        tokenizer=tokenizer,
-        dataset_text_field="text",
-        max_seq_length=1024,
-        callbacks=[StreamCallback()],
-    )
-
-    trainer.train()
-    trainer.model.save_pretrained(str(output_dir))
-    tokenizer.save_pretrained(str(output_dir))
-
-    final_loss = state.get("loss")
-    return {"adapter_path": str(output_dir), "final_loss": final_loss}
 
 
 async def start_training() -> dict:
@@ -228,51 +106,116 @@ async def start_training() -> dict:
 
 async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
     output_dir = settings.models_dir / f"lora_adapter_v{version}"
-    loop = asyncio.get_running_loop()
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    def on_event(ev: dict) -> None:
-        asyncio.run_coroutine_threadsafe(_emit(ev), loop)
-
-    def is_cancelled() -> bool:
-        return training_state.cancelled
+    pairs_file = output_dir / ".pairs.json"
+    pairs_file.write_text(
+        json.dumps(pairs, ensure_ascii=False), encoding="utf-8"
+    )
+    cancel_file = output_dir / ".cancel"
+    if cancel_file.exists():
+        cancel_file.unlink()
+    training_state.cancel_file = cancel_file
 
     await _emit({"phase": "starting", "version": version, "pairs": len(pairs)})
 
+    final_result: dict = {}
+    error_message: Optional[str] = None
+
     try:
-        result = await asyncio.to_thread(
-            _train_blocking, pairs, output_dir, on_event, is_cancelled
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-u",
+            "-m",
+            "backend.train_worker",
+            "--pairs-file", str(pairs_file),
+            "--output-dir", str(output_dir),
+            "--base-model", settings.hf_base_model,
+            "--cancel-file", str(cancel_file),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
+        training_state.process = proc
+
+        assert proc.stdout is not None
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            if line.startswith(EVENT_PREFIX):
+                payload = line[len(EVENT_PREFIX):]
+                try:
+                    event = json.loads(payload)
+                except json.JSONDecodeError:
+                    log.warning("malformed train event: %s", payload[:200])
+                    continue
+                phase = event.get("phase")
+                if phase == "result":
+                    final_result = {k: v for k, v in event.items() if k != "phase"}
+                    continue
+                if phase == "error":
+                    error_message = event.get("error") or "training error"
+                await _emit(event)
+            elif line:
+                log.info("[train_worker] %s", line)
+
+        rc = await proc.wait()
+        training_state.process = None
+
+        if error_message is None and rc != 0 and not final_result:
+            error_message = (
+                f"training process exited with code {rc} "
+                f"(likely OOM or native crash; check backend logs)"
+            )
+
+        if error_message:
+            raise RuntimeError(error_message)
+
+        adapter_path = final_result.get("adapter_path") or str(output_dir)
+        was_cancelled = bool(final_result.get("cancelled")) or training_state.cancelled
         async with SessionLocal() as session:
-            res = await session.execute(select(TrainingRun).where(TrainingRun.id == run_id))
+            res = await session.execute(
+                select(TrainingRun).where(TrainingRun.id == run_id)
+            )
             run = res.scalar_one()
             run.finished_at = datetime.utcnow()
-            run.final_loss = result.get("final_loss")
-            run.adapter_path = result.get("adapter_path")
-            run.status = "cancelled" if training_state.cancelled else "done"
+            run.final_loss = final_result.get("final_loss")
+            run.adapter_path = adapter_path
+            run.status = "cancelled" if was_cancelled else "done"
             await session.commit()
 
-            pair_rows = await session.execute(select(TrainingPair))
-            for p in pair_rows.scalars().all():
-                p.used_in_training = True
-            await session.commit()
+            if not was_cancelled:
+                pair_rows = await session.execute(select(TrainingPair))
+                for p in pair_rows.scalars().all():
+                    p.used_in_training = True
+                await session.commit()
 
         await _emit({
-            "phase": "done",
-            "adapter_path": result.get("adapter_path"),
-            "final_loss": result.get("final_loss"),
+            "phase": "cancelled" if was_cancelled else "done",
+            "adapter_path": adapter_path,
+            "final_loss": final_result.get("final_loss"),
             "version": version,
         })
-        await create_ollama_modelfile(output_dir, version)
-    except Exception as e:  # noqa: BLE001
+        if not was_cancelled:
+            await create_ollama_modelfile(output_dir, version)
+    except Exception as e:
         log.exception("training failed")
         async with SessionLocal() as session:
-            res = await session.execute(select(TrainingRun).where(TrainingRun.id == run_id))
+            res = await session.execute(
+                select(TrainingRun).where(TrainingRun.id == run_id)
+            )
             run = res.scalar_one()
             run.finished_at = datetime.utcnow()
             run.status = "failed"
             await session.commit()
-        await _emit({"phase": "error", "error": str(e)})
+        if error_message is None:
+            await _emit({"phase": "error", "error": str(e)})
     finally:
+        with contextlib.suppress(FileNotFoundError):
+            cancel_file.unlink()
+        with contextlib.suppress(FileNotFoundError):
+            pairs_file.unlink()
         training_state.reset()
 
 
@@ -291,6 +234,11 @@ async def cancel_training() -> bool:
     if not training_state.running:
         return False
     training_state.cancelled = True
+    if training_state.cancel_file is not None:
+        try:
+            training_state.cancel_file.touch(exist_ok=True)
+        except OSError:
+            log.exception("failed to create cancel sentinel")
     return True
 
 
