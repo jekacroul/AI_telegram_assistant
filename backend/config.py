@@ -18,8 +18,14 @@ class Settings(BaseSettings):
     )
 
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    llm_backend: str = Field(default="ollama", alias="LLM_BACKEND")
     ollama_host: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
     ollama_model: str = Field(default="mistral:7b", alias="OLLAMA_MODEL")
+    openai_base_url: str = Field(
+        default="http://localhost:1234/v1", alias="OPENAI_BASE_URL"
+    )
+    openai_api_key: str = Field(default="local", alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="local-model", alias="OPENAI_MODEL")
     auto_reply: bool = Field(default=False, alias="AUTO_REPLY")
     db_path: str = Field(default="./data/database.db", alias="DB_PATH")
     training_data_path: str = Field(default="./training_data/", alias="TRAINING_DATA_PATH")

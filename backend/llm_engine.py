@@ -12,8 +12,12 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 
-class OllamaUnavailableError(RuntimeError):
+class LLMUnavailableError(RuntimeError):
     pass
+
+
+# Backwards-compatible alias: existing callers import OllamaUnavailableError.
+OllamaUnavailableError = LLMUnavailableError
 
 
 SYSTEM_TEMPLATE = (
@@ -252,7 +256,70 @@ def _extract_variants(raw: str, user_name: str | None = None) -> list[str]:
     return final
 
 
-class OllamaClient:
+class LLMClient:
+    """Common reply-building logic shared by all backend clients."""
+
+    host: str
+    model: str
+
+    async def health(self) -> bool:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    async def list_models(self) -> list[str]:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    async def ensure_model(self, model: str | None = None) -> None:
+        return None
+
+    async def generate_raw(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float = 0.8,
+        num_predict: int = 512,
+        json_format: bool = False,
+    ) -> str:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    async def generate_reply(
+        self,
+        incoming_text: str,
+        sender_name: str,
+        style_profile: Optional[dict] = None,
+        chat_history: Optional[list[dict]] = None,
+        user_name: Optional[str] = None,
+    ) -> list[str]:
+        effective_name = user_name or settings.user_name
+        system = build_system_prompt(
+            effective_name,
+            style_profile,
+            sender_name,
+            chat_history,
+        )
+        prompt = (
+            f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"
+            "Ответь как продолжение чата от первого лица."
+            " Дай ровно 3 разных варианта ответа в виде нумерованного списка"
+            " (1., 2., 3.), без своего имени и без JSON."
+        )
+        raw = await self.generate_raw(system, prompt)
+        variants = _extract_variants(raw, user_name=effective_name)
+        if not variants:
+            fallback = _fallback_from_raw(raw, effective_name)
+            log.warning(
+                "LLM response did not match expected format; using raw output as fallback. "
+                "model=%s raw=%r",
+                self.model,
+                raw,
+            )
+            if fallback:
+                variants = [fallback]
+        while len(variants) < 3:
+            variants.append(variants[-1] if variants else "…")
+        return variants[:3]
+
+
+class OllamaClient(LLMClient):
     def __init__(self, host: str | None = None, model: str | None = None) -> None:
         self.host = (host or settings.ollama_host).rstrip("/")
         self.model = model or settings.ollama_model
@@ -318,49 +385,107 @@ class OllamaClient:
             data = r.json()
             return data.get("response", "")
 
-    async def generate_reply(
+
+class OpenAICompatibleClient(LLMClient):
+    """Client for OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)."""
+
+    def __init__(
         self,
-        incoming_text: str,
-        sender_name: str,
-        style_profile: Optional[dict] = None,
-        chat_history: Optional[list[dict]] = None,
-        user_name: Optional[str] = None,
-    ) -> list[str]:
-        effective_name = user_name or settings.user_name
-        system = build_system_prompt(
-            effective_name,
-            style_profile,
-            sender_name,
-            chat_history,
-        )
-        prompt = (
-            f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"
-            "Ответь как продолжение чата от первого лица."
-            " Дай ровно 3 разных варианта ответа в виде нумерованного списка"
-            " (1., 2., 3.), без своего имени и без JSON."
-        )
-        raw = await self.generate_raw(system, prompt)
-        variants = _extract_variants(raw, user_name=effective_name)
-        if not variants:
-            fallback = _fallback_from_raw(raw, effective_name)
-            log.warning(
-                "LLM response did not match expected format; using raw output as fallback. "
-                "model=%s raw=%r",
-                self.model,
-                raw,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        self.host = (base_url or settings.openai_base_url).rstrip("/")
+        self.model = model or settings.openai_model
+        self.api_key = api_key if api_key is not None else settings.openai_api_key
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    async def health(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(f"{self.host}/models", headers=self._headers())
+                return r.status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    async def list_models(self) -> list[str]:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(f"{self.host}/models", headers=self._headers())
+                r.raise_for_status()
+                data = r.json()
+                return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+        except httpx.HTTPError:
+            return []
+
+    async def _ensure_alive(self) -> None:
+        if not await self.health():
+            raise LLMUnavailableError(
+                f"OpenAI-совместимый сервер недоступен на {self.host}. "
+                "Проверь, что LM Studio / llama.cpp / vLLM запущен."
             )
-            if fallback:
-                variants = [fallback]
-        while len(variants) < 3:
-            variants.append(variants[-1] if variants else "…")
-        return variants[:3]
+
+    async def generate_raw(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float = 0.8,
+        num_predict: int = 512,
+        json_format: bool = False,
+    ) -> str:
+        await self._ensure_alive()
+        payload: dict = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": num_predict,
+            "stream": False,
+        }
+        if json_format:
+            payload["response_format"] = {"type": "json_object"}
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post(
+                f"{self.host}/chat/completions",
+                json=payload,
+                headers=self._headers(),
+            )
+            r.raise_for_status()
+            data = r.json()
+            choices = data.get("choices") or []
+            if not choices:
+                return ""
+            message = choices[0].get("message") or {}
+            return message.get("content", "") or ""
 
 
-_default_client: Optional[OllamaClient] = None
+_default_client: Optional[LLMClient] = None
 
 
-def get_client() -> OllamaClient:
+def _make_client() -> LLMClient:
+    backend = (settings.llm_backend or "ollama").strip().lower()
+    if backend in {"openai", "lmstudio", "lm_studio", "openai_compatible"}:
+        return OpenAICompatibleClient()
+    if backend != "ollama":
+        log.warning("Unknown LLM_BACKEND=%r, falling back to ollama.", backend)
+    return OllamaClient()
+
+
+def get_client() -> LLMClient:
     global _default_client
     if _default_client is None:
-        _default_client = OllamaClient()
+        _default_client = _make_client()
     return _default_client
+
+
+def reset_client() -> None:
+    """Drop the cached client (useful when settings change at runtime/tests)."""
+    global _default_client
+    _default_client = None
