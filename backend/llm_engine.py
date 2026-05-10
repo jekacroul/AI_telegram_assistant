@@ -14,16 +14,19 @@ class OllamaUnavailableError(RuntimeError):
 
 
 SYSTEM_TEMPLATE = (
-    "Ты — {user_name}. Отвечай точно в его стиле.\n"
-    "Стиль: {style_profile}\n"
-    "Собеседник: {sender_name}\n"
-    "История чата: {chat_history}\n"
-    "Сгенерируй ровно 3 варианта ответа. Каждый вариант — это просто"
-    " готовый текст сообщения (обычная строка), без JSON, без полей"
-    " sender/text, без кавычек вокруг и без префиксов.\n"
-    "Формат ответа — строго JSON:\n"
-    '{{"variants": ["текст первого варианта", "текст второго варианта",'
-    ' "текст третьего варианта"]}}'
+    "Ты — {user_name}. Ты пишешь сообщение в Telegram собеседнику {sender_name}"
+    " от первого лица, как живой человек. Ни в коем случае не пиши своё имя"
+    " ('{user_name}'), не ставь его перед текстом, не оборачивай ответ в JSON,"
+    " не используй кавычки, двоеточия-разделители, поля sender/text. Просто"
+    " сам текст сообщения, как ты бы написал его в чате.\n"
+    "Стиль речи: {style_profile}\n"
+    "История чата:\n{chat_history}\n"
+    "Дай ровно 3 разных варианта ответа. Формат — нумерованный список,"
+    " каждый вариант с новой строки:\n"
+    "1. <текст первого варианта>\n"
+    "2. <текст второго варианта>\n"
+    "3. <текст третьего варианта>\n"
+    "Никаких других пояснений, заголовков или JSON."
 )
 
 
@@ -122,29 +125,70 @@ def _looks_like_json_garbage(text: str) -> bool:
 
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
 _QUOTED_VALUE_RE = re.compile(r':\s*"((?:\\.|[^"\\])+)"', re.DOTALL)
+_NUMBERED_LINE_RE = re.compile(r'^\s*(?:[\-•*]|\(?\d{1,2}[.\)\]:])\s+(.+?)\s*$')
 
 
-def _extract_variants(raw: str) -> list[str]:
+def _strip_speaker_prefix(text: str, user_name: str | None) -> str:
+    if not text:
+        return text
+    cleaned = text.strip()
+    if not cleaned:
+        return cleaned
+    while len(cleaned) >= 2 and cleaned[0] in '"\'`«' and cleaned[-1] in '"\'`»':
+        inner = cleaned[1:-1].strip()
+        if not inner:
+            break
+        cleaned = inner
+    if not user_name:
+        return cleaned
+    name = user_name.strip()
+    pattern = re.compile(
+        rf'^\s*["\'«]?\s*{re.escape(name)}\s*["\'»]?\s*[:.,\-–—]\s+',
+        re.IGNORECASE,
+    )
+    for _ in range(3):
+        new = pattern.sub("", cleaned, count=1)
+        if new == cleaned:
+            break
+        cleaned = new.strip()
+    return cleaned
+
+
+def _parse_numbered_list(raw: str) -> list[str]:
+    items: list[str] = []
+    for line in raw.splitlines():
+        m = _NUMBERED_LINE_RE.match(line)
+        if not m:
+            continue
+        candidate = _coerce_variant(m.group(1))
+        if candidate and not _looks_like_json_garbage(candidate):
+            items.append(candidate)
+    return items
+
+
+def _extract_variants(raw: str, user_name: str | None = None) -> list[str]:
     if not raw:
         return []
 
-    for candidate in _JSON_OBJECT_RE.findall(raw):
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        variants = data.get("variants") if isinstance(data, dict) else None
-        if isinstance(variants, list):
-            cleaned = [_coerce_variant(v) for v in variants]
-            cleaned = [c for c in cleaned if c and not _looks_like_json_garbage(c)]
-            if cleaned:
-                return cleaned[:3]
+    collected: list[str] = _parse_numbered_list(raw)
 
-    fragment_matches = _QUOTED_VALUE_RE.findall(raw)
-    if fragment_matches:
-        salvaged: list[str] = []
+    if not collected:
+        for candidate in _JSON_OBJECT_RE.findall(raw):
+            try:
+                data = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            variants = data.get("variants") if isinstance(data, dict) else None
+            if isinstance(variants, list):
+                cleaned = [_coerce_variant(v) for v in variants]
+                cleaned = [c for c in cleaned if c and not _looks_like_json_garbage(c)]
+                if cleaned:
+                    collected = cleaned
+                    break
+
+    if not collected:
         seen: set[str] = set()
-        for frag in fragment_matches:
+        for frag in _QUOTED_VALUE_RE.findall(raw):
             try:
                 text = json.loads(f'"{frag}"')
             except json.JSONDecodeError:
@@ -153,16 +197,44 @@ def _extract_variants(raw: str) -> list[str]:
             if not text or _looks_like_json_garbage(text) or text in seen:
                 continue
             seen.add(text)
-            salvaged.append(text)
-            if len(salvaged) >= 3:
+            collected.append(text)
+            if len(collected) >= 3:
                 break
-        if salvaged:
-            return salvaged
 
-    lines = [ln.strip(" -•\t") for ln in raw.splitlines() if ln.strip()]
-    cleaned = [ln for ln in lines if ln and not ln.startswith("{") and not ln.startswith("}")]
-    cleaned = [ln for ln in cleaned if not _looks_like_json_garbage(ln)]
-    return cleaned[:3] if cleaned else []
+    if not collected:
+        for line in raw.splitlines():
+            ln = line.strip(" -•\t")
+            if ln and not ln.startswith("{") and not ln.startswith("}") \
+                    and not _looks_like_json_garbage(ln):
+                collected.append(ln)
+
+    if user_name and len(collected) == 1:
+        single = collected[0]
+        if single.lower().count(user_name.lower()) >= 2:
+            parts = re.split(
+                rf'["\'«]?\s*{re.escape(user_name)}\s*["\'»]?\s*[:.,\-–—]?',
+                single,
+                flags=re.IGNORECASE,
+            )
+            cleaned_parts: list[str] = []
+            for p in parts:
+                p = p.strip().strip('"\',.:;`').strip()
+                if p:
+                    cleaned_parts.append(p)
+            if len(cleaned_parts) >= 2:
+                collected = cleaned_parts
+
+    final: list[str] = []
+    seen_final: set[str] = set()
+    for item in collected:
+        cleaned = _strip_speaker_prefix(item, user_name)
+        if not cleaned or _looks_like_json_garbage(cleaned) or cleaned in seen_final:
+            continue
+        seen_final.add(cleaned)
+        final.append(cleaned)
+        if len(final) >= 3:
+            break
+    return final
 
 
 class OllamaClient:
@@ -239,15 +311,21 @@ class OllamaClient:
         chat_history: Optional[list[dict]] = None,
         user_name: Optional[str] = None,
     ) -> list[str]:
+        effective_name = user_name or settings.user_name
         system = build_system_prompt(
-            user_name or settings.user_name,
+            effective_name,
             style_profile,
             sender_name,
             chat_history,
         )
-        prompt = f"Сообщение собеседника: {incoming_text}\nДай ровно 3 варианта ответа."
-        raw = await self.generate_raw(system, prompt, json_format=True)
-        variants = _extract_variants(raw)
+        prompt = (
+            f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"
+            "Ответь как продолжение чата от первого лица."
+            " Дай ровно 3 разных варианта ответа в виде нумерованного списка"
+            " (1., 2., 3.), без своего имени и без JSON."
+        )
+        raw = await self.generate_raw(system, prompt)
+        variants = _extract_variants(raw, user_name=effective_name)
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "ок")
         return variants[:3]
