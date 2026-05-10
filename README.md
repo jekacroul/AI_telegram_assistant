@@ -5,7 +5,8 @@ LoRA fine-tuning локального LLM (Mistral 7B / LLaMA 3.1 8B). Ника�
 
 ## Стек
 
-- **LLM**: [Ollama](https://ollama.com) (`mistral:7b` по умолчанию)
+- **LLM**: локальный OpenAI-совместимый сервер ([LM Studio](https://lmstudio.ai),
+  llama.cpp server, vLLM и т.п.)
 - **Fine-tuning**: PEFT + transformers + bitsandbytes (4-bit NF4) + TRL/SFTTrainer
 - **Telegram**: aiogram 3.x (Bot API, async). Подключается через Telegram Premium
   «Chat Automation» — бот отвечает от твоего имени.
@@ -20,7 +21,7 @@ telegram-local-ai/
 ├── backend/
 │   ├── main.py               # FastAPI + lifespan
 │   ├── bot.py                # aiogram bot, обработчик webhook
-│   ├── llm_engine.py         # Ollama inference
+│   ├── llm_engine.py         # OpenAI-compatible LLM client
 │   ├── trainer.py            # LoRA fine-tuning pipeline
 │   ├── dataset_builder.py    # Сбор обучающих пар
 │   ├── style_engine.py       # Анализ стиля
@@ -39,13 +40,12 @@ telegram-local-ai/
 
 ## Быстрый старт
 
-### 1. Ollama
+### 1. LM Studio
 
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama serve &
-ollama pull mistral:7b
-```
+Скачай [LM Studio](https://lmstudio.ai), загрузи нужную модель и запусти
+встроенный OpenAI-совместимый сервер (по умолчанию `http://localhost:1234/v1`).
+Любой другой OpenAI-совместимый бэкенд (llama.cpp server, vLLM) тоже подойдёт —
+укажи его URL в `OPENAI_BASE_URL`.
 
 ### 2. Backend
 
@@ -83,8 +83,8 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 1. **Сбор данных**. Каждое входящее и исходящее сообщение сохраняется в SQLite.
 2. **Анализ стиля** (`style_engine`). Каждые 20 новых сообщений автоматически
    пересобирается профиль: средняя длина, эмодзи, тон, частые слова, приветствия.
-3. **Генерация ответа** (`llm_engine`). На входящее сообщение Ollama выдаёт
-   3 варианта ответа в JSON, с системным промптом, в который инжектится
+3. **Генерация ответа** (`llm_engine`). На входящее сообщение локальный LLM
+   выдаёт 3 варианта ответа, с системным промптом, в который инжектится
    профиль стиля и история чата.
 4. **Режимы**:
    - `AUTO_REPLY=true` — бот отвечает сам, ты ставишь 👍/👎 и правишь.
@@ -92,8 +92,8 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 5. **Fine-tuning** (`trainer`). Когда накопилось ≥ 50 пар (input → output),
    запускаешь LoRA-обучение: r=16, alpha=32, target=`q_proj,v_proj`,
    3 эпохи, 4-bit NF4, fp16 compute. По завершении адаптер сохраняется
-   в `models/lora_adapter_v{N}/`, и пишется `Modelfile` для Ollama, который
-   можно «горячо» подгрузить через `/api/training/activate/{run_id}`.
+   в `models/lora_adapter_v{N}/`. `/api/training/activate/{run_id}` помечает
+   адаптер активным в БД — подгрузи его в LM Studio вручную.
 6. **Обратная связь**. 👎 в режиме авто-ответа открывает редактор: правишь,
    re-send, правильная пара уходит в `training_pairs` со `feedback=bad/good`.
 
@@ -101,7 +101,7 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/api/status` | Здоровье Ollama / Bot / DB |
+| GET | `/api/status` | Здоровье LLM / Bot / DB |
 | GET | `/api/chats` | Список чатов |
 | GET/POST | `/api/settings` | Токен, авто-ответ, мониторинг |
 | GET | `/api/messages/pending` | Очередь на ручной ответ |
@@ -112,7 +112,7 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 | POST | `/api/training/build-dataset` | Собрать JSONL |
 | POST | `/api/training/start` | Запустить обучение |
 | GET | `/api/training/progress` | SSE: epoch/step/loss/eta |
-| POST | `/api/training/activate/{id}` | Сделать адаптер активным в Ollama |
+| POST | `/api/training/activate/{id}` | Пометить адаптер активным в БД |
 | GET | `/api/style/profile` | Текущий профиль |
 | PUT | `/api/style/profile` | Ручное редактирование |
 | POST | `/api/style/reanalyze` | Пересобрать |
@@ -123,8 +123,10 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 
 ```
 TELEGRAM_BOT_TOKEN=
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=mistral:7b
+OPENAI_BASE_URL=http://localhost:1234/v1
+OPENAI_API_KEY=local
+OPENAI_MODEL=local-model
+LLM_MAX_TOKENS=2048
 AUTO_REPLY=false
 DB_PATH=./data/database.db
 TRAINING_DATA_PATH=./training_data/

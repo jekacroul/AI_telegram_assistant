@@ -6,7 +6,7 @@ export default function Settings() {
     telegram_bot_token: "",
     auto_reply: false,
     monitored_chats: [],
-    ollama_model: "mistral:7b",
+    llm_model: "",
   });
   const [tokenSet, setTokenSet] = useState(false);
   const [tokenMasked, setTokenMasked] = useState("");
@@ -22,11 +22,11 @@ export default function Settings() {
 
   const modelOptions = useMemo(() => {
     const list = [...models];
-    if (s.ollama_model && !list.includes(s.ollama_model)) {
-      list.unshift(s.ollama_model);
+    if (s.llm_model && !list.includes(s.llm_model)) {
+      list.unshift(s.llm_model);
     }
     return list;
-  }, [models, s.ollama_model]);
+  }, [models, s.llm_model]);
 
   const refresh = async () => {
     const [cs, st] = await Promise.all([api.chats(), api.getSettings()]);
@@ -37,7 +37,7 @@ export default function Settings() {
       ...prev,
       auto_reply: !!st.auto_reply,
       monitored_chats: st.monitored_chats || [],
-      ollama_model: st.ollama_model || "mistral:7b",
+      llm_model: st.llm_model || "",
     }));
     try {
       const m = await api.listModels();
@@ -105,11 +105,11 @@ export default function Settings() {
       </div>
 
       <div className="card">
-        <div className="label">Модель Ollama</div>
+        <div className="label">Модель LM Studio</div>
         <select
           className="input mt-2"
-          value={s.ollama_model}
-          onChange={(e) => setS({ ...s, ollama_model: e.target.value })}
+          value={s.llm_model}
+          onChange={(e) => setS({ ...s, llm_model: e.target.value })}
         >
           {modelOptions.map((m) => (
             <option key={m} value={m}>
@@ -124,8 +124,8 @@ export default function Settings() {
         )}
         {!modelsError && models.length === 0 && (
           <div className="text-xs text-muted mt-1">
-            Ollama не вернул моделей. Проверь, что `ollama list` показывает их и
-            сервер запущен.
+            LM Studio не вернул моделей. Загрузи модель в LM Studio и убедись,
+            что локальный сервер запущен на {`{OPENAI_BASE_URL}`}.
           </div>
         )}
       </div>

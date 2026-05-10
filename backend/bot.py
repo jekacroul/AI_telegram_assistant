@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -28,11 +27,35 @@ ALLOWED_UPDATES = [
     "callback_query",
 ]
 from .event_bus import message_bus
-from .llm_engine import OllamaUnavailableError, get_client
+from .llm_engine import LLMUnavailableError, get_client, pick_auto_variant
 from .style_engine import get_latest_profile, reanalyze_and_store
 
 
 log = logging.getLogger(__name__)
+
+
+TELEGRAM_MESSAGE_LIMIT = 4096
+
+
+def _split_for_telegram(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
+    """Split text into chunks that fit in a single Telegram message."""
+    if not text:
+        return [""]
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = remaining.rfind(" ", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 class TelegramService:
@@ -233,15 +256,15 @@ class TelegramService:
                     variants = await self._generate_variants(
                         content_text, sender_name, chat_id
                     )
-                    chosen = random.choice(variants) if variants else "ок"
+                    chosen = pick_auto_variant(variants) or "ок"
                     await self.send_reply(
                         chat_id, chosen,
                         reply_to=tg_msg.message_id,
                         business_connection_id=business_connection_id,
                     )
                     await self._record_reply(msg_id, chosen, sender_name, chat_id, chat_name)
-                except OllamaUnavailableError as e:
-                    log.warning("Ollama unavailable: %s", e)
+                except LLMUnavailableError as e:
+                    log.warning("LLM unavailable: %s", e)
                     self.last_error = str(e)
                 except TelegramBadRequest as e:
                     if "BUSINESS_PEER_INVALID" in str(e):
@@ -355,7 +378,9 @@ class TelegramService:
             kwargs["reply_to_message_id"] = reply_to
         if business_connection_id is not None:
             kwargs["business_connection_id"] = business_connection_id
-        await self.bot.send_message(chat_id, text, **kwargs)
+        for chunk in _split_for_telegram(text):
+            await self.bot.send_message(chat_id, chunk, **kwargs)
+            kwargs.pop("reply_to_message_id", None)
 
     async def send_and_record(
         self, chat_id: int, text: str, reply_to: Optional[int] = None,

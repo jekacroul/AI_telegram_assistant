@@ -18,9 +18,6 @@ class Settings(BaseSettings):
     )
 
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
-    llm_backend: str = Field(default="ollama", alias="LLM_BACKEND")
-    ollama_host: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
-    ollama_model: str = Field(default="mistral:7b", alias="OLLAMA_MODEL")
     openai_base_url: str = Field(
         default="http://localhost:1234/v1", alias="OPENAI_BASE_URL"
     )
@@ -33,6 +30,7 @@ class Settings(BaseSettings):
     webhook_base_url: Optional[str] = Field(default=None, alias="WEBHOOK_BASE_URL")
     user_name: str = Field(default="Я", alias="USER_NAME")
     hf_base_model: str = Field(default="mistralai/Mistral-7B-Instruct-v0.2", alias="HF_BASE_MODEL")
+    llm_max_tokens: int = Field(default=2048, alias="LLM_MAX_TOKENS")
 
     @property
     def db_url(self) -> str:

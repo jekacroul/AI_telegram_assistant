@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 from typing import Iterable, Optional
 
@@ -12,12 +13,37 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 
+_SENTENCE_END_CHARS = set('.!?…:;)]}»"\'`')
+_EMOJI_RANGES = (
+    (0x2600, 0x27BF),
+    (0x1F300, 0x1FAFF),
+)
+
+
+def _looks_complete(variant: str) -> bool:
+    s = (variant or "").rstrip()
+    if not s:
+        return False
+    last = s[-1]
+    if last in _SENTENCE_END_CHARS:
+        return True
+    code = ord(last)
+    return any(lo <= code <= hi for lo, hi in _EMOJI_RANGES)
+
+
+def pick_auto_variant(variants: list[str]) -> Optional[str]:
+    """Pick a variant for auto-reply, preferring ones that don't look truncated."""
+    if not variants:
+        return None
+    complete = [v for v in variants if _looks_complete(v)]
+    if complete:
+        return random.choice(complete)
+    log.warning("all %d LLM variants look truncated; falling back", len(variants))
+    return random.choice(variants)
+
+
 class LLMUnavailableError(RuntimeError):
     pass
-
-
-# Backwards-compatible alias: existing callers import OllamaUnavailableError.
-OllamaUnavailableError = LLMUnavailableError
 
 
 SYSTEM_TEMPLATE = (
@@ -123,8 +149,6 @@ def _looks_like_json_garbage(text: str) -> bool:
         return True
     if '"variants"' in stripped:
         return True
-    if stripped.count("{") + stripped.count("}") >= 3:
-        return True
     if stripped.startswith("{") or stripped.startswith("["):
         return True
     return False
@@ -132,7 +156,9 @@ def _looks_like_json_garbage(text: str) -> bool:
 
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
 _QUOTED_VALUE_RE = re.compile(r':\s*"((?:\\.|[^"\\])+)"', re.DOTALL)
-_NUMBERED_LINE_RE = re.compile(r'^\s*(?:[\-•*]|\(?\d{1,2}[.\)\]:])\s+(.+?)\s*$')
+_NUMBERED_START_RE = re.compile(
+    r'(?m)^([ \t]*)(?:\d{1,2}[.\)])(?:\s|$)'
+)
 
 
 def _strip_speaker_prefix(text: str, user_name: str | None) -> str:
@@ -162,12 +188,25 @@ def _strip_speaker_prefix(text: str, user_name: str | None) -> str:
 
 
 def _parse_numbered_list(raw: str) -> list[str]:
+    matches = list(_NUMBERED_START_RE.finditer(raw))
+    if not matches:
+        return []
+    base_indent = len(matches[0].group(1).expandtabs(4))
+    top_level = [
+        m for m in matches
+        if len(m.group(1).expandtabs(4)) <= base_indent
+    ]
     items: list[str] = []
-    for line in raw.splitlines():
-        m = _NUMBERED_LINE_RE.match(line)
-        if not m:
+    boundaries = [m.start() for m in top_level] + [len(raw)]
+    for i, m in enumerate(top_level):
+        chunk = raw[boundaries[i]:boundaries[i + 1]]
+        body = chunk[m.end() - m.start():].strip()
+        if not body:
             continue
-        candidate = _coerce_variant(m.group(1))
+        if "\n" in body:
+            candidate = body
+        else:
+            candidate = _coerce_variant(body)
         if candidate and not _looks_like_json_garbage(candidate):
             items.append(candidate)
     return items
@@ -276,7 +315,7 @@ class LLMClient:
         system: str,
         prompt: str,
         temperature: float = 0.8,
-        num_predict: int = 512,
+        num_predict: int | None = None,
         json_format: bool = False,
     ) -> str:  # pragma: no cover - overridden
         raise NotImplementedError
@@ -317,73 +356,6 @@ class LLMClient:
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
-
-
-class OllamaClient(LLMClient):
-    def __init__(self, host: str | None = None, model: str | None = None) -> None:
-        self.host = (host or settings.ollama_host).rstrip("/")
-        self.model = model or settings.ollama_model
-
-    async def health(self) -> bool:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(f"{self.host}/api/tags")
-                return r.status_code == 200
-        except httpx.HTTPError:
-            return False
-
-    async def list_models(self) -> list[str]:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(f"{self.host}/api/tags")
-                r.raise_for_status()
-                data = r.json()
-                return [m.get("name", "") for m in data.get("models", [])]
-        except httpx.HTTPError:
-            return []
-
-    async def ensure_model(self, model: str | None = None) -> None:
-        target = model or self.model
-        models = await self.list_models()
-        if any(m == target or m.startswith(f"{target}:") for m in models):
-            return
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", f"{self.host}/api/pull", json={"name": target}) as r:
-                async for _ in r.aiter_lines():
-                    pass
-
-    async def _ensure_alive(self) -> None:
-        if not await self.health():
-            raise OllamaUnavailableError(
-                f"Ollama не запущен на {self.host}. Запусти `ollama serve`."
-            )
-
-    async def generate_raw(
-        self,
-        system: str,
-        prompt: str,
-        temperature: float = 0.8,
-        num_predict: int = 512,
-        json_format: bool = False,
-    ) -> str:
-        await self._ensure_alive()
-        payload = {
-            "model": self.model,
-            "system": system,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": num_predict,
-            },
-        }
-        if json_format:
-            payload["format"] = "json"
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.post(f"{self.host}/api/generate", json=payload)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("response", "")
 
 
 class OpenAICompatibleClient(LLMClient):
@@ -435,10 +407,12 @@ class OpenAICompatibleClient(LLMClient):
         system: str,
         prompt: str,
         temperature: float = 0.8,
-        num_predict: int = 512,
+        num_predict: int | None = None,
         json_format: bool = False,
     ) -> str:
         await self._ensure_alive()
+        if num_predict is None:
+            num_predict = settings.llm_max_tokens
         payload: dict = {
             "model": self.model,
             "messages": [
@@ -469,19 +443,10 @@ class OpenAICompatibleClient(LLMClient):
 _default_client: Optional[LLMClient] = None
 
 
-def _make_client() -> LLMClient:
-    backend = (settings.llm_backend or "ollama").strip().lower()
-    if backend in {"openai", "lmstudio", "lm_studio", "openai_compatible"}:
-        return OpenAICompatibleClient()
-    if backend != "ollama":
-        log.warning("Unknown LLM_BACKEND=%r, falling back to ollama.", backend)
-    return OllamaClient()
-
-
 def get_client() -> LLMClient:
     global _default_client
     if _default_client is None:
-        _default_client = _make_client()
+        _default_client = OpenAICompatibleClient()
     return _default_client
 
 
