@@ -18,8 +18,12 @@ SYSTEM_TEMPLATE = (
     "Стиль: {style_profile}\n"
     "Собеседник: {sender_name}\n"
     "История чата: {chat_history}\n"
-    "Генерируй ровно 3 варианта ответа. Отвечай только JSON:\n"
-    '{{"variants": ["...", "...", "..."]}}'
+    "Сгенерируй ровно 3 варианта ответа. Каждый вариант — это просто"
+    " готовый текст сообщения (обычная строка), без JSON, без полей"
+    " sender/text, без кавычек вокруг и без префиксов.\n"
+    "Формат ответа — строго JSON:\n"
+    '{{"variants": ["текст первого варианта", "текст второго варианта",'
+    ' "текст третьего варианта"]}}'
 )
 
 
@@ -50,6 +54,27 @@ def build_system_prompt(
     )
 
 
+def _coerce_variant(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        for key in ("text", "message", "content", "reply", "answer", "variant"):
+            inner = value.get(key)
+            if isinstance(inner, str) and inner.strip():
+                return inner.strip()
+        return ""
+    if isinstance(value, list):
+        parts = [_coerce_variant(v) for v in value]
+        return " ".join(p for p in parts if p)
+    text = str(value).strip()
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            return _coerce_variant(json.loads(text))
+        except json.JSONDecodeError:
+            pass
+    return text
+
+
 def _extract_variants(raw: str) -> list[str]:
     if not raw:
         return []
@@ -58,9 +83,10 @@ def _extract_variants(raw: str) -> list[str]:
         candidate = match.group(0)
         try:
             data = json.loads(candidate)
-            variants = data.get("variants")
+            variants = data.get("variants") if isinstance(data, dict) else None
             if isinstance(variants, list):
-                cleaned = [str(v).strip() for v in variants if str(v).strip()]
+                cleaned = [_coerce_variant(v) for v in variants]
+                cleaned = [c for c in cleaned if c]
                 if cleaned:
                     return cleaned[:3]
         except json.JSONDecodeError:

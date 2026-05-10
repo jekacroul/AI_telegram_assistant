@@ -92,13 +92,45 @@ class TelegramService:
         self.last_update_kind = kind
         self.update_count += 1
 
+    @staticmethod
+    def _extract_message_content(tg_msg: TgMessage) -> str:
+        text = (tg_msg.text or "").strip()
+        if text:
+            return text
+        caption = (tg_msg.caption or "").strip()
+        if caption:
+            return caption
+        sticker = getattr(tg_msg, "sticker", None)
+        if sticker is not None:
+            emoji_char = (getattr(sticker, "emoji", None) or "").strip()
+            if emoji_char:
+                return emoji_char
+            return "(стикер)"
+        animation = getattr(tg_msg, "animation", None)
+        if animation is not None:
+            return "(гиф)"
+        if getattr(tg_msg, "photo", None):
+            return "(фото)"
+        if getattr(tg_msg, "video", None) is not None:
+            return "(видео)"
+        if getattr(tg_msg, "voice", None) is not None:
+            return "(голосовое)"
+        if getattr(tg_msg, "video_note", None) is not None:
+            return "(кружок)"
+        if getattr(tg_msg, "audio", None) is not None:
+            return "(аудио)"
+        if getattr(tg_msg, "document", None) is not None:
+            return "(документ)"
+        return ""
+
     async def handle_incoming(self, tg_msg: TgMessage) -> None:
         try:
             if tg_msg.from_user and tg_msg.from_user.is_bot:
                 return
             if tg_msg.chat.type == ChatType.CHANNEL:
                 return
-            if not tg_msg.text or not tg_msg.text.strip():
+            content_text = self._extract_message_content(tg_msg)
+            if not content_text:
                 return
 
             business_connection_id = getattr(tg_msg, "business_connection_id", None)
@@ -132,6 +164,8 @@ class TelegramService:
                 mentioned = False
                 if me and tg_msg.text and f"@{me.username}" in tg_msg.text:
                     mentioned = True
+                if me and tg_msg.caption and f"@{me.username}" in tg_msg.caption:
+                    mentioned = True
                 if (
                     tg_msg.reply_to_message
                     and tg_msg.reply_to_message.from_user
@@ -148,7 +182,7 @@ class TelegramService:
                     sender_id=sender_id,
                     sender_name=settings.user_name if is_mine else sender_name,
                     is_mine=is_mine,
-                    text=tg_msg.text,
+                    text=content_text,
                     timestamp=datetime.utcnow(),
                     message_id=tg_msg.message_id,
                     business_connection_id=business_connection_id,
@@ -178,7 +212,7 @@ class TelegramService:
                 "chat_id": chat_id,
                 "chat_name": chat_name,
                 "sender_name": row.sender_name,
-                "text": tg_msg.text,
+                "text": content_text,
                 "is_mine": is_mine,
                 "business": is_business,
                 "timestamp": datetime.utcnow().isoformat(),
@@ -196,7 +230,7 @@ class TelegramService:
             if auto_reply:
                 try:
                     variants = await self._generate_variants(
-                        tg_msg.text, sender_name, chat_id
+                        content_text, sender_name, chat_id
                     )
                     chosen = variants[0] if variants else "ок"
                     await self.send_reply(
