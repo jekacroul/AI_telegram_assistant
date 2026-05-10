@@ -1,16 +1,28 @@
+import os
+import sys
+
+# Re-exec under the project venv if the user launched us with a different
+# interpreter (system python lacks httpx/dotenv/etc and would crash on the
+# imports below). Must run before any third-party import.
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+_venv_python = os.path.join(_PROJECT_ROOT, ".venv", "Scripts", "python.exe")
+if not os.path.isfile(_venv_python):
+    _venv_python = os.path.join(_PROJECT_ROOT, ".venv", "bin", "python")
+if os.path.isfile(_venv_python) and os.path.realpath(sys.executable) != os.path.realpath(_venv_python):
+    print(f"⚙️  Перезапуск через venv: {_venv_python}")
+    os.execv(_venv_python, [_venv_python, os.path.abspath(__file__), *sys.argv[1:]])
+
 import subprocess
 import re
-import sys
 import time
 import httpx
-import os
 import threading
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = _PROJECT_ROOT
 
 # Backend (and the training subprocess it spawns) must run on the venv
 # interpreter, otherwise torch/transformers/bitsandbytes will be missing.
