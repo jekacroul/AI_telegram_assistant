@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    inspect,
     select,
 )
 from sqlalchemy.ext.asyncio import (
@@ -41,6 +42,9 @@ class Message(Base):
     message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     replied: Mapped[bool] = mapped_column(Boolean, default=False)
     reply_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_connection_id: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
 
 
 class TrainingPair(Base):
@@ -92,6 +96,16 @@ SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_apply_lightweight_migrations)
+
+
+def _apply_lightweight_migrations(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    columns = {col["name"] for col in inspector.get_columns("messages")}
+    if "business_connection_id" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN business_connection_id VARCHAR(128)"
+        )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
