@@ -127,7 +127,7 @@ def _looks_like_json_garbage(text: str) -> bool:
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
 _QUOTED_VALUE_RE = re.compile(r':\s*"((?:\\.|[^"\\])+)"', re.DOTALL)
 _NUMBERED_START_RE = re.compile(
-    r'(?m)^[ \t]{0,3}(?:\d{1,2}[.\)])\s+'
+    r'(?m)^([ \t]*)(?:\d{1,2}[.\)])(?:\s|$)'
 )
 
 
@@ -158,14 +158,19 @@ def _strip_speaker_prefix(text: str, user_name: str | None) -> str:
 
 
 def _parse_numbered_list(raw: str) -> list[str]:
-    starts = [m.start() for m in _NUMBERED_START_RE.finditer(raw)]
-    if not starts:
+    matches = list(_NUMBERED_START_RE.finditer(raw))
+    if not matches:
         return []
+    base_indent = len(matches[0].group(1).expandtabs(4))
+    top_level = [
+        m for m in matches
+        if len(m.group(1).expandtabs(4)) <= base_indent
+    ]
     items: list[str] = []
-    boundaries = starts + [len(raw)]
-    for i in range(len(starts)):
+    boundaries = [m.start() for m in top_level] + [len(raw)]
+    for i, m in enumerate(top_level):
         chunk = raw[boundaries[i]:boundaries[i + 1]]
-        body = _NUMBERED_START_RE.sub("", chunk, count=1).strip()
+        body = chunk[m.end() - m.start():].strip()
         if not body:
             continue
         if "\n" in body:
