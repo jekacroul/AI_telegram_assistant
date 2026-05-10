@@ -1,18 +1,23 @@
 import os
+import subprocess
 import sys
 
 # Re-exec under the project venv if the user launched us with a different
 # interpreter (system python lacks httpx/dotenv/etc and would crash on the
-# imports below). Must run before any third-party import.
+# imports below). Must run before any third-party import. We use subprocess
+# rather than os.execv because the latter on Windows builds a flat command
+# line and a space in the path (e.g. "AI model") tears the argv apart.
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _venv_python = os.path.join(_PROJECT_ROOT, ".venv", "Scripts", "python.exe")
 if not os.path.isfile(_venv_python):
     _venv_python = os.path.join(_PROJECT_ROOT, ".venv", "bin", "python")
 if os.path.isfile(_venv_python) and os.path.realpath(sys.executable) != os.path.realpath(_venv_python):
     print(f"⚙️  Перезапуск через venv: {_venv_python}")
-    os.execv(_venv_python, [_venv_python, os.path.abspath(__file__), *sys.argv[1:]])
+    sys.exit(subprocess.run(
+        [_venv_python, os.path.abspath(__file__), *sys.argv[1:]],
+        cwd=_PROJECT_ROOT,
+    ).returncode)
 
-import subprocess
 import re
 import time
 import httpx
