@@ -20,6 +20,13 @@ import time
 import traceback
 from pathlib import Path
 
+# Windows: torch ships libiomp5md.dll while pyarrow (pulled in by `datasets`)
+# brings vcomp140.dll. Both register OpenMP runtimes in the same process and
+# the second loader hits an access violation (exit code 3221225477) when the
+# first runtime has already taken over thread-local slots. Telling Intel OMP
+# to tolerate the duplicate is the standard workaround.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 EVENT_PREFIX = "__TRAIN_EVENT__ "
 
 _log_file = None  # type: ignore[var-annotated]
@@ -167,13 +174,16 @@ def run_training(
     base_model: str,
     cancel_file: Path,
 ) -> dict:
+    # Load pyarrow-based stack first so its OpenMP runtime wins over torch's
+    # libiomp5md.dll on Windows. KMP_DUPLICATE_LIB_OK above is the safety net.
+    log("step:import_datasets")
+    from datasets import Dataset
+
     log("step:import_torch")
     import torch
     log(f"  torch {torch.__version__} cuda={torch.version.cuda} avail={torch.cuda.is_available()}")
     log(f"  device={torch.cuda.get_device_name(0)} free_mem={torch.cuda.mem_get_info()[0] // (1024*1024)}MiB")
 
-    log("step:import_datasets")
-    from datasets import Dataset
     log("step:import_peft")
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     log("step:import_transformers")
