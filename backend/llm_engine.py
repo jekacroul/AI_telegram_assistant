@@ -119,8 +119,6 @@ def _looks_like_json_garbage(text: str) -> bool:
         return True
     if '"variants"' in stripped:
         return True
-    if stripped.count("{") + stripped.count("}") >= 3:
-        return True
     if stripped.startswith("{") or stripped.startswith("["):
         return True
     return False
@@ -128,7 +126,9 @@ def _looks_like_json_garbage(text: str) -> bool:
 
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
 _QUOTED_VALUE_RE = re.compile(r':\s*"((?:\\.|[^"\\])+)"', re.DOTALL)
-_NUMBERED_LINE_RE = re.compile(r'^\s*(?:[\-•*]|\(?\d{1,2}[.\)\]:])\s+(.+?)\s*$')
+_NUMBERED_START_RE = re.compile(
+    r'(?m)^[ \t]{0,3}(?:\d{1,2}[.\)])\s+'
+)
 
 
 def _strip_speaker_prefix(text: str, user_name: str | None) -> str:
@@ -158,12 +158,20 @@ def _strip_speaker_prefix(text: str, user_name: str | None) -> str:
 
 
 def _parse_numbered_list(raw: str) -> list[str]:
+    starts = [m.start() for m in _NUMBERED_START_RE.finditer(raw)]
+    if not starts:
+        return []
     items: list[str] = []
-    for line in raw.splitlines():
-        m = _NUMBERED_LINE_RE.match(line)
-        if not m:
+    boundaries = starts + [len(raw)]
+    for i in range(len(starts)):
+        chunk = raw[boundaries[i]:boundaries[i + 1]]
+        body = _NUMBERED_START_RE.sub("", chunk, count=1).strip()
+        if not body:
             continue
-        candidate = _coerce_variant(m.group(1))
+        if "\n" in body:
+            candidate = body
+        else:
+            candidate = _coerce_variant(body)
         if candidate and not _looks_like_json_garbage(candidate):
             items.append(candidate)
     return items
