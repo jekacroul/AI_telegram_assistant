@@ -16,10 +16,6 @@ class LLMUnavailableError(RuntimeError):
     pass
 
 
-# Backwards-compatible alias: existing callers import OllamaUnavailableError.
-OllamaUnavailableError = LLMUnavailableError
-
-
 SYSTEM_TEMPLATE = (
     "Ты — {user_name}. Ты пишешь сообщение в Telegram собеседнику {sender_name}"
     " от первого лица, как живой человек. Ни в коем случае не пиши своё имя"
@@ -319,75 +315,6 @@ class LLMClient:
         return variants[:3]
 
 
-class OllamaClient(LLMClient):
-    def __init__(self, host: str | None = None, model: str | None = None) -> None:
-        self.host = (host or settings.ollama_host).rstrip("/")
-        self.model = model or settings.ollama_model
-
-    async def health(self) -> bool:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(f"{self.host}/api/tags")
-                return r.status_code == 200
-        except httpx.HTTPError:
-            return False
-
-    async def list_models(self) -> list[str]:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(f"{self.host}/api/tags")
-                r.raise_for_status()
-                data = r.json()
-                return [m.get("name", "") for m in data.get("models", [])]
-        except httpx.HTTPError:
-            return []
-
-    async def ensure_model(self, model: str | None = None) -> None:
-        target = model or self.model
-        models = await self.list_models()
-        if any(m == target or m.startswith(f"{target}:") for m in models):
-            return
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", f"{self.host}/api/pull", json={"name": target}) as r:
-                async for _ in r.aiter_lines():
-                    pass
-
-    async def _ensure_alive(self) -> None:
-        if not await self.health():
-            raise OllamaUnavailableError(
-                f"Ollama не запущен на {self.host}. Запусти `ollama serve`."
-            )
-
-    async def generate_raw(
-        self,
-        system: str,
-        prompt: str,
-        temperature: float = 0.8,
-        num_predict: int | None = None,
-        json_format: bool = False,
-    ) -> str:
-        await self._ensure_alive()
-        if num_predict is None:
-            num_predict = settings.llm_max_tokens
-        payload = {
-            "model": self.model,
-            "system": system,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": num_predict,
-            },
-        }
-        if json_format:
-            payload["format"] = "json"
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.post(f"{self.host}/api/generate", json=payload)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("response", "")
-
-
 class OpenAICompatibleClient(LLMClient):
     """Client for OpenAI-compatible servers (LM Studio, llama.cpp, vLLM, etc.)."""
 
@@ -473,19 +400,10 @@ class OpenAICompatibleClient(LLMClient):
 _default_client: Optional[LLMClient] = None
 
 
-def _make_client() -> LLMClient:
-    backend = (settings.llm_backend or "ollama").strip().lower()
-    if backend in {"openai", "lmstudio", "lm_studio", "openai_compatible"}:
-        return OpenAICompatibleClient()
-    if backend != "ollama":
-        log.warning("Unknown LLM_BACKEND=%r, falling back to ollama.", backend)
-    return OllamaClient()
-
-
 def get_client() -> LLMClient:
     global _default_client
     if _default_client is None:
-        _default_client = _make_client()
+        _default_client = OpenAICompatibleClient()
     return _default_client
 
 

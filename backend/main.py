@@ -30,7 +30,7 @@ from .database import (
 )
 from .dataset_builder import build_dataset_file, dataset_stats
 from .event_bus import message_bus, training_bus
-from .llm_engine import OllamaUnavailableError, get_client
+from .llm_engine import LLMUnavailableError, get_client
 from .style_engine import (
     get_latest_profile,
     reanalyze_and_store,
@@ -75,7 +75,7 @@ app.add_middleware(
 
 @app.get("/api/status")
 async def status() -> dict:
-    ollama_ok = await get_client().health()
+    llm_ok = await get_client().health()
     bot_ok = telegram_service.is_configured
     db_ok = True
     try:
@@ -87,13 +87,13 @@ async def status() -> dict:
         auto_reply = (
             await get_setting(session, "auto_reply", "1" if settings.auto_reply else "0")
         ) in ("1", "true", "True")
-        ollama_model = await get_setting(session, "ollama_model", settings.ollama_model)
+        llm_model = await get_setting(session, "llm_model", settings.openai_model)
     return {
-        "ollama": ollama_ok,
+        "llm": llm_ok,
         "bot": bot_ok,
         "db": db_ok,
         "auto_reply": auto_reply,
-        "ollama_model": ollama_model,
+        "llm_model": llm_model,
         "user_name": settings.user_name,
         "last_update_at": (
             telegram_service.last_update_at.isoformat()
@@ -141,7 +141,7 @@ class SettingsIn(BaseModel):
     telegram_bot_token: Optional[str] = None
     auto_reply: Optional[bool] = None
     monitored_chats: Optional[list[int]] = None
-    ollama_model: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
 @app.post("/api/settings")
@@ -160,9 +160,9 @@ async def save_settings(
     if payload.monitored_chats is not None:
         csv = ",".join(str(x) for x in payload.monitored_chats)
         await set_setting(session, "monitored_chats", csv)
-    if payload.ollama_model is not None:
-        await set_setting(session, "ollama_model", payload.ollama_model)
-        get_client().model = payload.ollama_model
+    if payload.llm_model is not None:
+        await set_setting(session, "llm_model", payload.llm_model)
+        get_client().model = payload.llm_model
     return {"ok": True}
 
 
@@ -175,13 +175,13 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
     ) in ("1", "true", "True")
     monitored_csv = await get_setting(session, "monitored_chats", "")
     monitored = [int(x) for x in monitored_csv.split(",") if x.strip()]
-    ollama_model = await get_setting(session, "ollama_model", settings.ollama_model)
+    llm_model = await get_setting(session, "llm_model", settings.openai_model)
     return {
         "telegram_bot_token_masked": masked,
         "telegram_bot_token_set": bool(token),
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
-        "ollama_model": ollama_model,
+        "llm_model": llm_model,
     }
 
 
@@ -247,7 +247,7 @@ async def generate_reply(
             style_profile=profile,
             chat_history=history_dicts,
         )
-    except OllamaUnavailableError as e:
+    except LLMUnavailableError as e:
         raise HTTPException(503, str(e))
     return {"variants": variants}
 
@@ -493,7 +493,7 @@ async def llm_test(payload: TestIn, session: AsyncSession = Depends(get_session)
             style_profile=profile,
             chat_history=[],
         )
-    except OllamaUnavailableError as e:
+    except LLMUnavailableError as e:
         raise HTTPException(503, str(e))
     return {"prompt": payload.text, "variants": variants}
 

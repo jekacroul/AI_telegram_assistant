@@ -197,8 +197,6 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             "final_loss": final_result.get("final_loss"),
             "version": version,
         })
-        if not was_cancelled:
-            await create_ollama_modelfile(output_dir, version)
     except Exception as e:
         log.exception("training failed")
         async with SessionLocal() as session:
@@ -217,17 +215,6 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
         with contextlib.suppress(FileNotFoundError):
             pairs_file.unlink()
         training_state.reset()
-
-
-async def create_ollama_modelfile(adapter_dir: Path, version: int) -> None:
-    """Write Modelfile so adapter can be hot-loaded into Ollama."""
-    modelfile = adapter_dir / "Modelfile"
-    content = (
-        f"FROM {settings.ollama_model}\n"
-        f"ADAPTER {adapter_dir}\n"
-    )
-    modelfile.write_text(content, encoding="utf-8")
-    log.info("wrote Modelfile at %s", modelfile)
 
 
 async def cancel_training() -> bool:
@@ -252,24 +239,10 @@ async def activate_adapter(run_id: int) -> bool:
         for r in all_runs:
             r.is_active = (r.id == run_id)
         await session.commit()
-
-    import httpx
-    adapter_dir = Path(target.adapter_path)
-    modelfile = adapter_dir / "Modelfile"
-    if not modelfile.exists():
-        await create_ollama_modelfile(adapter_dir, target.version)
-    name = f"{settings.ollama_model}-style-v{target.version}"
-    try:
-        async with httpx.AsyncClient(timeout=None) as client:
-            await client.post(
-                f"{settings.ollama_host}/api/create",
-                json={"name": name, "modelfile": modelfile.read_text("utf-8")},
-            )
-        from .llm_engine import get_client as get_llm
-        get_llm().model = name
-    except Exception:  # noqa: BLE001
-        log.exception("hot-reload to Ollama failed")
-        return False
+    log.info(
+        "marked adapter v%s active at %s; load it manually in LM Studio",
+        target.version, target.adapter_path,
+    )
     return True
 
 

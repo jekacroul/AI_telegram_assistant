@@ -28,7 +28,7 @@ ALLOWED_UPDATES = [
     "callback_query",
 ]
 from .event_bus import message_bus
-from .llm_engine import OllamaUnavailableError, get_client
+from .llm_engine import LLMUnavailableError, get_client
 from .style_engine import get_latest_profile, reanalyze_and_store
 
 
@@ -264,8 +264,8 @@ class TelegramService:
                         business_connection_id=business_connection_id,
                     )
                     await self._record_reply(msg_id, chosen, sender_name, chat_id, chat_name)
-                except OllamaUnavailableError as e:
-                    log.warning("Ollama unavailable: %s", e)
+                except LLMUnavailableError as e:
+                    log.warning("LLM unavailable: %s", e)
                     self.last_error = str(e)
                 except TelegramBadRequest as e:
                     if "BUSINESS_PEER_INVALID" in str(e):
