@@ -1,7 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
-
-const MODELS = ["mistral:7b", "llama3.1:8b"];
 
 export default function Settings() {
   const [s, setS] = useState({
@@ -13,12 +11,22 @@ export default function Settings() {
   const [tokenSet, setTokenSet] = useState(false);
   const [tokenMasked, setTokenMasked] = useState("");
   const [chats, setChats] = useState([]);
+  const [models, setModels] = useState([]);
+  const [modelsError, setModelsError] = useState("");
   const [test, setTest] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [webhook, setWebhook] = useState(null);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookBusy, setWebhookBusy] = useState(false);
+
+  const modelOptions = useMemo(() => {
+    const list = [...models];
+    if (s.ollama_model && !list.includes(s.ollama_model)) {
+      list.unshift(s.ollama_model);
+    }
+    return list;
+  }, [models, s.ollama_model]);
 
   const refresh = async () => {
     const [cs, st] = await Promise.all([api.chats(), api.getSettings()]);
@@ -31,6 +39,14 @@ export default function Settings() {
       monitored_chats: st.monitored_chats || [],
       ollama_model: st.ollama_model || "mistral:7b",
     }));
+    try {
+      const m = await api.listModels();
+      setModels(m.models || []);
+      setModelsError("");
+    } catch (e) {
+      setModels([]);
+      setModelsError(e.message || "не удалось получить список моделей");
+    }
   };
 
   useEffect(() => {
@@ -95,12 +111,23 @@ export default function Settings() {
           value={s.ollama_model}
           onChange={(e) => setS({ ...s, ollama_model: e.target.value })}
         >
-          {MODELS.map((m) => (
+          {modelOptions.map((m) => (
             <option key={m} value={m}>
               {m}
             </option>
           ))}
         </select>
+        {modelsError && (
+          <div className="text-xs text-bad mt-1">
+            Не удалось загрузить список моделей: {modelsError}
+          </div>
+        )}
+        {!modelsError && models.length === 0 && (
+          <div className="text-xs text-muted mt-1">
+            Ollama не вернул моделей. Проверь, что `ollama list` показывает их и
+            сервер запущен.
+          </div>
+        )}
       </div>
 
       <div className="card">
