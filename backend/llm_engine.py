@@ -105,26 +105,64 @@ def _coerce_variant(value, _depth: int = 0) -> str:
     return text
 
 
+def _looks_like_json_garbage(text: str) -> bool:
+    if not text:
+        return True
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if '"variants"' in stripped:
+        return True
+    if stripped.count("{") + stripped.count("}") >= 3:
+        return True
+    if stripped.startswith("{") or stripped.startswith("["):
+        return True
+    return False
+
+
+_JSON_OBJECT_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
+_QUOTED_VALUE_RE = re.compile(r':\s*"((?:\\.|[^"\\])+)"', re.DOTALL)
+
+
 def _extract_variants(raw: str) -> list[str]:
     if not raw:
         return []
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if match:
-        candidate = match.group(0)
+
+    for candidate in _JSON_OBJECT_RE.findall(raw):
         try:
             data = json.loads(candidate)
-            variants = data.get("variants") if isinstance(data, dict) else None
-            if isinstance(variants, list):
-                cleaned = [_coerce_variant(v) for v in variants]
-                cleaned = [c for c in cleaned if c]
-                if cleaned:
-                    return cleaned[:3]
         except json.JSONDecodeError:
-            pass
+            continue
+        variants = data.get("variants") if isinstance(data, dict) else None
+        if isinstance(variants, list):
+            cleaned = [_coerce_variant(v) for v in variants]
+            cleaned = [c for c in cleaned if c and not _looks_like_json_garbage(c)]
+            if cleaned:
+                return cleaned[:3]
+
+    fragment_matches = _QUOTED_VALUE_RE.findall(raw)
+    if fragment_matches:
+        salvaged: list[str] = []
+        seen: set[str] = set()
+        for frag in fragment_matches:
+            try:
+                text = json.loads(f'"{frag}"')
+            except json.JSONDecodeError:
+                text = frag
+            text = text.strip()
+            if not text or _looks_like_json_garbage(text) or text in seen:
+                continue
+            seen.add(text)
+            salvaged.append(text)
+            if len(salvaged) >= 3:
+                break
+        if salvaged:
+            return salvaged
 
     lines = [ln.strip(" -•\t") for ln in raw.splitlines() if ln.strip()]
     cleaned = [ln for ln in lines if ln and not ln.startswith("{") and not ln.startswith("}")]
-    return cleaned[:3] if cleaned else [raw.strip()]
+    cleaned = [ln for ln in cleaned if not _looks_like_json_garbage(ln)]
+    return cleaned[:3] if cleaned else []
 
 
 class OllamaClient:
@@ -172,6 +210,7 @@ class OllamaClient:
         prompt: str,
         temperature: float = 0.8,
         num_predict: int = 512,
+        json_format: bool = False,
     ) -> str:
         await self._ensure_alive()
         payload = {
@@ -184,6 +223,8 @@ class OllamaClient:
                 "num_predict": num_predict,
             },
         }
+        if json_format:
+            payload["format"] = "json"
         async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(f"{self.host}/api/generate", json=payload)
             r.raise_for_status()
@@ -205,7 +246,7 @@ class OllamaClient:
             chat_history,
         )
         prompt = f"Сообщение собеседника: {incoming_text}\nДай ровно 3 варианта ответа."
-        raw = await self.generate_raw(system, prompt)
+        raw = await self.generate_raw(system, prompt, json_format=True)
         variants = _extract_variants(raw)
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "ок")
