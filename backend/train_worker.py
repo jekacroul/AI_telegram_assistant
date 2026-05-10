@@ -274,7 +274,7 @@ def run_training(
         fp16=True,
         optim="paged_adamw_8bit",
         dataset_text_field="text",
-        max_seq_length=1024,
+        max_length=1024,
     )
 
     state: dict = {"loss": None, "step": 0, "epoch": 0.0, "start": time.time()}
