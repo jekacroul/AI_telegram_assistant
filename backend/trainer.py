@@ -164,9 +164,15 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
         training_state.process = None
 
         if error_message is None and rc != 0 and not final_result:
+            log_path = output_dir / "train_worker.log"
+            hint = (
+                "native crash (access violation, segfault, missing CUDA DLL)"
+                if rc in (3221225477, -1073741819) else
+                "OOM or non-zero exit"
+            )
             error_message = (
-                f"training process exited with code {rc} "
-                f"(likely OOM or native crash; check backend logs)"
+                f"training process exited with code {rc} ({hint}). "
+                f"See per-step log: {log_path}"
             )
 
         if error_message:

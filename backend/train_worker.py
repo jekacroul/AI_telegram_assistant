@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -20,6 +21,27 @@ import traceback
 from pathlib import Path
 
 EVENT_PREFIX = "__TRAIN_EVENT__ "
+
+_log_file = None  # type: ignore[var-annotated]
+
+
+def _open_log(output_dir: Path) -> None:
+    global _log_file
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _log_file = open(output_dir / "train_worker.log", "w", encoding="utf-8", buffering=1)
+
+
+def log(message: str) -> None:
+    """Step-grained progress log. Flushed to disk so a native crash can't lose it."""
+    line = f"[{time.strftime('%H:%M:%S')}] {message}"
+    print(line, flush=True)
+    if _log_file is not None:
+        _log_file.write(line + "\n")
+        _log_file.flush()
+        try:
+            os.fsync(_log_file.fileno())
+        except OSError:
+            pass
 
 
 def emit(event: dict) -> None:
@@ -145,9 +167,16 @@ def run_training(
     base_model: str,
     cancel_file: Path,
 ) -> dict:
+    log("step:import_torch")
     import torch
+    log(f"  torch {torch.__version__} cuda={torch.version.cuda} avail={torch.cuda.is_available()}")
+    log(f"  device={torch.cuda.get_device_name(0)} free_mem={torch.cuda.mem_get_info()[0] // (1024*1024)}MiB")
+
+    log("step:import_datasets")
     from datasets import Dataset
+    log("step:import_peft")
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    log("step:import_transformers")
     from transformers import (
         AutoModelForCausalLM,
         AutoTokenizer,
@@ -155,12 +184,18 @@ def run_training(
         TrainerCallback,
         TrainingArguments,
     )
+    log("step:import_trl")
     from trl import SFTTrainer
+    log("step:import_bitsandbytes")
+    import bitsandbytes as bnb
+    log(f"  bitsandbytes {bnb.__version__}")
 
+    log(f"step:tokenizer base_model={base_model}")
     tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    log("step:bnb_config")
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -168,20 +203,26 @@ def run_training(
         bnb_4bit_use_double_quant=True,
     )
 
+    log("step:load_model (this is the most common crash point)")
     try:
+        log("  trying with flash_attention_2")
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             quantization_config=bnb_config,
             device_map="cuda:0",
             attn_implementation="flash_attention_2",
         )
-    except Exception:
+    except Exception as e:
+        log(f"  flash_attention_2 failed: {type(e).__name__}: {e}")
+        log("  falling back to default attention")
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             quantization_config=bnb_config,
             device_map="cuda:0",
         )
+    log("step:model_loaded")
 
+    log("step:prepare_for_kbit_training")
     model = prepare_model_for_kbit_training(model)
 
     lora_config = LoraConfig(
@@ -192,12 +233,15 @@ def run_training(
         bias="none",
         task_type="CAUSAL_LM",
     )
+    log("step:get_peft_model")
     model = get_peft_model(model, lora_config)
 
+    log(f"step:build_dataset n={len(pairs)}")
     texts = [_format_alpaca(p) for p in pairs]
     ds = Dataset.from_dict({"text": texts})
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    log("step:training_args")
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=3,
@@ -242,6 +286,7 @@ def run_training(
                 ctrl.should_training_stop = True
             return ctrl
 
+    log("step:build_trainer")
     trainer = SFTTrainer(
         model=model,
         args=training_args,
@@ -252,9 +297,12 @@ def run_training(
         callbacks=[StreamCallback()],
     )
 
+    log("step:trainer.train()")
     trainer.train()
+    log("step:save_adapter")
     trainer.model.save_pretrained(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
+    log("step:done")
 
     return {
         "adapter_path": str(output_dir),
@@ -271,7 +319,14 @@ def main() -> int:
     parser.add_argument("--cancel-file", required=True)
     args = parser.parse_args()
 
+    output_dir = Path(args.output_dir)
+    _open_log(output_dir)
+    log(f"train_worker started pid={os.getpid()} python={sys.executable}")
+    log(f"output_dir={output_dir}")
+
+    log("step:preflight")
     _preflight()
+    log("step:preflight_ok")
 
     try:
         pairs = json.loads(Path(args.pairs_file).read_text(encoding="utf-8"))
@@ -282,11 +337,13 @@ def main() -> int:
     try:
         result = run_training(
             pairs=pairs,
-            output_dir=Path(args.output_dir),
+            output_dir=output_dir,
             base_model=args.base_model,
             cancel_file=Path(args.cancel_file),
         )
     except Exception as e:
+        log(f"FATAL python exception: {type(e).__name__}: {e}")
+        log(traceback.format_exc())
         emit({
             "phase": "error",
             "error": f"{type(e).__name__}: {e}",
