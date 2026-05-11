@@ -1,15 +1,50 @@
+import os
 import subprocess
+import sys
+
+# Re-exec under the project venv if the user launched us with a different
+# interpreter (system python lacks httpx/dotenv/etc and would crash on the
+# imports below). Must run before any third-party import. We use subprocess
+# rather than os.execv because the latter on Windows builds a flat command
+# line and a space in the path (e.g. "AI model") tears the argv apart.
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+_venv_python = os.path.join(_PROJECT_ROOT, ".venv", "Scripts", "python.exe")
+if not os.path.isfile(_venv_python):
+    _venv_python = os.path.join(_PROJECT_ROOT, ".venv", "bin", "python")
+if os.path.isfile(_venv_python) and os.path.realpath(sys.executable) != os.path.realpath(_venv_python):
+    print(f"⚙️  Перезапуск через venv: {_venv_python}")
+    sys.exit(subprocess.run(
+        [_venv_python, os.path.abspath(__file__), *sys.argv[1:]],
+        cwd=_PROJECT_ROOT,
+    ).returncode)
+
 import re
 import time
 import httpx
-import os
 import threading
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-PROJECT_ROOT = "D:\\AI model\\AI_telegram_assistant"
+PROJECT_ROOT = _PROJECT_ROOT
+
+# Backend (and the training subprocess it spawns) must run on the venv
+# interpreter, otherwise torch/transformers/bitsandbytes will be missing.
+_venv_python_win = os.path.join(PROJECT_ROOT, ".venv", "Scripts", "python.exe")
+_venv_python_nix = os.path.join(PROJECT_ROOT, ".venv", "bin", "python")
+if os.path.isfile(_venv_python_win):
+    BACKEND_PYTHON = _venv_python_win
+elif os.path.isfile(_venv_python_nix):
+    BACKEND_PYTHON = _venv_python_nix
+else:
+    print(
+        "❌ Не найден интерпретатор venv в "
+        f"{os.path.join(PROJECT_ROOT, '.venv')}.\n"
+        "   Создай venv (py -3.11 -m venv .venv), активируй его, "
+        "поставь зависимости и CUDA-сборку torch."
+    )
+    sys.exit(1)
 
 tunnel_url = None
 
@@ -21,9 +56,9 @@ def stream_output(process, prefix=""):
             print(f"{prefix} {line}")
 
 def start_backend():
-    print("🔧 Запускаю бэкенд...")
+    print(f"🔧 Запускаю бэкенд ({BACKEND_PYTHON})...")
     process = subprocess.Popen(
-        ["python", "-m", "backend.main"],
+        [BACKEND_PYTHON, "-u", "-m", "backend.main"],
         cwd=PROJECT_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -49,9 +84,15 @@ def start_frontend():
     threading.Thread(target=stream_output, args=(process, "[frontend]"), daemon=True).start()
     return process
 
-def start_cloudflare():
-    global tunnel_url
-    print("🚀 Запускаю Cloudflare tunnel...")
+_TUNNEL_URL_RE = re.compile(r'https://[a-z0-9\-]+\.trycloudflare\.com')
+
+
+def _spawn_cloudflared_once(timeout: float = 25.0):
+    """Spawn cloudflared and wait up to `timeout` seconds for the trycloudflare URL.
+
+    Returns (process, url). url is None if the tunnel didn't come up — the caller
+    is responsible for terminating the process before retrying.
+    """
     process = subprocess.Popen(
         [".\\cloudflared", "tunnel", "--url", "http://localhost:8000"],
         cwd=PROJECT_ROOT,
@@ -62,19 +103,80 @@ def start_cloudflare():
         errors='ignore'
     )
 
-    for line in process.stdout:
+    deadline = time.time() + timeout
+    while True:
+        if process.poll() is not None:
+            # cloudflared exited; drain anything left
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    print(f"[cloudflare] {line}")
+            return process, None
+
+        line = process.stdout.readline()
+        if not line:
+            if time.time() > deadline:
+                return process, None
+            continue
+
         line = line.strip()
         if line:
             print(f"[cloudflare] {line}")
-        match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
+        match = _TUNNEL_URL_RE.search(line)
         if match:
-            tunnel_url = match.group(0)
-            print(f"\n✅ Tunnel URL: {tunnel_url}")
+            url = match.group(0)
+            print(f"\n✅ Tunnel URL: {url}")
             # После получения URL читаем остаток в фоне
             threading.Thread(target=stream_output, args=(process, "[cloudflare]"), daemon=True).start()
-            break
+            return process, url
 
-    return process
+        if time.time() > deadline:
+            return process, None
+
+
+def _kill(process):
+    if process is None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            process.kill()
+        except OSError:
+            pass
+
+
+def start_cloudflare():
+    """Try to bring up a quick tunnel with retries. Returns the live process or None."""
+    global tunnel_url
+    backoffs = [5, 10, 20, 40]  # 5 attempts total: immediate, then 4 backoff waits
+    for attempt in range(1, len(backoffs) + 2):
+        print(f"🚀 Запускаю Cloudflare tunnel (попытка {attempt}/{len(backoffs) + 1})...")
+        process, url = _spawn_cloudflared_once()
+        if url:
+            tunnel_url = url
+            return process
+
+        _kill(process)
+        if attempt > len(backoffs):
+            break
+        delay = backoffs[attempt - 1]
+        print(
+            f"⏳ Cloudflare quick tunnel не поднялся "
+            f"(скорее всего временный 500 на trycloudflare.com). "
+            f"Повтор через {delay}с..."
+        )
+        time.sleep(delay)
+
+    print(
+        "\n⚠️  Cloudflare tunnel так и не запустился после ретраев.\n"
+        "   Backend (http://localhost:8000) и dashboard (http://localhost:5173) работают,\n"
+        "   но Telegram webhook зарегистрировать не удалось — бот не получит входящие\n"
+        "   сообщения, пока quick-tunnels у Cloudflare лежат. Можно перезапустить позже\n"
+        "   или поднять named-tunnel (требует аккаунта CF).\n"
+    )
+    return None
 
 def register_webhook(url):
     print(f"📡 Регистрирую webhook в Telegram...")
@@ -100,11 +202,9 @@ if __name__ == "__main__":
     print("⏳ Жду запуска сервисов...")
     time.sleep(4)
 
-    # Запускаем tunnel (блокирует пока не получит URL)
+    # Запускаем tunnel с ретраями (None если все попытки провалились)
     cloudflare = start_cloudflare()
 
-    # Регистрируем webhook
-    time.sleep(8)
     if tunnel_url:
         register_webhook(tunnel_url)
         print("\n" + "="*50)
@@ -115,14 +215,20 @@ if __name__ == "__main__":
         print("="*50)
         print("\nНажми Ctrl+C для остановки\n")
     else:
-        print("❌ Tunnel не запустился")
+        print("\n" + "="*50)
+        print("⚠️  ЗАПУЩЕНО ЧАСТИЧНО (без внешнего туннеля)")
+        print(f"📊 Дашборд:       http://localhost:5173")
+        print(f"📡 API docs:       http://localhost:8000/docs")
+        print("   Telegram webhook не зарегистрирован.")
+        print("="*50)
+        print("\nНажми Ctrl+C для остановки\n")
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n🛑 Остановка всех процессов...")
-        backend.terminate()
-        frontend.terminate()
-        cloudflare.terminate()
+        _kill(backend)
+        _kill(frontend)
+        _kill(cloudflare)
         print("👋 Готово")
