@@ -104,8 +104,12 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 5. **Fine-tuning** (`trainer`). Когда накопилось ≥ 50 пар (input → output),
    запускаешь LoRA-обучение: r=16, alpha=32, target=`q_proj,v_proj`,
    3 эпохи, 4-bit NF4, fp16 compute. По завершении адаптер сохраняется
-   в `models/lora_adapter_v{N}/`. `/api/training/activate/{run_id}` помечает
-   адаптер активным в БД — подгрузи его в LM Studio вручную.
+   в `models/lora_adapter_v{N}/`. Если в `.env` указан `LLAMA_CPP_PATH`,
+   адаптер автоматически **сливается с базовой моделью** в fp16 и
+   квантизуется в один GGUF (`GGUF_QUANT`, по умолчанию `Q8_0`). При
+   указанном `LM_STUDIO_MODELS_DIR` итоговый файл копируется прямо в
+   папку моделей LM Studio — грузишь как обычную модель, без адаптеров.
+   `/api/training/activate/{run_id}` помечает адаптер активным в БД.
 6. **Обратная связь**. 👎 в режиме авто-ответа открывает редактор: правишь,
    re-send, правильная пара уходит в `training_pairs` со `feedback=bad/good`.
 
@@ -145,6 +149,15 @@ TRAINING_DATA_PATH=./training_data/
 MODELS_PATH=./models/
 USER_NAME=Я
 HF_BASE_MODEL=mistralai/Mistral-7B-Instruct-v0.2
+
+# Авто-экспорт обученной модели в GGUF для LM Studio. Необязательно.
+# LLAMA_CPP_PATH — путь к собранному клону https://github.com/ggerganov/llama.cpp
+# (нужны convert_hf_to_gguf.py и собранный llama-quantize в build/bin/).
+# LM_STUDIO_MODELS_DIR — папка моделей LM Studio; туда копируется итоговый GGUF.
+# GGUF_QUANT — тип квантизации (Q4_K_M / Q5_K_M / Q8_0 / F16). По умолчанию Q8_0.
+LLAMA_CPP_PATH=
+LM_STUDIO_MODELS_DIR=
+GGUF_QUANT=Q8_0
 ```
 
 ## Лицензия

@@ -191,13 +191,15 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
 
         gguf_path: Optional[Path] = None
         if not was_cancelled:
-            from .gguf_export import convert_adapter_to_gguf
-            await _emit({"phase": "converting_gguf", "version": version})
+            from .gguf_export import merge_and_export_gguf
+            await _emit({"phase": "merging_and_exporting_gguf", "version": version})
             gguf_path = await asyncio.to_thread(
-                convert_adapter_to_gguf,
+                merge_and_export_gguf,
                 Path(adapter_path),
+                settings.hf_base_model,
                 settings.llama_cpp_path,
-                settings.lm_studio_adapters_dir,
+                settings.lm_studio_models_dir,
+                settings.gguf_quant,
             )
 
         async with SessionLocal() as session:
