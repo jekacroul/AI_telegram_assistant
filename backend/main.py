@@ -4,8 +4,22 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+
+
+def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
+    """Serialize a datetime as ISO 8601 UTC with a Z suffix.
+
+    The DB stores naive UTC (from datetime.utcnow() and Telegram's UTC
+    message.date). The Z marker is required so JS new Date() parses the
+    string as UTC instead of local time.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 from aiogram.exceptions import TelegramBadRequest
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
@@ -110,10 +124,7 @@ async def status() -> dict:
         "auto_reply": auto_reply,
         "llm_model": llm_model,
         "user_name": settings.user_name,
-        "last_update_at": (
-            telegram_service.last_update_at.isoformat()
-            if telegram_service.last_update_at else None
-        ),
+        "last_update_at": _iso_utc(telegram_service.last_update_at),
         "last_update_kind": telegram_service.last_update_kind,
         "update_count": telegram_service.update_count,
         "last_error": telegram_service.last_error,
@@ -138,7 +149,7 @@ async def list_chats(session: AsyncSession = Depends(get_session)) -> list[dict]
             "chat_id": r.chat_id,
             "chat_name": r.chat_name,
             "count": r.count,
-            "last": r.last.isoformat() if r.last else None,
+            "last": _iso_utc(r.last),
             "monitored": (r.chat_id in monitored) if monitored else True,
         }
         for r in rows
@@ -208,7 +219,7 @@ def _message_to_dict(m: Message) -> dict:
         "sender_name": m.sender_name,
         "is_mine": m.is_mine,
         "text": m.text,
-        "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+        "timestamp": _iso_utc(m.timestamp),
         "message_id": m.message_id,
         "replied": m.replied,
         "reply_text": m.reply_text,
@@ -520,9 +531,7 @@ async def dialogs_chats(session: AsyncSession = Depends(get_session)) -> list[di
         r.chat_id: {
             "versions": r.versions,
             "latest_version": r.latest_version,
-            "latest_backup_at": r.latest_backup_at.isoformat()
-            if r.latest_backup_at
-            else None,
+            "latest_backup_at": _iso_utc(r.latest_backup_at),
         }
         for r in backups_result.all()
     }
@@ -533,7 +542,7 @@ async def dialogs_chats(session: AsyncSession = Depends(get_session)) -> list[di
             "chat_id": c.chat_id,
             "chat_name": c.chat_name or "",
             "message_count": c.count,
-            "last_message_at": c.last.isoformat() if c.last else None,
+            "last_message_at": _iso_utc(c.last),
             "excluded": c.chat_id in excluded,
             "versions": by_chat.get(c.chat_id, {}).get("versions", 0),
             "latest_version": by_chat.get(c.chat_id, {}).get("latest_version"),
@@ -559,7 +568,7 @@ async def dialogs_versions(
             "chat_id": b.chat_id,
             "chat_name": b.chat_name,
             "version": b.version,
-            "created_at": b.created_at.isoformat() if b.created_at else None,
+            "created_at": _iso_utc(b.created_at),
             "message_count": b.message_count,
         }
         for b in rows
@@ -588,7 +597,7 @@ async def dialogs_backup_content(
             "chat_id": backup.chat_id,
             "chat_name": backup.chat_name,
             "version": backup.version,
-            "created_at": backup.created_at.isoformat() if backup.created_at else None,
+            "created_at": _iso_utc(backup.created_at),
             "message_count": backup.message_count,
         },
         "messages": [
@@ -598,7 +607,7 @@ async def dialogs_backup_content(
                 "sender_name": m.sender_name,
                 "is_mine": m.is_mine,
                 "text": m.text,
-                "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+                "timestamp": _iso_utc(m.timestamp),
                 "message_id": m.message_id,
             }
             for m in rows
@@ -611,10 +620,16 @@ async def dialogs_settings(session: AsyncSession = Depends(get_session)) -> dict
     excluded = sorted(await get_excluded_chats(session))
     interval = await get_interval_hours(session)
     last_run = await get_setting(session, SETTING_LAST_RUN, "")
+    last_run_iso: Optional[str] = None
+    if last_run:
+        try:
+            last_run_iso = _iso_utc(datetime.fromisoformat(last_run))
+        except ValueError:
+            last_run_iso = last_run
     return {
         "excluded_chats": list(excluded),
         "interval_hours": interval,
-        "last_run_at": last_run or None,
+        "last_run_at": last_run_iso,
         "running": dialog_backup_scheduler.last_result is not None,
         "last_error": dialog_backup_scheduler.last_error,
     }
@@ -642,8 +657,8 @@ async def save_dialogs_settings(
 async def dialogs_run_backup() -> dict:
     result = await dialog_backup_scheduler.run_now()
     return {
-        "started_at": result.started_at.isoformat(),
-        "finished_at": result.finished_at.isoformat(),
+        "started_at": _iso_utc(result.started_at),
+        "finished_at": _iso_utc(result.finished_at),
         "chats_processed": result.chats_processed,
         "new_versions": result.new_versions,
         "skipped": result.skipped,
