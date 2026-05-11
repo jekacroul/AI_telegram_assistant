@@ -277,36 +277,36 @@ def run_training(
         max_length=1024,
     )
 
-    state: dict = {"loss": None, "step": 0, "epoch": 0.0, "start": time.time()}
+    tracker: dict = {"loss": None, "step": 0, "epoch": 0.0, "start": time.time()}
 
     def _is_cancelled() -> bool:
         return cancel_file.exists()
 
     class StreamCallback(TrainerCallback):
-        def on_log(self, args, ctrl, st, logs=None, **kw):
+        def on_log(self, args, state, control, logs=None, **kw):
             if logs is None:
                 return
-            step = st.global_step
-            total = max(st.max_steps, 1)
+            step = state.global_step
+            total = max(state.max_steps, 1)
             if "loss" in logs:
-                state["loss"] = float(logs["loss"])
-            state["step"] = step
-            state["epoch"] = float(logs.get("epoch", st.epoch or 0.0))
-            elapsed = time.time() - state["start"]
+                tracker["loss"] = float(logs["loss"])
+            tracker["step"] = step
+            tracker["epoch"] = float(logs.get("epoch", state.epoch or 0.0))
+            elapsed = time.time() - tracker["start"]
             eta = (elapsed / step) * (total - step) if step > 0 else None
             emit({
-                "epoch": state["epoch"],
+                "epoch": tracker["epoch"],
                 "step": step,
                 "max_steps": total,
-                "loss": state["loss"],
+                "loss": tracker["loss"],
                 "eta_seconds": eta,
                 "phase": "training",
             })
 
-        def on_step_end(self, args, ctrl, st, **kw):
+        def on_step_end(self, args, state, control, **kw):
             if _is_cancelled():
-                ctrl.should_training_stop = True
-            return ctrl
+                control.should_training_stop = True
+            return control
 
     emit({"phase": "preparing_trainer"})
     log("step:build_trainer")
@@ -327,7 +327,7 @@ def run_training(
 
     return {
         "adapter_path": str(output_dir),
-        "final_loss": state.get("loss"),
+        "final_loss": tracker.get("loss"),
         "cancelled": _is_cancelled(),
     }
 
