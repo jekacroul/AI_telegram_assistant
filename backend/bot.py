@@ -28,8 +28,13 @@ from aiogram.types import Update
 from sqlalchemy import select
 
 from .config import settings
-from .database import Message, SessionLocal, get_setting
+from .database import Message, SessionLocal, get_setting, set_setting
 from .dialog_backup import mark_messages_deleted
+from .notifications import (
+    SETTING_LAST_PRIVATE_CHAT_ID,
+    SETTING_NOTIFY_CHAT_ID,
+    notify_owner,
+)
 
 ALLOWED_UPDATES = [
     "message",
@@ -108,11 +113,13 @@ class TelegramService:
     def _register_handlers(self, dp: Dispatcher) -> None:
         @dp.message(Command("start"))
         async def cmd_start(message: TgMessage) -> None:
+            await self._remember_private_chat(message)
             await message.answer("Локальный AI-ассистент готов. Отвечаю в твоём стиле.")
 
         @dp.message()
         async def on_message(message: TgMessage) -> None:
             self._mark_update("message")
+            await self._remember_private_chat(message)
             await self.handle_incoming(message)
 
         @dp.business_message()
@@ -141,6 +148,22 @@ class TelegramService:
         self.last_update_at = datetime.utcnow()
         self.last_update_kind = kind
         self.update_count += 1
+
+    @staticmethod
+    async def _remember_private_chat(tg_msg: TgMessage) -> None:
+        try:
+            if tg_msg.chat.type != ChatType.PRIVATE:
+                return
+            if getattr(tg_msg, "business_connection_id", None):
+                return
+            if tg_msg.from_user and tg_msg.from_user.is_bot:
+                return
+            async with SessionLocal() as session:
+                await set_setting(
+                    session, SETTING_LAST_PRIVATE_CHAT_ID, str(tg_msg.chat.id)
+                )
+        except Exception:  # noqa: BLE001
+            log.exception("failed to remember last private chat")
 
     @staticmethod
     def _extract_message_content(tg_msg: TgMessage) -> str:
@@ -290,6 +313,7 @@ class TelegramService:
                         business_connection_id=business_connection_id,
                     )
                     await self._record_reply(msg_id, chosen, sender_name, chat_id, chat_name)
+                    await notify_owner(chat_name, sender_name, content_text, chosen)
                 except LLMUnavailableError as e:
                     log.warning("LLM unavailable: %s", e)
                     self.last_error = str(e)

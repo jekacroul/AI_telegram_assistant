@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     llama_cpp_path: Optional[str] = Field(default=None, alias="LLAMA_CPP_PATH")
     lm_studio_models_dir: Optional[str] = Field(default=None, alias="LM_STUDIO_MODELS_DIR")
     gguf_quant: str = Field(default="Q8_0", alias="GGUF_QUANT")
+    notify_chat_id: str = Field(default="", alias="NOTIFY_CHAT_ID")
 
     @property
     def db_url(self) -> str:

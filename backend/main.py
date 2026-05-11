@@ -57,6 +57,11 @@ from .dialog_backup import (
 )
 from .event_bus import message_bus, training_bus
 from .llm_engine import LLMUnavailableError, get_client
+from .notifications import (
+    SETTING_LAST_PRIVATE_CHAT_ID,
+    SETTING_NOTIFY_CHAT_ID,
+    SETTING_NOTIFY_ENABLED,
+)
 from .style_engine import (
     get_latest_profile,
     reanalyze_and_store,
@@ -78,6 +83,11 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    if settings.notify_chat_id:
+        async with SessionLocal() as session:
+            current = await get_setting(session, SETTING_NOTIFY_CHAT_ID, "")
+            if not current:
+                await set_setting(session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id)
     token = settings.telegram_bot_token
     if token:
         try:
@@ -190,6 +200,48 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
         "monitored_chats": monitored,
         "llm_model": llm_model,
     }
+
+
+class NotifyChatIn(BaseModel):
+    chat_id: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+@app.get("/api/settings/notify-chat")
+async def get_notify_chat(session: AsyncSession = Depends(get_session)) -> dict:
+    chat_id = await get_setting(session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id)
+    enabled = (
+        await get_setting(session, SETTING_NOTIFY_ENABLED, "1")
+    ) in ("1", "true", "True")
+    return {"chat_id": chat_id, "enabled": enabled}
+
+
+@app.post("/api/settings/notify-chat")
+async def save_notify_chat(
+    payload: NotifyChatIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    if payload.chat_id is not None:
+        value = payload.chat_id.strip()
+        if value:
+            try:
+                int(value)
+            except ValueError:
+                raise HTTPException(400, "chat_id must be an integer")
+        await set_setting(session, SETTING_NOTIFY_CHAT_ID, value)
+    if payload.enabled is not None:
+        await set_setting(session, SETTING_NOTIFY_ENABLED, "1" if payload.enabled else "0")
+    return {"ok": True}
+
+
+@app.get("/api/settings/notify-chat/detect")
+async def detect_notify_chat(session: AsyncSession = Depends(get_session)) -> dict:
+    chat_id = await get_setting(session, SETTING_LAST_PRIVATE_CHAT_ID, "")
+    if not chat_id:
+        raise HTTPException(
+            404,
+            "Не удалось определить chat_id. Напишите боту /start в личку и попробуйте снова.",
+        )
+    return {"chat_id": chat_id}
 
 
 @app.get("/api/messages/pending")
