@@ -22,9 +22,19 @@ import re
 import time
 import httpx
 import threading
+import logging
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from backend.logging_setup import setup_logging
+
+_logs_path = Path(os.getenv("LOGS_PATH", "./logs/"))
+if not _logs_path.is_absolute():
+    _logs_path = Path(_PROJECT_ROOT) / _logs_path
+setup_logging(_logs_path)
+log = logging.getLogger("start")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PROJECT_ROOT = _PROJECT_ROOT
@@ -38,25 +48,25 @@ if os.path.isfile(_venv_python_win):
 elif os.path.isfile(_venv_python_nix):
     BACKEND_PYTHON = _venv_python_nix
 else:
-    print(
-        "❌ Не найден интерпретатор venv в "
-        f"{os.path.join(PROJECT_ROOT, '.venv')}.\n"
-        "   Создай venv (py -3.11 -m venv .venv), активируй его, "
-        "поставь зависимости и CUDA-сборку torch."
+    log.error(
+        "❌ Не найден интерпретатор venv в %s. "
+        "Создай venv (py -3.11 -m venv .venv), активируй его, "
+        "поставь зависимости и CUDA-сборку torch.",
+        os.path.join(PROJECT_ROOT, ".venv"),
     )
     sys.exit(1)
 
 tunnel_url = None
 
 def stream_output(process, prefix=""):
-    """Читает вывод процесса в фоне и печатает с префиксом"""
+    """Читает вывод процесса в фоне и пишет в лог с префиксом"""
     for line in process.stdout:
         line = line.strip()
         if line:
-            print(f"{prefix} {line}")
+            log.info("%s %s", prefix, line)
 
 def start_backend():
-    print(f"🔧 Запускаю бэкенд ({BACKEND_PYTHON})...")
+    log.info("🔧 Запускаю бэкенд (%s)...", BACKEND_PYTHON)
     process = subprocess.Popen(
         [BACKEND_PYTHON, "-u", "-m", "backend.main"],
         cwd=PROJECT_ROOT,
@@ -70,7 +80,7 @@ def start_backend():
     return process
 
 def start_frontend():
-    print("🎨 Запускаю фронтенд...")
+    log.info("🎨 Запускаю фронтенд...")
     process = subprocess.Popen(
         ["npm", "run", "dev"],
         cwd=os.path.join(PROJECT_ROOT, "frontend"),
@@ -110,7 +120,7 @@ def _spawn_cloudflared_once(timeout: float = 25.0):
             for line in process.stdout:
                 line = line.strip()
                 if line:
-                    print(f"[cloudflare] {line}")
+                    log.info("[cloudflare] %s", line)
             return process, None
 
         line = process.stdout.readline()
@@ -121,11 +131,11 @@ def _spawn_cloudflared_once(timeout: float = 25.0):
 
         line = line.strip()
         if line:
-            print(f"[cloudflare] {line}")
+            log.info("[cloudflare] %s", line)
         match = _TUNNEL_URL_RE.search(line)
         if match:
             url = match.group(0)
-            print(f"\n✅ Tunnel URL: {url}")
+            log.info("✅ Tunnel URL: %s", url)
             # После получения URL читаем остаток в фоне
             threading.Thread(target=stream_output, args=(process, "[cloudflare]"), daemon=True).start()
             return process, url
@@ -152,7 +162,7 @@ def start_cloudflare():
     global tunnel_url
     backoffs = [5, 10, 20, 40]  # 5 attempts total: immediate, then 4 backoff waits
     for attempt in range(1, len(backoffs) + 2):
-        print(f"🚀 Запускаю Cloudflare tunnel (попытка {attempt}/{len(backoffs) + 1})...")
+        log.info("🚀 Запускаю Cloudflare tunnel (попытка %d/%d)...", attempt, len(backoffs) + 1)
         process, url = _spawn_cloudflared_once()
         if url:
             tunnel_url = url
@@ -162,27 +172,28 @@ def start_cloudflare():
         if attempt > len(backoffs):
             break
         delay = backoffs[attempt - 1]
-        print(
-            f"⏳ Cloudflare quick tunnel не поднялся "
-            f"(скорее всего временный 500 на trycloudflare.com). "
-            f"Повтор через {delay}с..."
+        log.warning(
+            "⏳ Cloudflare quick tunnel не поднялся "
+            "(скорее всего временный 500 на trycloudflare.com). "
+            "Повтор через %dс...",
+            delay,
         )
         time.sleep(delay)
 
-    print(
-        "\n⚠️  Cloudflare tunnel так и не запустился после ретраев.\n"
-        "   Backend (http://localhost:8000) и dashboard (http://localhost:5173) работают,\n"
-        "   но Telegram webhook зарегистрировать не удалось — бот не получит входящие\n"
-        "   сообщения, пока quick-tunnels у Cloudflare лежат. Можно перезапустить позже\n"
-        "   или поднять named-tunnel (требует аккаунта CF).\n"
+    log.warning(
+        "⚠️  Cloudflare tunnel так и не запустился после ретраев. "
+        "Backend (http://localhost:8000) и dashboard (http://localhost:5173) работают, "
+        "но Telegram webhook зарегистрировать не удалось — бот не получит входящие "
+        "сообщения, пока quick-tunnels у Cloudflare лежат. Можно перезапустить позже "
+        "или поднять named-tunnel (требует аккаунта CF)."
     )
     return None
 
 def register_webhook(url):
-    print(f"⏳ Жду 10с перед регистрацией webhook ({url})...")
+    log.info("⏳ Жду 10с перед регистрацией webhook (%s)...", url)
     time.sleep(10)
 
-    print(f"📡 Регистрирую webhook в Telegram...")
+    log.info("📡 Регистрирую webhook в Telegram...")
     backoffs = [3, 6, 12, 24]
     last_error = None
     for attempt in range(1, len(backoffs) + 2):
@@ -194,7 +205,7 @@ def register_webhook(url):
             )
             data = response.json()
             if data.get("ok"):
-                print(f"✅ Webhook зарегистрирован!")
+                log.info("✅ Webhook зарегистрирован!")
                 return
             last_error = data
             desc = (data.get("description") or "").lower()
@@ -202,7 +213,7 @@ def register_webhook(url):
             # сами не починятся, и повторы лишь зашумят логи.
             transient = "failed to resolve host" in desc or "name or service not known" in desc
             if not transient:
-                print(f"❌ Ошибка webhook: {data}")
+                log.error("❌ Ошибка webhook: %s", data)
                 return
         except Exception as e:
             last_error = e
@@ -210,17 +221,17 @@ def register_webhook(url):
         if attempt > len(backoffs):
             break
         delay = backoffs[attempt - 1]
-        print(f"⏳ Telegram ещё не резолвит туннель, повтор через {delay}с (попытка {attempt}/{len(backoffs) + 1})...")
+        log.info("⏳ Telegram ещё не резолвит туннель, повтор через %dс (попытка %d/%d)...", delay, attempt, len(backoffs) + 1)
         time.sleep(delay)
 
-    print(f"❌ Ошибка webhook после ретраев: {last_error}")
+    log.error("❌ Ошибка webhook после ретраев: %s", last_error)
 
 if __name__ == "__main__":
     # Запускаем бэкенд и фронтенд параллельно
     backend = start_backend()
     frontend = start_frontend()
 
-    print("⏳ Жду запуска сервисов...")
+    log.info("⏳ Жду запуска сервисов...")
     time.sleep(4)
 
     # Запускаем tunnel с ретраями (None если все попытки провалились)
@@ -228,28 +239,28 @@ if __name__ == "__main__":
 
     if tunnel_url:
         register_webhook(tunnel_url)
-        print("\n" + "="*50)
-        print("✅ ВСЁ ЗАПУЩЕНО!")
-        print(f"🌐 Публичный URL: {tunnel_url}")
-        print(f"📊 Дашборд:       http://localhost:5173")
-        print(f"📡 API docs:       http://localhost:8000/docs")
-        print("="*50)
-        print("\nНажми Ctrl+C для остановки\n")
+        log.info("=" * 50)
+        log.info("✅ ВСЁ ЗАПУЩЕНО!")
+        log.info("🌐 Публичный URL: %s", tunnel_url)
+        log.info("📊 Дашборд:       http://localhost:5173")
+        log.info("📡 API docs:      http://localhost:8000/docs")
+        log.info("=" * 50)
+        log.info("Нажми Ctrl+C для остановки")
     else:
-        print("\n" + "="*50)
-        print("⚠️  ЗАПУЩЕНО ЧАСТИЧНО (без внешнего туннеля)")
-        print(f"📊 Дашборд:       http://localhost:5173")
-        print(f"📡 API docs:       http://localhost:8000/docs")
-        print("   Telegram webhook не зарегистрирован.")
-        print("="*50)
-        print("\nНажми Ctrl+C для остановки\n")
+        log.warning("=" * 50)
+        log.warning("⚠️  ЗАПУЩЕНО ЧАСТИЧНО (без внешнего туннеля)")
+        log.warning("📊 Дашборд:       http://localhost:5173")
+        log.warning("📡 API docs:      http://localhost:8000/docs")
+        log.warning("   Telegram webhook не зарегистрирован.")
+        log.warning("=" * 50)
+        log.warning("Нажми Ctrl+C для остановки")
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 Остановка всех процессов...")
+        log.info("🛑 Остановка всех процессов...")
         _kill(backend)
         _kill(frontend)
         _kill(cloudflare)
-        print("👋 Готово")
+        log.info("👋 Готово")

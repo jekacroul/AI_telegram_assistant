@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     db_path: str = Field(default="./data/database.db", alias="DB_PATH")
     training_data_path: str = Field(default="./training_data/", alias="TRAINING_DATA_PATH")
     models_path: str = Field(default="./models/", alias="MODELS_PATH")
+    logs_path: str = Field(default="./logs/", alias="LOGS_PATH")
     webhook_base_url: Optional[str] = Field(default=None, alias="WEBHOOK_BASE_URL")
     user_name: str = Field(default="Я", alias="USER_NAME")
     hf_base_model: str = Field(default="mistralai/Mistral-7B-Instruct-v0.2", alias="HF_BASE_MODEL")
@@ -53,6 +54,14 @@ class Settings(BaseSettings):
     @property
     def models_dir(self) -> Path:
         path = Path(self.models_path)
+        if not path.is_absolute():
+            path = ROOT_DIR / path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def logs_dir(self) -> Path:
+        path = Path(self.logs_path)
         if not path.is_absolute():
             path = ROOT_DIR / path
         path.mkdir(parents=True, exist_ok=True)
