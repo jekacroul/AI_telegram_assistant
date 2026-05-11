@@ -178,25 +178,9 @@ def start_cloudflare():
     )
     return None
 
-def _wait_for_tunnel_dns(url, timeout=60.0):
-    """Probe the tunnel URL until DNS resolves and it responds, or timeout."""
-    deadline = time.time() + timeout
-    delay = 2.0
-    while time.time() < deadline:
-        try:
-            # Any HTTP response (even 404) means DNS resolved and the tunnel is up.
-            httpx.get(url, timeout=5, follow_redirects=False)
-            return True
-        except Exception:
-            time.sleep(delay)
-            delay = min(delay * 1.5, 8.0)
-    return False
-
-
 def register_webhook(url):
-    print(f"📡 Жду готовности туннеля ({url})...")
-    if not _wait_for_tunnel_dns(url):
-        print("⚠️  Туннель не ответил за 60с, всё равно пробую зарегистрировать webhook...")
+    print(f"⏳ Жду 10с перед регистрацией webhook ({url})...")
+    time.sleep(10)
 
     print(f"📡 Регистрирую webhook в Telegram...")
     backoffs = [3, 6, 12, 24]
