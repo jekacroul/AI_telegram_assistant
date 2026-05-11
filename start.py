@@ -178,21 +178,58 @@ def start_cloudflare():
     )
     return None
 
+def _wait_for_tunnel_dns(url, timeout=60.0):
+    """Probe the tunnel URL until DNS resolves and it responds, or timeout."""
+    deadline = time.time() + timeout
+    delay = 2.0
+    while time.time() < deadline:
+        try:
+            # Any HTTP response (even 404) means DNS resolved and the tunnel is up.
+            httpx.get(url, timeout=5, follow_redirects=False)
+            return True
+        except Exception:
+            time.sleep(delay)
+            delay = min(delay * 1.5, 8.0)
+    return False
+
+
 def register_webhook(url):
+    print(f"📡 Жду готовности туннеля ({url})...")
+    if not _wait_for_tunnel_dns(url):
+        print("⚠️  Туннель не ответил за 60с, всё равно пробую зарегистрировать webhook...")
+
     print(f"📡 Регистрирую webhook в Telegram...")
-    try:
-        response = httpx.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
-            params={"url": f"{url}/webhook/{BOT_TOKEN}"},
-            timeout=10
-        )
-        data = response.json()
-        if data.get("ok"):
-            print(f"✅ Webhook зарегистрирован!")
-        else:
-            print(f"❌ Ошибка webhook: {data}")
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
+    backoffs = [3, 6, 12, 24]
+    last_error = None
+    for attempt in range(1, len(backoffs) + 2):
+        try:
+            response = httpx.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
+                params={"url": f"{url}/webhook/{BOT_TOKEN}"},
+                timeout=10
+            )
+            data = response.json()
+            if data.get("ok"):
+                print(f"✅ Webhook зарегистрирован!")
+                return
+            last_error = data
+            desc = (data.get("description") or "").lower()
+            # Только DNS-резолв имеет смысл ретраить — остальные ошибки конфигурации
+            # сами не починятся, и повторы лишь зашумят логи.
+            transient = "failed to resolve host" in desc or "name or service not known" in desc
+            if not transient:
+                print(f"❌ Ошибка webhook: {data}")
+                return
+        except Exception as e:
+            last_error = e
+
+        if attempt > len(backoffs):
+            break
+        delay = backoffs[attempt - 1]
+        print(f"⏳ Telegram ещё не резолвит туннель, повтор через {delay}с (попытка {attempt}/{len(backoffs) + 1})...")
+        time.sleep(delay)
+
+    print(f"❌ Ошибка webhook после ретраев: {last_error}")
 
 if __name__ == "__main__":
     # Запускаем бэкенд и фронтенд параллельно
