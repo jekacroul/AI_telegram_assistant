@@ -52,13 +52,14 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    async with SessionLocal() as session:
-        token = await get_setting(session, "telegram_bot_token", settings.telegram_bot_token)
+    token = settings.telegram_bot_token
     if token:
         try:
             await telegram_service.setup(token)
         except Exception:  # noqa: BLE001
             log.exception("bot setup failed at startup")
+    else:
+        log.warning("TELEGRAM_BOT_TOKEN is not set; bot will be inactive")
     yield
     await telegram_service.shutdown()
 
@@ -105,13 +106,6 @@ async def status() -> dict:
     }
 
 
-@app.get("/api/webhook/info")
-async def webhook_info() -> dict:
-    if not telegram_service.is_configured:
-        raise HTTPException(400, "bot not configured")
-    return await telegram_service.get_webhook_info()
-
-
 @app.get("/api/chats")
 async def list_chats(session: AsyncSession = Depends(get_session)) -> list[dict]:
     result = await session.execute(
@@ -138,7 +132,6 @@ async def list_chats(session: AsyncSession = Depends(get_session)) -> list[dict]
 
 
 class SettingsIn(BaseModel):
-    telegram_bot_token: Optional[str] = None
     auto_reply: Optional[bool] = None
     monitored_chats: Optional[list[int]] = None
     llm_model: Optional[str] = None
@@ -148,13 +141,6 @@ class SettingsIn(BaseModel):
 async def save_settings(
     payload: SettingsIn, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    if payload.telegram_bot_token is not None:
-        await set_setting(session, "telegram_bot_token", payload.telegram_bot_token)
-        if payload.telegram_bot_token:
-            try:
-                await telegram_service.setup(payload.telegram_bot_token)
-            except Exception as e:  # noqa: BLE001
-                raise HTTPException(400, f"bot setup failed: {e}")
     if payload.auto_reply is not None:
         await set_setting(session, "auto_reply", "1" if payload.auto_reply else "0")
     if payload.monitored_chats is not None:
@@ -168,8 +154,6 @@ async def save_settings(
 
 @app.get("/api/settings")
 async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
-    token = await get_setting(session, "telegram_bot_token", settings.telegram_bot_token)
-    masked = (token[:6] + "..." + token[-4:]) if len(token) > 12 else ("set" if token else "")
     auto_reply = (
         await get_setting(session, "auto_reply", "1" if settings.auto_reply else "0")
     ) in ("1", "true", "True")
@@ -177,8 +161,6 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
     monitored = [int(x) for x in monitored_csv.split(",") if x.strip()]
     llm_model = await get_setting(session, "llm_model", settings.openai_model)
     return {
-        "telegram_bot_token_masked": masked,
-        "telegram_bot_token_set": bool(token),
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
         "llm_model": llm_model,
@@ -508,24 +490,6 @@ async def telegram_webhook(token: str, request: Request) -> JSONResponse:
     except Exception:  # noqa: BLE001
         log.exception("webhook processing failed")
     return JSONResponse({"ok": True})
-
-
-class WebhookIn(BaseModel):
-    url: str
-
-
-@app.post("/api/webhook/set")
-async def webhook_set(payload: WebhookIn) -> dict:
-    if not telegram_service.is_configured:
-        raise HTTPException(400, "bot not configured")
-    await telegram_service.set_webhook(payload.url)
-    return {"ok": True, "url": payload.url}
-
-
-@app.post("/api/webhook/remove")
-async def webhook_remove() -> dict:
-    await telegram_service.remove_webhook()
-    return {"ok": True}
 
 
 frontend_dist = ROOT_DIR / "frontend" / "dist"
