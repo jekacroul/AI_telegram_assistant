@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
 import "./index.css";
 import Dashboard from "./pages/Dashboard.jsx";
+import Dialogs from "./pages/Dialogs.jsx";
 import Training from "./pages/Training.jsx";
 import StyleProfile from "./pages/StyleProfile.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -20,6 +21,7 @@ function Layout() {
           <nav className="flex items-center gap-1">
             {[
               ["/", "Дашборд"],
+              ["/dialogs", "Диалоги"],
               ["/training", "Обучение"],
               ["/style", "Стиль"],
               ["/settings", "Настройки"],
@@ -41,6 +43,7 @@ function Layout() {
       <main className="max-w-6xl mx-auto px-6 py-6">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/dialogs" element={<Dialogs />} />
           <Route path="/training" element={<Training />} />
           <Route path="/style" element={<StyleProfile />} />
           <Route path="/settings" element={<Settings />} />

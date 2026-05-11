@@ -67,6 +67,17 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
   listModels: () => request("/api/llm/models"),
+  dialogsChats: () => request("/api/dialogs/chats"),
+  dialogsVersions: (chat_id) => request(`/api/dialogs/${chat_id}/versions`),
+  dialogsBackup: (backup_id) => request(`/api/dialogs/backup/${backup_id}`),
+  dialogsSettings: () => request("/api/dialogs/settings"),
+  saveDialogsSettings: (data) =>
+    request("/api/dialogs/settings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  dialogsRunBackup: () =>
+    request("/api/dialogs/run-backup", { method: "POST" }),
 };
 
 export function streamEvents(path, onEvent) {

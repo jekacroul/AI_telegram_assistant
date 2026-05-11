@@ -10,12 +10,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
-from aiogram.types import Message as TgMessage
+from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
 from sqlalchemy import select
 
 from .config import settings
 from .database import Message, SessionLocal, get_setting
+from .dialog_backup import mark_messages_deleted
 
 ALLOWED_UPDATES = [
     "message",
@@ -110,6 +111,18 @@ class TelegramService:
         async def on_business_edit(message: TgMessage) -> None:
             self._mark_update("edited_business_message")
             await self.handle_incoming(message)
+
+        @dp.deleted_business_messages()
+        async def on_business_deleted(event: BusinessMessagesDeleted) -> None:
+            self._mark_update("deleted_business_messages")
+            try:
+                chat_id = event.chat.id if event.chat else None
+                ids = list(event.message_ids or [])
+                if chat_id is not None and ids:
+                    await mark_messages_deleted(chat_id, ids)
+            except Exception as e:  # noqa: BLE001
+                self.last_error = str(e)
+                log.exception("deleted_business_messages handling failed")
 
     def _mark_update(self, kind: str) -> None:
         self.last_update_at = datetime.utcnow()

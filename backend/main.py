@@ -21,6 +21,8 @@ from .bot import telegram_service
 from .config import ROOT_DIR, settings
 from .logging_setup import setup_logging
 from .database import (
+    DialogBackup,
+    DialogBackupMessage,
     Message,
     SessionLocal,
     TrainingPair,
@@ -30,6 +32,15 @@ from .database import (
     set_setting,
 )
 from .dataset_builder import build_dataset_file, dataset_stats
+from .dialog_backup import (
+    DEFAULT_INTERVAL_HOURS,
+    SETTING_INTERVAL,
+    SETTING_LAST_RUN,
+    get_excluded_chats,
+    get_interval_hours,
+    scheduler as dialog_backup_scheduler,
+    set_excluded_chats,
+)
 from .event_bus import message_bus, training_bus
 from .llm_engine import LLMUnavailableError, get_client
 from .style_engine import (
@@ -61,7 +72,9 @@ async def lifespan(app: FastAPI):
             log.exception("bot setup failed at startup")
     else:
         log.warning("TELEGRAM_BOT_TOKEN is not set; bot will be inactive")
+    dialog_backup_scheduler.start()
     yield
+    await dialog_backup_scheduler.stop()
     await telegram_service.shutdown()
 
 
@@ -479,6 +492,163 @@ async def llm_test(payload: TestIn, session: AsyncSession = Depends(get_session)
     except LLMUnavailableError as e:
         raise HTTPException(503, str(e))
     return {"prompt": payload.text, "variants": variants}
+
+
+@app.get("/api/dialogs/chats")
+async def dialogs_chats(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    chats_result = await session.execute(
+        select(
+            Message.chat_id,
+            func.max(Message.chat_name).label("chat_name"),
+            func.count(Message.id).label("count"),
+            func.max(Message.timestamp).label("last"),
+        )
+        .where(Message.deleted == False)  # noqa: E712
+        .group_by(Message.chat_id)
+    )
+    chats = chats_result.all()
+
+    backups_result = await session.execute(
+        select(
+            DialogBackup.chat_id,
+            func.count(DialogBackup.id).label("versions"),
+            func.max(DialogBackup.version).label("latest_version"),
+            func.max(DialogBackup.created_at).label("latest_backup_at"),
+        ).group_by(DialogBackup.chat_id)
+    )
+    by_chat = {
+        r.chat_id: {
+            "versions": r.versions,
+            "latest_version": r.latest_version,
+            "latest_backup_at": r.latest_backup_at.isoformat()
+            if r.latest_backup_at
+            else None,
+        }
+        for r in backups_result.all()
+    }
+    excluded = await get_excluded_chats(session)
+
+    return [
+        {
+            "chat_id": c.chat_id,
+            "chat_name": c.chat_name or "",
+            "message_count": c.count,
+            "last_message_at": c.last.isoformat() if c.last else None,
+            "excluded": c.chat_id in excluded,
+            "versions": by_chat.get(c.chat_id, {}).get("versions", 0),
+            "latest_version": by_chat.get(c.chat_id, {}).get("latest_version"),
+            "latest_backup_at": by_chat.get(c.chat_id, {}).get("latest_backup_at"),
+        }
+        for c in chats
+    ]
+
+
+@app.get("/api/dialogs/{chat_id}/versions")
+async def dialogs_versions(
+    chat_id: int, session: AsyncSession = Depends(get_session)
+) -> list[dict]:
+    result = await session.execute(
+        select(DialogBackup)
+        .where(DialogBackup.chat_id == chat_id)
+        .order_by(desc(DialogBackup.version))
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "id": b.id,
+            "chat_id": b.chat_id,
+            "chat_name": b.chat_name,
+            "version": b.version,
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+            "message_count": b.message_count,
+        }
+        for b in rows
+    ]
+
+
+@app.get("/api/dialogs/backup/{backup_id}")
+async def dialogs_backup_content(
+    backup_id: int, session: AsyncSession = Depends(get_session)
+) -> dict:
+    backup_q = await session.execute(
+        select(DialogBackup).where(DialogBackup.id == backup_id)
+    )
+    backup = backup_q.scalar_one_or_none()
+    if not backup:
+        raise HTTPException(404, "backup not found")
+    msg_q = await session.execute(
+        select(DialogBackupMessage)
+        .where(DialogBackupMessage.backup_id == backup_id)
+        .order_by(DialogBackupMessage.timestamp, DialogBackupMessage.id)
+    )
+    rows = msg_q.scalars().all()
+    return {
+        "backup": {
+            "id": backup.id,
+            "chat_id": backup.chat_id,
+            "chat_name": backup.chat_name,
+            "version": backup.version,
+            "created_at": backup.created_at.isoformat() if backup.created_at else None,
+            "message_count": backup.message_count,
+        },
+        "messages": [
+            {
+                "id": m.id,
+                "sender_id": m.sender_id,
+                "sender_name": m.sender_name,
+                "is_mine": m.is_mine,
+                "text": m.text,
+                "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+                "message_id": m.message_id,
+            }
+            for m in rows
+        ],
+    }
+
+
+@app.get("/api/dialogs/settings")
+async def dialogs_settings(session: AsyncSession = Depends(get_session)) -> dict:
+    excluded = sorted(await get_excluded_chats(session))
+    interval = await get_interval_hours(session)
+    last_run = await get_setting(session, SETTING_LAST_RUN, "")
+    return {
+        "excluded_chats": list(excluded),
+        "interval_hours": interval,
+        "last_run_at": last_run or None,
+        "running": dialog_backup_scheduler.last_result is not None,
+        "last_error": dialog_backup_scheduler.last_error,
+    }
+
+
+class DialogSettingsIn(BaseModel):
+    excluded_chats: Optional[list[int]] = None
+    interval_hours: Optional[int] = None
+
+
+@app.post("/api/dialogs/settings")
+async def save_dialogs_settings(
+    payload: DialogSettingsIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    if payload.excluded_chats is not None:
+        await set_excluded_chats(session, payload.excluded_chats)
+    if payload.interval_hours is not None:
+        value = max(1, int(payload.interval_hours))
+        await set_setting(session, SETTING_INTERVAL, str(value))
+        dialog_backup_scheduler.trigger()
+    return {"ok": True}
+
+
+@app.post("/api/dialogs/run-backup")
+async def dialogs_run_backup() -> dict:
+    result = await dialog_backup_scheduler.run_now()
+    return {
+        "started_at": result.started_at.isoformat(),
+        "finished_at": result.finished_at.isoformat(),
+        "chats_processed": result.chats_processed,
+        "new_versions": result.new_versions,
+        "skipped": result.skipped,
+        "excluded": result.excluded,
+    }
 
 
 @app.post("/webhook/{token}")
