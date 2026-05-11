@@ -19,6 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from .bot import telegram_service
 from .config import ROOT_DIR, settings
+from .logging_setup import setup_logging
 from .database import (
     Message,
     SessionLocal,
@@ -45,7 +46,7 @@ from .trainer import (
 )
 
 
-logging.basicConfig(level=logging.INFO)
+setup_logging(settings.logs_dir, level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
