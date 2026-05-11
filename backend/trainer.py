@@ -5,9 +5,17 @@ import contextlib
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+
+def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -272,8 +280,8 @@ async def list_runs() -> list[dict]:
             {
                 "id": r.id,
                 "version": r.version,
-                "started_at": r.started_at.isoformat() if r.started_at else None,
-                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                "started_at": _iso_utc(r.started_at),
+                "finished_at": _iso_utc(r.finished_at),
                 "pair_count": r.pair_count,
                 "final_loss": r.final_loss,
                 "adapter_path": r.adapter_path,

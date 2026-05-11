@@ -45,6 +45,35 @@ class Message(Base):
     business_connection_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True
     )
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
+class DialogBackup(Base):
+    __tablename__ = "dialog_backups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(Integer, index=True)
+    chat_name: Mapped[str] = mapped_column(String(255), default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    signature: Mapped[str] = mapped_column(String(64), default="")
+
+
+class DialogBackupMessage(Base):
+    __tablename__ = "dialog_backup_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    backup_id: Mapped[int] = mapped_column(
+        ForeignKey("dialog_backups.id", ondelete="CASCADE"), index=True
+    )
+    chat_id: Mapped[int] = mapped_column(Integer, index=True)
+    sender_id: Mapped[int] = mapped_column(Integer, default=0)
+    sender_name: Mapped[str] = mapped_column(String(255), default="")
+    is_mine: Mapped[bool] = mapped_column(Boolean, default=False)
+    text: Mapped[str] = mapped_column(Text, default="")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class TrainingPair(Base):
@@ -105,6 +134,10 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "business_connection_id" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN business_connection_id VARCHAR(128)"
+        )
+    if "deleted" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN deleted BOOLEAN DEFAULT 0 NOT NULL"
         )
 
 

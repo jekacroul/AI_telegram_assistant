@@ -2,20 +2,34 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+
+def _naive_utc(dt: Optional[datetime]) -> datetime:
+    """Return a tz-naive datetime in UTC for storage in a naive DateTime column."""
+    if dt is None:
+        return datetime.utcnow()
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
-from aiogram.types import Message as TgMessage
+from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
 from sqlalchemy import select
 
 from .config import settings
 from .database import Message, SessionLocal, get_setting
+from .dialog_backup import mark_messages_deleted
 
 ALLOWED_UPDATES = [
     "message",
@@ -111,6 +125,18 @@ class TelegramService:
             self._mark_update("edited_business_message")
             await self.handle_incoming(message)
 
+        @dp.deleted_business_messages()
+        async def on_business_deleted(event: BusinessMessagesDeleted) -> None:
+            self._mark_update("deleted_business_messages")
+            try:
+                chat_id = event.chat.id if event.chat else None
+                ids = list(event.message_ids or [])
+                if chat_id is not None and ids:
+                    await mark_messages_deleted(chat_id, ids)
+            except Exception as e:  # noqa: BLE001
+                self.last_error = str(e)
+                log.exception("deleted_business_messages handling failed")
+
     def _mark_update(self, kind: str) -> None:
         self.last_update_at = datetime.utcnow()
         self.last_update_kind = kind
@@ -199,6 +225,7 @@ class TelegramService:
                     mentioned = True
                 should_reply = mentioned
 
+            tg_ts = _naive_utc(getattr(tg_msg, "date", None))
             async with SessionLocal() as session:
                 row = Message(
                     chat_id=chat_id,
@@ -207,7 +234,7 @@ class TelegramService:
                     sender_name=settings.user_name if is_mine else sender_name,
                     is_mine=is_mine,
                     text=content_text,
-                    timestamp=datetime.utcnow(),
+                    timestamp=tg_ts,
                     message_id=tg_msg.message_id,
                     business_connection_id=business_connection_id,
                 )
@@ -239,7 +266,7 @@ class TelegramService:
                 "text": content_text,
                 "is_mine": is_mine,
                 "business": is_business,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": _iso_utc_now(),
                 "auto_reply": auto_reply,
                 "will_reply": should_reply,
             })
@@ -360,7 +387,7 @@ class TelegramService:
             "chat_name": chat_name,
             "to": sender_name,
             "text": reply_text,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": _iso_utc_now(),
             "original_id": original_id,
         })
 
@@ -413,7 +440,7 @@ class TelegramService:
         await message_bus.publish("sent", {
             "chat_id": chat_id,
             "text": text,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": _iso_utc_now(),
             "original_id": original_id,
         })
 
