@@ -262,11 +262,17 @@ def run_training(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     log("step:training_args")
+    # Defaults tuned for a 12 GB card (RTX 3060). 4-bit 12B base ~6 GB +
+    # activations + optimizer state pushes close to the limit at batch=4,
+    # so use batch=2 with accumulation=4 (same effective batch of 8) and
+    # gradient checkpointing to trade speed for VRAM headroom.
     training_args = SFTConfig(
         output_dir=str(output_dir),
         num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         learning_rate=2e-4,
         logging_steps=1,
         save_strategy="no",
