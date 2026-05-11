@@ -143,6 +143,16 @@ export default function Training() {
             {progress.phase === "done" && progress.final_loss != null && (
               <span>Final loss: <b>{progress.final_loss.toFixed(4)}</b></span>
             )}
+            {progress.phase === "done" && progress.gguf_path && (
+              <span className="text-good">
+                GGUF: <code className="text-xs">{progress.gguf_path}</code>
+              </span>
+            )}
+            {progress.phase === "done" && progress.gguf_path === null && (
+              <span className="text-muted">
+                GGUF не сконвертирован (настрой LLAMA_CPP_PATH в .env)
+              </span>
+            )}
           </div>
           {progress.phase === "training" && progress.max_steps > 0 && (
             <div className="mt-2 h-2 bg-white/10 rounded">

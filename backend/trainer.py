@@ -180,6 +180,18 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
 
         adapter_path = final_result.get("adapter_path") or str(output_dir)
         was_cancelled = bool(final_result.get("cancelled")) or training_state.cancelled
+
+        gguf_path: Optional[Path] = None
+        if not was_cancelled:
+            from .gguf_export import convert_adapter_to_gguf
+            await _emit({"phase": "converting_gguf", "version": version})
+            gguf_path = await asyncio.to_thread(
+                convert_adapter_to_gguf,
+                Path(adapter_path),
+                settings.llama_cpp_path,
+                settings.lm_studio_adapters_dir,
+            )
+
         async with SessionLocal() as session:
             res = await session.execute(
                 select(TrainingRun).where(TrainingRun.id == run_id)
@@ -200,6 +212,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
         await _emit({
             "phase": "cancelled" if was_cancelled else "done",
             "adapter_path": adapter_path,
+            "gguf_path": str(gguf_path) if gguf_path else None,
             "final_loss": final_result.get("final_loss"),
             "version": version,
         })

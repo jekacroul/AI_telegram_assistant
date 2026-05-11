@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     user_name: str = Field(default="Я", alias="USER_NAME")
     hf_base_model: str = Field(default="mistralai/Mistral-7B-Instruct-v0.2", alias="HF_BASE_MODEL")
     llm_max_tokens: int = Field(default=2048, alias="LLM_MAX_TOKENS")
+    llama_cpp_path: Optional[str] = Field(default=None, alias="LLAMA_CPP_PATH")
+    lm_studio_adapters_dir: Optional[str] = Field(default=None, alias="LM_STUDIO_ADAPTERS_DIR")
 
     @property
     def db_url(self) -> str:
