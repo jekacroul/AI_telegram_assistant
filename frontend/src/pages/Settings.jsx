@@ -13,6 +13,10 @@ export default function Settings() {
   const [test, setTest] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [notify, setNotify] = useState({ chat_id: "", enabled: true });
+  const [notifySaving, setNotifySaving] = useState(false);
+  const [notifyMsg, setNotifyMsg] = useState("");
+  const [notifyError, setNotifyError] = useState("");
 
   const modelOptions = useMemo(() => {
     const list = [...models];
@@ -38,6 +42,15 @@ export default function Settings() {
     } catch (e) {
       setModels([]);
       setModelsError(e.message || "не удалось получить список моделей");
+    }
+    try {
+      const n = await api.getNotifyChat();
+      setNotify({
+        chat_id: n.chat_id || "",
+        enabled: n.enabled !== false,
+      });
+    } catch {
+      // ignore
     }
   };
 
@@ -65,6 +78,35 @@ export default function Settings() {
       setTest({ loading: false, ...res });
     } catch (e) {
       setTest({ loading: false, error: e.message });
+    }
+  }
+
+  async function saveNotify() {
+    setNotifySaving(true);
+    setNotifyError("");
+    setNotifyMsg("");
+    try {
+      await api.saveNotifyChat({
+        chat_id: notify.chat_id.trim(),
+        enabled: !!notify.enabled,
+      });
+      setNotifyMsg("Сохранено");
+    } catch (e) {
+      setNotifyError(e.message);
+    } finally {
+      setNotifySaving(false);
+    }
+  }
+
+  async function detectNotify() {
+    setNotifyError("");
+    setNotifyMsg("");
+    try {
+      const res = await api.detectNotifyChat();
+      setNotify((prev) => ({ ...prev, chat_id: String(res.chat_id || "") }));
+      setNotifyMsg("chat_id определён. Не забудь сохранить.");
+    } catch (e) {
+      setNotifyError(e.message);
     }
   }
 
@@ -155,6 +197,64 @@ export default function Settings() {
           Test model
         </button>
         {error && <span className="text-bad text-sm self-center">{error}</span>}
+      </div>
+
+      <div className="card">
+        <div className="label">Уведомления</div>
+        <label className="flex items-start gap-3 mt-2">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!notify.enabled}
+            onChange={(e) =>
+              setNotify((prev) => ({ ...prev, enabled: e.target.checked }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">
+              Уведомлять когда бот отвечает
+            </div>
+            <div className="text-xs text-muted">
+              Бот пришлёт сообщение в указанный чат после каждого авто-ответа.
+            </div>
+          </div>
+        </label>
+
+        <div className="mt-3">
+          <div className="label">Ваш chat_id</div>
+          <div className="flex gap-2 mt-1">
+            <input
+              className="input flex-1"
+              placeholder="например, 123456789"
+              value={notify.chat_id}
+              onChange={(e) =>
+                setNotify((prev) => ({ ...prev, chat_id: e.target.value }))
+              }
+            />
+            <button className="btn-secondary" onClick={detectNotify}>
+              Определить автоматически
+            </button>
+          </div>
+          <div className="text-xs text-muted mt-1">
+            Напишите боту /start в личку, затем нажмите «Определить автоматически».
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-3 items-center">
+          <button
+            className="btn-primary"
+            onClick={saveNotify}
+            disabled={notifySaving}
+          >
+            Сохранить уведомления
+          </button>
+          {notifyMsg && (
+            <span className="text-good text-sm">{notifyMsg}</span>
+          )}
+          {notifyError && (
+            <span className="text-bad text-sm">{notifyError}</span>
+          )}
+        </div>
       </div>
 
       {test && (
