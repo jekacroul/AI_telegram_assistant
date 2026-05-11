@@ -27,6 +27,9 @@ export default function Dialogs() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [intervalDraft, setIntervalDraft] = useState("24");
+  const [savingInterval, setSavingInterval] = useState(false);
+  const [intervalSaved, setIntervalSaved] = useState(false);
 
   const excludedSet = useMemo(
     () => new Set((settings.excluded_chats || []).map((x) => Number(x))),
@@ -38,6 +41,7 @@ export default function Dialogs() {
       const [c, s] = await Promise.all([api.dialogsChats(), api.dialogsSettings()]);
       setChats(c);
       setSettings(s);
+      setIntervalDraft(String(s.interval_hours ?? 24));
     } catch (e) {
       setError(e.message || String(e));
     }
@@ -119,36 +123,67 @@ export default function Dialogs() {
     }
   }
 
-  async function saveInterval(hours) {
-    const value = Math.max(1, parseInt(hours, 10) || 24);
-    setSettings((s) => ({ ...s, interval_hours: value }));
+  async function saveInterval() {
+    const parsed = parseInt(intervalDraft, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setError("Интервал должен быть целым числом ≥ 1");
+      return;
+    }
+    setSavingInterval(true);
+    setError("");
     try {
-      await api.saveDialogsSettings({ interval_hours: value });
+      await api.saveDialogsSettings({ interval_hours: parsed });
+      setSettings((s) => ({ ...s, interval_hours: parsed }));
+      setIntervalDraft(String(parsed));
+      setIntervalSaved(true);
+      setTimeout(() => setIntervalSaved(false), 1500);
     } catch (e) {
       setError(e.message || String(e));
+    } finally {
+      setSavingInterval(false);
     }
   }
+
+  const intervalDirty =
+    String(settings.interval_hours ?? "") !== intervalDraft.trim();
 
   const selectedChat = chats.find((c) => c.chat_id === selectedChatId);
 
   return (
     <div className="space-y-4">
       <div className="card flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col">
+        <div className="flex flex-col gap-1">
           <div className="text-sm">
             Резервные копии диалогов — снэпшоты по версиям.
           </div>
           <div className="text-xs text-muted">
-            Последний запуск: {formatDate(settings.last_run_at) || "—"} ·
-            интервал:{" "}
+            Последний запуск: {formatDate(settings.last_run_at) || "—"}
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-xs text-muted">Интервал, ч:</span>
             <input
               type="number"
               min={1}
-              className="input inline-block w-20 ml-1 mr-1 py-0.5 text-xs"
-              defaultValue={settings.interval_hours}
-              onBlur={(e) => saveInterval(e.target.value)}
-            />{" "}
-            ч
+              className="input w-20 py-1 text-xs"
+              value={intervalDraft}
+              onChange={(e) => setIntervalDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && intervalDirty) saveInterval();
+              }}
+            />
+            <button
+              className="btn-secondary disabled:opacity-50"
+              onClick={saveInterval}
+              disabled={!intervalDirty || savingInterval}
+            >
+              {savingInterval ? "Сохраняю…" : "Сохранить"}
+            </button>
+            {intervalSaved && (
+              <span className="text-xs text-good">Сохранено</span>
+            )}
+            {intervalDirty && !savingInterval && !intervalSaved && (
+              <span className="text-xs text-muted">не сохранено</span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
