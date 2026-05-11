@@ -101,7 +101,7 @@ export default function Dashboard() {
         <div className="card text-sm text-muted">
           ⚠️ Апдейтов от Telegram пока не приходило. Проверь:
           <ul className="list-disc ml-5 mt-1 space-y-0.5">
-            <li>webhook установлен (Настройки → блок Webhook → Info)</li>
+            <li>webhook зарегистрирован при старте через start.py (Cloudflare tunnel)</li>
             <li>в Telegram → Settings → Business → Chatbots бот подключён, и в Manage messages выбраны нужные чаты</li>
             <li>backend доступен по HTTPS снаружи (ngrok/cloudflared)</li>
           </ul>

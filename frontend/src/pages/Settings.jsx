@@ -3,22 +3,16 @@ import { api } from "../lib/api.js";
 
 export default function Settings() {
   const [s, setS] = useState({
-    telegram_bot_token: "",
     auto_reply: false,
     monitored_chats: [],
     llm_model: "",
   });
-  const [tokenSet, setTokenSet] = useState(false);
-  const [tokenMasked, setTokenMasked] = useState("");
   const [chats, setChats] = useState([]);
   const [models, setModels] = useState([]);
   const [modelsError, setModelsError] = useState("");
   const [test, setTest] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [webhook, setWebhook] = useState(null);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookBusy, setWebhookBusy] = useState(false);
 
   const modelOptions = useMemo(() => {
     const list = [...models];
@@ -31,8 +25,6 @@ export default function Settings() {
   const refresh = async () => {
     const [cs, st] = await Promise.all([api.chats(), api.getSettings()]);
     setChats(cs);
-    setTokenSet(!!st.telegram_bot_token_set);
-    setTokenMasked(st.telegram_bot_token_masked || "");
     setS((prev) => ({
       ...prev,
       auto_reply: !!st.auto_reply,
@@ -57,10 +49,7 @@ export default function Settings() {
     setSaving(true);
     setError("");
     try {
-      const payload = { ...s };
-      if (!payload.telegram_bot_token) delete payload.telegram_bot_token;
-      await api.saveSettings(payload);
-      setS((prev) => ({ ...prev, telegram_bot_token: "" }));
+      await api.saveSettings(s);
       refresh();
     } catch (e) {
       setError(e.message);
@@ -90,20 +79,6 @@ export default function Settings() {
 
   return (
     <div className="space-y-4">
-      <div className="card">
-        <div className="label">Telegram Bot Token</div>
-        <div className="text-xs text-muted mt-1">
-          Текущий: {tokenSet ? tokenMasked : "не задан"}
-        </div>
-        <input
-          className="input mt-2"
-          type="password"
-          placeholder="123456:ABC-..."
-          value={s.telegram_bot_token}
-          onChange={(e) => setS({ ...s, telegram_bot_token: e.target.value })}
-        />
-      </div>
-
       <div className="card">
         <div className="label">Модель LM Studio</div>
         <select
@@ -180,65 +155,6 @@ export default function Settings() {
           Test model
         </button>
         {error && <span className="text-bad text-sm self-center">{error}</span>}
-      </div>
-
-      <div className="card">
-        <div className="label">Webhook</div>
-        <div className="flex gap-2 mt-2">
-          <input
-            className="input"
-            placeholder="https://your-host/webhook/<TOKEN>"
-            value={webhookUrl}
-            onChange={(e) => setWebhookUrl(e.target.value)}
-          />
-          <button
-            className="btn-primary"
-            disabled={webhookBusy || !webhookUrl}
-            onClick={async () => {
-              setWebhookBusy(true);
-              try {
-                await api.setWebhook(webhookUrl);
-                setWebhook(await api.webhookInfo());
-              } catch (e) {
-                setError(e.message);
-              } finally {
-                setWebhookBusy(false);
-              }
-            }}
-          >
-            Установить
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={async () => {
-              try {
-                setWebhook(await api.webhookInfo());
-              } catch (e) {
-                setError(e.message);
-              }
-            }}
-          >
-            Info
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={async () => {
-              await api.removeWebhook();
-              setWebhook(null);
-            }}
-          >
-            Удалить
-          </button>
-        </div>
-        {webhook && (
-          <pre className="mt-3 text-xs bg-bg p-2 rounded overflow-auto">
-            {JSON.stringify(webhook, null, 2)}
-          </pre>
-        )}
-        <div className="text-xs text-muted mt-2">
-          Для Telegram Premium «Chat Automation» нужен публичный HTTPS.
-          Локально — через ngrok / cloudflared.
-        </div>
       </div>
 
       {test && (

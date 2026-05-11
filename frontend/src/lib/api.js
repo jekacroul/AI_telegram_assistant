@@ -67,13 +67,6 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
   listModels: () => request("/api/llm/models"),
-  webhookInfo: () => request("/api/webhook/info"),
-  setWebhook: (url) =>
-    request("/api/webhook/set", {
-      method: "POST",
-      body: JSON.stringify({ url }),
-    }),
-  removeWebhook: () => request("/api/webhook/remove", { method: "POST" }),
 };
 
 export function streamEvents(path, onEvent) {
