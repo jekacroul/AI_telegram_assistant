@@ -216,7 +216,7 @@ def run_training(
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_compute_dtype=torch.bfloat16,
         bnb_4bit_use_double_quant=True,
     )
 
@@ -271,7 +271,7 @@ def run_training(
         logging_steps=1,
         save_strategy="no",
         report_to=[],
-        fp16=True,
+        bf16=True,
         optim="paged_adamw_8bit",
         dataset_text_field="text",
         max_length=1024,
