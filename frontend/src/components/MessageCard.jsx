@@ -5,6 +5,11 @@ function initials(name) {
   const parts = name.trim().split(/\s+/);
   return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
 }
+function isMediaPlaceholder(text) {
+  return ["(фото)", "(видео)", "(кружок)", "(photo)", "(video)"].includes(
+    (text || "").trim().toLowerCase()
+  );
+}
 
 export default function MessageCard({ msg, onReply, onFeedback }) {
   const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "";
@@ -26,7 +31,7 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
           <span className="text-xs text-muted">в {msg.chat_name}</span>
           <span className="text-xs text-muted ml-auto">{ts}</span>
         </div>
-        {msg.text && (
+        {msg.text && !(msg.media_path && isMediaPlaceholder(msg.text)) && (
           <div className="text-sm whitespace-pre-wrap break-words">{msg.text}</div>
         )}
         {msg.media_type === "photo" && msg.media_path && (

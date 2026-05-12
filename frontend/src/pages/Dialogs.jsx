@@ -12,6 +12,11 @@ function formatTime(iso) {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+function isMediaPlaceholder(text) {
+  return ["(фото)", "(видео)", "(кружок)", "(photo)", "(video)"].includes(
+    (text || "").trim().toLowerCase()
+  );
+}
 
 export default function Dialogs() {
   const [chats, setChats] = useState([]);
@@ -400,7 +405,7 @@ export default function Dialogs() {
                             {m.sender_name || "собеседник"}
                           </div>
                         )}
-                        {m.text && (
+                        {m.text && !(m.media_path && isMediaPlaceholder(m.text)) && (
                           <div className="whitespace-pre-wrap break-words">
                             {m.text}
                           </div>
