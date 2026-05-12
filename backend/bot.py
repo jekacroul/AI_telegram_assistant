@@ -262,6 +262,15 @@ class TelegramService:
             if tg_msg.chat.type == ChatType.CHANNEL:
                 return
             content_text, media_type, media_file_id, media_file_unique_id, is_view_once = self._extract_message_content(tg_msg)
+            
+            # Debug logging for media messages (including view-once which have no file_id)
+            if media_type or is_view_once:
+                log.info(
+                    f"Media message detected: type={media_type}, "
+                    f"file_id={media_file_id[:20] if media_file_id else 'N/A'}, "
+                    f"is_view_once={is_view_once}"
+                )
+            
             if not content_text:
                 return
 
