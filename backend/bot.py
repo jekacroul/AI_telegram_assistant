@@ -186,10 +186,16 @@ class TelegramService:
             return False, True
         if getattr(tg_msg, "media_has_scheduled", False):
             return False, True
-        # Check for view-once photo/video (Telegram API fields)
-        if getattr(tg_msg, "photo", None) and getattr(tg_msg.photo[-1] if tg_msg.photo else None, "file_size", 0) > 0:
-            # Regular photo - can be saved
-            pass
+        # Check for view-once photo (self-destructing)
+        photo = getattr(tg_msg, "photo", None)
+        if photo:
+            # Check if it's a view-once photo (no file_size or special flag)
+            last_photo = photo[-1] if photo else None
+            if last_photo and getattr(last_photo, "file_size", 0) == 0:
+                return False, True
+        # Check for view-once video (video note with special flag)
+        if getattr(tg_msg, "video_note", None):
+            return False, True
         return True, False
 
     async def _download_and_save_media(
@@ -235,6 +241,11 @@ class TelegramService:
             if doc.mime_type and doc.mime_type.startswith(("image/", "video/")):
                 file_id = doc.file_id
                 media_type = "document"
+
+        if not file_id and getattr(tg_msg, "video_note", None):
+            # Video note (circle) - treat as video
+            file_id = tg_msg.video_note.file_id
+            media_type = "video"
 
         if not file_id:
             return None, None
