@@ -283,12 +283,19 @@ class TelegramService:
             chat_username = getattr(tg_msg.chat, "username", None) or (
                 sender.username if sender else ""
             )
+            chat_full_name = (getattr(tg_msg.chat, "full_name", None) or "").strip()
+            chat_first = (getattr(tg_msg.chat, "first_name", None) or "").strip()
+            chat_last = (getattr(tg_msg.chat, "last_name", None) or "").strip()
+            chat_person_name = f"{chat_first} {chat_last}".strip()
             chat_name = (
                 tg_msg.chat.title
-                or (sender.full_name if sender else "")
+                or chat_full_name
+                or chat_person_name
                 or chat_username
                 or str(chat_id)
             )
+            if is_business and not is_mine and chat_name:
+                sender_name = chat_name
 
             self._cancel_delayed_reply(chat_id)
 
