@@ -50,6 +50,9 @@ class Message(Base):
         String(128), nullable=True
     )
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    media_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    media_private: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class DialogBackup(Base):
@@ -80,6 +83,9 @@ class DialogBackupMessage(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    media_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    media_private: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class TrainingPair(Base):
@@ -164,6 +170,32 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "chat_username" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN chat_username VARCHAR(255) DEFAULT '' NOT NULL"
+        )
+    if "media_type" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN media_type VARCHAR(32)"
+        )
+    if "media_path" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN media_path VARCHAR(1024)"
+        )
+    if "media_private" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN media_private BOOLEAN DEFAULT 0 NOT NULL"
+        )
+
+    backup_columns = {col["name"] for col in inspector.get_columns("dialog_backup_messages")}
+    if "media_type" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_type VARCHAR(32)"
+        )
+    if "media_path" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_path VARCHAR(1024)"
+        )
+    if "media_private" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_private BOOLEAN DEFAULT 0 NOT NULL"
         )
 
 

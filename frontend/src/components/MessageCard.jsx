@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 function initials(name) {
   if (!name) return "?";
@@ -9,6 +9,7 @@ function initials(name) {
 export default function MessageCard({ msg, onReply, onFeedback }) {
   const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "";
   const isMine = msg.is_mine;
+  const [openMedia, setOpenMedia] = useState(false);
 
   return (
     <div className="card flex gap-3 items-start">
@@ -26,6 +27,29 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
           <span className="text-xs text-muted ml-auto">{ts}</span>
         </div>
         <div className="text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+        {msg.media_type === "photo" && msg.media_path && (
+          <button className="mt-2 block" onClick={() => setOpenMedia(true)}>
+            <img
+              src={msg.media_path}
+              alt="photo"
+              className="max-h-56 rounded-lg border border-white/10 object-cover"
+            />
+          </button>
+        )}
+        {(msg.media_type === "video" || msg.media_type === "video_note") &&
+          msg.media_path && (
+            <button className="mt-2 block" onClick={() => setOpenMedia(true)}>
+              <video
+                src={msg.media_path}
+                className="max-h-56 rounded-lg border border-white/10"
+              />
+            </button>
+          )}
+        {msg.media_private && !msg.media_path && (
+          <div className="mt-2 text-xs text-muted">
+            Приватное {msg.media_type === "photo" ? "фото" : "видео"} (одноразовое)
+          </div>
+        )}
         {msg.replied && msg.reply_text && (
           <div className="mt-2 pl-3 border-l-2 border-accent/50 text-sm text-muted">
             <div className="text-[10px] uppercase tracking-wide mb-1">
@@ -58,6 +82,27 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
           )}
         </div>
       </div>
+      {openMedia && msg.media_path && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setOpenMedia(false)}
+        >
+          {msg.media_type === "photo" ? (
+            <img
+              src={msg.media_path}
+              alt="photo fullscreen"
+              className="max-w-full max-h-full object-contain"
+            />
+          ) : (
+            <video
+              src={msg.media_path}
+              controls
+              autoPlay
+              className="max-w-full max-h-full"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

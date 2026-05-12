@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -201,6 +202,40 @@ class TelegramService:
             return "(документ)"
         return ""
 
+    @staticmethod
+    def _extract_media(tg_msg: TgMessage) -> tuple[Optional[str], Optional[str]]:
+        if getattr(tg_msg, "photo", None):
+            photo_sizes = tg_msg.photo or []
+            if photo_sizes:
+                return "photo", photo_sizes[-1].file_id
+        if getattr(tg_msg, "video", None) is not None:
+            return "video", tg_msg.video.file_id
+        if getattr(tg_msg, "video_note", None) is not None:
+            return "video_note", tg_msg.video_note.file_id
+        return None, None
+
+    async def _download_media(
+        self, file_id: str, media_type: str, tg_msg: TgMessage
+    ) -> tuple[Optional[str], bool]:
+        if not self.bot:
+            return None, True
+        chat_folder = settings.media_dir / str(tg_msg.chat.id)
+        chat_folder.mkdir(parents=True, exist_ok=True)
+        ext = {"photo": ".jpg", "video": ".mp4", "video_note": ".mp4"}.get(
+            media_type, ""
+        )
+        file_name = f"{tg_msg.message_id}_{media_type}{ext}"
+        target = chat_folder / file_name
+        try:
+            await self.bot.download(file_id, destination=target)
+            relative = Path("media") / str(tg_msg.chat.id) / file_name
+            return f"/{relative.as_posix()}", False
+        except TelegramBadRequest:
+            return None, True
+        except Exception:
+            log.exception("failed to download media")
+            return None, True
+
     async def handle_incoming(self, tg_msg: TgMessage) -> None:
         try:
             if tg_msg.from_user and tg_msg.from_user.is_bot:
@@ -210,6 +245,13 @@ class TelegramService:
             content_text = self._extract_message_content(tg_msg)
             if not content_text:
                 return
+            media_type, media_file_id = self._extract_media(tg_msg)
+            media_path = None
+            media_private = False
+            if media_type and media_file_id:
+                media_path, media_private = await self._download_media(
+                    media_file_id, media_type, tg_msg
+                )
 
             business_connection_id = getattr(tg_msg, "business_connection_id", None)
             is_business = business_connection_id is not None
@@ -279,6 +321,9 @@ class TelegramService:
                     timestamp=tg_ts,
                     message_id=tg_msg.message_id,
                     business_connection_id=business_connection_id,
+                    media_type=media_type,
+                    media_path=media_path,
+                    media_private=media_private,
                 )
                 session.add(row)
                 await session.commit()
