@@ -19,6 +19,14 @@ const timezoneOptions = [
   "Asia/Almaty",
 ];
 
+const delayBounds = { min: 30, max: 600 };
+
+function formatDelayPreview(seconds) {
+  const minutes = seconds / 60;
+  if (Number.isInteger(minutes)) return `${minutes}`;
+  return minutes.toFixed(1).replace(".", ",");
+}
+
 export default function Settings() {
   const [s, setS] = useState({
     auto_reply: false,
@@ -32,6 +40,11 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notify, setNotify] = useState({ chat_id: "", enabled: true });
+  const [delay, setDelay] = useState({
+    delay_enabled: false,
+    delay_min_seconds: 60,
+    delay_max_seconds: 180,
+  });
   const [schedule, setSchedule] = useState({
     enabled: false,
     timezone: "Europe/Moscow",
@@ -54,10 +67,11 @@ export default function Settings() {
   }, [models, s.llm_model]);
 
   const refresh = async () => {
-    const [cs, st, sch] = await Promise.all([
+    const [cs, st, sch, d] = await Promise.all([
       api.chats(),
       api.getSettings(),
       api.getSchedule(),
+      api.getDelay(),
     ]);
     setChats(cs);
     setS((prev) => ({
@@ -76,6 +90,11 @@ export default function Settings() {
       active: !!sch.active,
       next_active_text: sch.next_active_text || "",
     }));
+    setDelay({
+      delay_enabled: !!d.delay_enabled,
+      delay_min_seconds: d.delay_min_seconds || 60,
+      delay_max_seconds: d.delay_max_seconds || 180,
+    });
     try {
       const m = await api.listModels();
       setModels(m.models || []);
@@ -103,7 +122,11 @@ export default function Settings() {
     setSaving(true);
     setError("");
     try {
-      await Promise.all([api.saveSettings(s), api.saveSchedule(schedule)]);
+      await Promise.all([
+        api.saveSettings(s),
+        api.saveSchedule(schedule),
+        api.saveDelay(delay),
+      ]);
       refresh();
     } catch (e) {
       setError(e.message);
@@ -157,6 +180,20 @@ export default function Settings() {
       if (days.has(day) && days.size > 1) days.delete(day);
       else days.add(day);
       return { ...prev, days: Array.from(days).sort() };
+    });
+  }
+
+  function updateDelay(field, value) {
+    const seconds = Number(value);
+    setDelay((prev) => {
+      const next = { ...prev, [field]: seconds };
+      if (field === "delay_min_seconds" && seconds > next.delay_max_seconds) {
+        next.delay_max_seconds = seconds;
+      }
+      if (field === "delay_max_seconds" && seconds < next.delay_min_seconds) {
+        next.delay_min_seconds = seconds;
+      }
+      return next;
     });
   }
 
@@ -316,6 +353,72 @@ export default function Settings() {
           </div>
         )}
       </div>
+
+      <div className="card">
+        <div className="label">Задержка ответа</div>
+        <label className="flex items-start gap-3 mt-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!delay.delay_enabled}
+            onChange={(e) =>
+              setDelay((prev) => ({ ...prev, delay_enabled: e.target.checked }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">
+              Имитировать время обдумывания
+            </div>
+            <div className="text-xs text-muted">
+              Если за это время придёт новое сообщение из того же чата, старый
+              ответ отменится и бот подготовит новый по полной истории.
+            </div>
+          </div>
+        </label>
+
+        <div className="grid md:grid-cols-2 gap-4 mt-4">
+          <div>
+            <div className="flex justify-between text-sm">
+              <span>От {delay.delay_min_seconds} сек</span>
+              <span className="text-muted">{delayBounds.min}–{delayBounds.max}</span>
+            </div>
+            <input
+              className="w-full mt-2"
+              type="range"
+              min={delayBounds.min}
+              max={delayBounds.max}
+              step="10"
+              value={delay.delay_min_seconds}
+              onChange={(e) =>
+                updateDelay("delay_min_seconds", e.target.value)
+              }
+            />
+          </div>
+          <div>
+            <div className="flex justify-between text-sm">
+              <span>До {delay.delay_max_seconds} сек</span>
+              <span className="text-muted">{delayBounds.min}–{delayBounds.max}</span>
+            </div>
+            <input
+              className="w-full mt-2"
+              type="range"
+              min={delayBounds.min}
+              max={delayBounds.max}
+              step="10"
+              value={delay.delay_max_seconds}
+              onChange={(e) =>
+                updateDelay("delay_max_seconds", e.target.value)
+              }
+            />
+          </div>
+        </div>
+
+        <div className="text-sm text-muted mt-3">
+          Бот будет отвечать через {formatDelayPreview(delay.delay_min_seconds)}–
+          {formatDelayPreview(delay.delay_max_seconds)} минуты
+        </div>
+      </div>
+
 
       <div className="card">
         <div className="label">Чаты под наблюдением</div>
