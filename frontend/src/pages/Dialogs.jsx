@@ -194,6 +194,7 @@ export default function Dialogs() {
     String(settings.interval_minutes ?? "") !== intervalDraft.trim();
 
   const selectedChat = chats.find((c) => c.chat_id === selectedChatId);
+  const selectedVersion = versions.find((v) => v.id === selectedBackup);
 
   return (
     <div className="space-y-4">
@@ -317,17 +318,21 @@ export default function Dialogs() {
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-muted">Версия</label>
                   <select
-                    className="input py-1 text-sm w-32"
+                    className="input flex-none py-1 text-sm"
+                    style={{ width: "5rem" }}
                     value={selectedBackup || ""}
                     onChange={(e) => selectBackup(Number(e.target.value))}
                     disabled={versions.length === 0 || busy}
+                    title={
+                      selectedVersion ? formatDate(selectedVersion.created_at) : ""
+                    }
                   >
                     {versions.length === 0 && (
                       <option value="">нет копий</option>
                     )}
                     {versions.map((v) => (
                       <option key={v.id} value={v.id}>
-                        v{v.version} · {formatDate(v.created_at)}
+                        v{v.version}
                       </option>
                     ))}
                   </select>
