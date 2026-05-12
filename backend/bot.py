@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 
@@ -93,6 +95,9 @@ class TelegramService:
         self.update_count: int = 0
         self.last_error: str = ""
         self._delayed_reply_tasks: dict[int, asyncio.Task] = {}
+        # Path to store media files
+        self.media_dir = Path("/workspace/media")
+        self.media_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def is_configured(self) -> bool:
@@ -255,6 +260,57 @@ class TelegramService:
             
         return "", None, None, None, False
 
+    async def _download_media(self, file_id: str, media_type: str) -> Optional[str]:
+        """Download media file from Telegram and save it locally.
+        
+        Args:
+            file_id: Telegram file ID
+            media_type: Type of media (photo, video, video_note, etc.)
+            
+        Returns:
+            Relative path to the saved file, or None if download failed
+        """
+        if not self.bot or not file_id:
+            return None
+        
+        try:
+            # Get file info from Telegram
+            file = await self.bot.get_file(file_id)
+            file_path = file.file_path
+            
+            if not file_path:
+                return None
+            
+            # Generate unique filename
+            import uuid
+            ext = os.path.splitext(file_path)[1] if '.' in file_path else ''
+            if not ext:
+                # Default extensions for different media types
+                ext_map = {
+                    'photo': '.jpg',
+                    'video': '.mp4',
+                    'video_note': '.mp4',
+                    'animation': '.gif',
+                    'voice': '.ogg',
+                    'audio': '.mp3',
+                    'document': '',
+                    'sticker': '.webp',
+                }
+                ext = ext_map.get(media_type, '')
+            
+            filename = f"{uuid.uuid4()}{ext}"
+            local_path = self.media_dir / filename
+            
+            # Download the file
+            await self.bot.download_file(file_path, local_path)
+            
+            # Return relative path from workspace
+            return f"media/{filename}"
+            
+        except Exception as e:
+            log.exception(f"Failed to download media: {e}")
+            return None
+
     async def handle_incoming(self, tg_msg: TgMessage) -> None:
         try:
             if tg_msg.from_user and tg_msg.from_user.is_bot:
@@ -310,6 +366,13 @@ class TelegramService:
 
             self._cancel_delayed_reply(chat_id)
 
+            # Download media if we have a file_id and it's not view-once
+            media_file_path = None
+            if media_type and media_file_id and not is_view_once:
+                media_file_path = await self._download_media(media_file_id, media_type)
+                if media_file_path:
+                    log.info(f"Downloaded media to {media_file_path}")
+
             should_reply = not is_mine
             if not is_business and tg_msg.chat.type in (
                 ChatType.GROUP,
@@ -345,6 +408,7 @@ class TelegramService:
                     media_type=media_type,
                     media_file_id=media_file_id,
                     media_file_unique_id=media_file_unique_id,
+                    media_file_path=media_file_path,
                     is_view_once=is_view_once,
                 )
                 session.add(row)

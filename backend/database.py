@@ -53,6 +53,7 @@ class Message(Base):
     media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     media_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     media_file_unique_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    media_file_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     is_view_once: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -87,6 +88,7 @@ class DialogBackupMessage(Base):
     media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     media_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     media_file_unique_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    media_file_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     is_view_once: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -189,6 +191,10 @@ def _apply_lightweight_migrations(sync_conn) -> None:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN is_view_once BOOLEAN DEFAULT 0 NOT NULL"
         )
+    if "media_file_path" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN media_file_path VARCHAR(512)"
+        )
 
     # Migrate dialog_backup_messages table
     backup_columns = {col["name"] for col in inspector.get_columns("dialog_backup_messages")}
@@ -207,6 +213,10 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "is_view_once" not in backup_columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE dialog_backup_messages ADD COLUMN is_view_once BOOLEAN DEFAULT 0 NOT NULL"
+        )
+    if "media_file_path" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_file_path VARCHAR(512)"
         )
 
 

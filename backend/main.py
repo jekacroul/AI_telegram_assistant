@@ -1356,6 +1356,13 @@ if frontend_dist.exists():
         "/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend"
     )
 
+# Mount media directory for serving downloaded files
+media_dir = ROOT_DIR / "media"
+if media_dir.exists():
+    app.mount(
+        "/media", StaticFiles(directory=str(media_dir)), name="media"
+    )
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -20,89 +20,106 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
       );
     }
 
-    if (msg.media_type === "photo" && msg.media_file_id) {
-      return (
-        <div className="mt-2">
-          <img 
-            src={`https://api.telegram.org/file/bot${window.TELEGRAM_BOT_TOKEN}/${msg.media_file_id}`} 
-            alt="Photo" 
-            className="max-w-xs rounded-lg shadow-lg"
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.nextSibling && (e.target.nextSibling.style.display = 'block');
-            }}
-          />
-          <div className="hidden mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-            <span className="text-sm text-muted">📷 Фото (недоступно для прямого просмотра)</span>
+    // Display media from local file path
+    if (msg.media_file_path) {
+      const mediaUrl = `/media/${msg.media_file_path.replace('media/', '')}`;
+      
+      if (msg.media_type === "photo") {
+        return (
+          <div className="mt-2">
+            <img 
+              src={mediaUrl} 
+              alt="Photo" 
+              className="max-w-xs rounded-lg shadow-lg"
+            />
           </div>
-        </div>
-      );
+        );
+      }
+      
+      if (msg.media_type === "video_note") {
+        return (
+          <div className="mt-2">
+            <video 
+              src={mediaUrl} 
+              controls 
+              className="max-w-xs rounded-lg shadow-lg"
+              style={{ borderRadius: '50%' }}
+            />
+          </div>
+        );
+      }
+      
+      if (msg.media_type === "video") {
+        return (
+          <div className="mt-2">
+            <video 
+              src={mediaUrl} 
+              controls 
+              className="max-w-xs rounded-lg shadow-lg"
+            />
+          </div>
+        );
+      }
+      
+      if (msg.media_type === "animation") {
+        return (
+          <div className="mt-2">
+            <img 
+              src={mediaUrl} 
+              alt="GIF" 
+              className="max-w-xs rounded-lg shadow-lg"
+            />
+          </div>
+        );
+      }
+      
+      if (msg.media_type === "voice") {
+        return (
+          <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
+            <audio src={mediaUrl} controls />
+            <span className="text-sm text-muted">🎤 Голосовое сообщение</span>
+          </div>
+        );
+      }
+      
+      if (msg.media_type === "audio") {
+        return (
+          <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
+            <audio src={mediaUrl} controls />
+            <span className="text-sm text-muted">🎵 Аудио</span>
+          </div>
+        );
+      }
+      
+      if (msg.media_type === "document") {
+        return (
+          <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
+            <a href={mediaUrl} download className="text-sm text-accent hover:underline">
+              📄 Скачать документ
+            </a>
+          </div>
+        );
+      }
+      
+      if (msg.media_type === "sticker") {
+        return (
+          <div className="mt-2">
+            <img 
+              src={mediaUrl} 
+              alt="Sticker" 
+              className="max-w-[150px] rounded-lg"
+            />
+          </div>
+        );
+      }
     }
     
-    if (msg.media_type === "video_note" && msg.media_file_id) {
-      return (
-        <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-          <span className="text-sm text-muted">⭕ Кружок (видеосообщение)</span>
-          <div className="text-xs text-muted mt-1">File ID: {msg.media_file_id}</div>
-        </div>
-      );
-    }
-    
-    if (msg.media_type === "video" && msg.media_file_id) {
-      return (
-        <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-          <span className="text-sm text-muted">🎬 Видео</span>
-          <div className="text-xs text-muted mt-1">File ID: {msg.media_file_id}</div>
-        </div>
-      );
-    }
-    
-    if (msg.media_type === "animation" && msg.media_file_id) {
-      return (
-        <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-          <span className="text-sm text-muted">🎬 GIF</span>
-          <div className="text-xs text-muted mt-1">File ID: {msg.media_file_id}</div>
-        </div>
-      );
-    }
-    
-    if (msg.media_type === "voice" && msg.media_file_id) {
-      return (
-        <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-          <span className="text-sm text-muted">🎤 Голосовое сообщение</span>
-          <div className="text-xs text-muted mt-1">File ID: {msg.media_file_id}</div>
-        </div>
-      );
-    }
-    
-    if (msg.media_type === "audio" && msg.media_file_id) {
-      return (
-        <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-          <span className="text-sm text-muted">🎵 Аудио</span>
-          <div className="text-xs text-muted mt-1">File ID: {msg.media_file_id}</div>
-        </div>
-      );
-    }
-    
-    if (msg.media_type === "document" && msg.media_file_id) {
-      return (
-        <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-          <span className="text-sm text-muted">📄 Документ</span>
-          <div className="text-xs text-muted mt-1">File ID: {msg.media_file_id}</div>
-        </div>
-      );
-    }
-    
-    if (msg.media_type === "sticker" && msg.media_file_id) {
-      return (
-        <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
-          <span className="text-sm text-muted">😊 Стикер</span>
-          <div className="text-xs text-muted mt-1">File ID: {msg.media_file_id}</div>
-        </div>
-      );
-    }
-    
-    return null;
+    // Fallback for old messages without file path
+    return (
+      <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
+        <span className="text-sm text-muted">📎 Медиафайл (требуется повторное сохранение)</span>
+      </div>
+    );
   };
 
   return (
