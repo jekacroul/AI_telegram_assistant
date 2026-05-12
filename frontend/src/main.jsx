@@ -7,6 +7,7 @@ import Dialogs from "./pages/Dialogs.jsx";
 import Training from "./pages/Training.jsx";
 import StyleProfile from "./pages/StyleProfile.jsx";
 import Settings from "./pages/Settings.jsx";
+import Stats from "./pages/Stats.jsx";
 
 function Layout() {
   const linkBase = "px-4 py-2 rounded-md text-sm transition-colors";
@@ -24,6 +25,7 @@ function Layout() {
               ["/dialogs", "Диалоги"],
               ["/training", "Обучение"],
               ["/style", "Стиль"],
+              ["/stats", "Статистика"],
               ["/settings", "Настройки"],
             ].map(([to, label]) => (
               <NavLink
@@ -46,6 +48,7 @@ function Layout() {
           <Route path="/dialogs" element={<Dialogs />} />
           <Route path="/training" element={<Training />} />
           <Route path="/style" element={<StyleProfile />} />
+          <Route path="/stats" element={<Stats />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 
@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import Integer, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -40,6 +40,7 @@ from .database import (
     Message,
     SessionLocal,
     TrainingPair,
+    TrainingRun,
     get_session,
     get_setting,
     init_db,
@@ -716,6 +717,162 @@ async def dialogs_run_backup() -> dict:
         "skipped": result.skipped,
         "excluded": result.excluded,
     }
+
+
+@app.get("/api/stats/overview")
+async def stats_overview(session: AsyncSession = Depends(get_session)) -> dict:
+    received = (await session.execute(
+        select(func.count(Message.id)).where(Message.is_mine == False)  # noqa: E712
+    )).scalar() or 0
+    sent = (await session.execute(
+        select(func.count(Message.id)).where(Message.is_mine == True)  # noqa: E712
+    )).scalar() or 0
+    replied = (await session.execute(
+        select(func.count(Message.id)).where(
+            Message.is_mine == False, Message.replied == True  # noqa: E712
+        )
+    )).scalar() or 0
+    approved_manual = (await session.execute(
+        select(func.count(TrainingPair.id)).where(TrainingPair.feedback == "good")
+    )).scalar() or 0
+    rejected = (await session.execute(
+        select(func.count(TrainingPair.id)).where(TrainingPair.feedback == "bad")
+    )).scalar() or 0
+    total_feedback = approved_manual + rejected
+    approval_rate = (approved_manual / total_feedback) if total_feedback else 0.0
+    return {
+        "received": received,
+        "sent": sent,
+        "replied": replied,
+        "approved_manual": approved_manual,
+        "rejected": rejected,
+        "approval_rate": approval_rate,
+    }
+
+
+@app.get("/api/stats/activity")
+async def stats_activity(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    since = datetime.utcnow() - timedelta(days=30)
+    day = func.strftime("%Y-%m-%d", Message.timestamp).label("day")
+    result = await session.execute(
+        select(
+            day,
+            func.sum(func.cast(Message.is_mine == False, Integer)).label("received"),  # noqa: E712
+            func.sum(func.cast(Message.is_mine == True, Integer)).label("sent"),  # noqa: E712
+        )
+        .where(Message.timestamp >= since)
+        .group_by(day)
+        .order_by(day)
+    )
+    rows = {r.day: {"received": int(r.received or 0), "sent": int(r.sent or 0)} for r in result.all()}
+    out: list[dict] = []
+    today = datetime.utcnow().date()
+    for i in range(29, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        stats = rows.get(d, {"received": 0, "sent": 0})
+        out.append({"day": d, **stats})
+    return out
+
+
+@app.get("/api/stats/top-chats")
+async def stats_top_chats(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    result = await session.execute(
+        select(
+            Message.chat_id,
+            func.max(Message.chat_name).label("chat_name"),
+            func.count(Message.id).label("count"),
+        )
+        .group_by(Message.chat_id)
+        .order_by(desc("count"))
+        .limit(10)
+    )
+    return [
+        {"chat_id": r.chat_id, "chat_name": r.chat_name or "", "count": r.count}
+        for r in result.all()
+    ]
+
+
+@app.get("/api/stats/model-quality")
+async def stats_model_quality(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    runs_q = await session.execute(
+        select(TrainingRun)
+        .where(TrainingRun.finished_at.is_not(None))
+        .order_by(TrainingRun.finished_at)
+    )
+    runs = list(runs_q.scalars().all())
+    out: list[dict] = []
+    for i, run in enumerate(runs):
+        start = run.finished_at
+        end = runs[i + 1].finished_at if i + 1 < len(runs) else None
+        cond = [TrainingPair.timestamp >= start]
+        if end is not None:
+            cond.append(TrainingPair.timestamp < end)
+        good = (await session.execute(
+            select(func.count(TrainingPair.id)).where(
+                *cond, TrainingPair.feedback == "good"
+            )
+        )).scalar() or 0
+        bad = (await session.execute(
+            select(func.count(TrainingPair.id)).where(
+                *cond, TrainingPair.feedback == "bad"
+            )
+        )).scalar() or 0
+        total = good + bad
+        approval_rate = (good / total) if total else 0.0
+        rejection_rate = (bad / total) if total else 0.0
+        out.append({
+            "version": run.version,
+            "run_id": run.id,
+            "is_active": run.is_active,
+            "status": run.status,
+            "finished_at": _iso_utc(run.finished_at),
+            "approved": good,
+            "rejected": bad,
+            "total": total,
+            "approval_rate": approval_rate,
+            "rejection_rate": rejection_rate,
+        })
+    return out
+
+
+@app.get("/api/stats/response-time")
+async def stats_response_time(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    result = await session.execute(
+        select(
+            Message.chat_id,
+            Message.chat_name,
+            Message.is_mine,
+            Message.timestamp,
+        ).order_by(Message.chat_id, Message.timestamp)
+    )
+    by_chat: dict[int, dict] = {}
+    pending_ts: dict[int, datetime] = {}
+    chat_names: dict[int, str] = {}
+    for chat_id, chat_name, is_mine, ts in result.all():
+        if chat_name:
+            chat_names[chat_id] = chat_name
+        if not is_mine:
+            if chat_id not in pending_ts:
+                pending_ts[chat_id] = ts
+        else:
+            start = pending_ts.pop(chat_id, None)
+            if start is not None and ts > start:
+                delta = (ts - start).total_seconds()
+                entry = by_chat.setdefault(chat_id, {"total": 0.0, "count": 0})
+                entry["total"] += delta
+                entry["count"] += 1
+    out: list[dict] = []
+    for chat_id, agg in by_chat.items():
+        if agg["count"] == 0:
+            continue
+        out.append({
+            "chat_id": chat_id,
+            "chat_name": chat_names.get(chat_id, ""),
+            "avg_seconds": agg["total"] / agg["count"],
+            "replies": agg["count"],
+        })
+    out.sort(key=lambda x: x["avg_seconds"])
+    return out
 
 
 @app.post("/webhook/{token}")

@@ -85,6 +85,11 @@ export const api = {
       body: JSON.stringify(data),
     }),
   detectNotifyChat: () => request("/api/settings/notify-chat/detect"),
+  statsOverview: () => request("/api/stats/overview"),
+  statsActivity: () => request("/api/stats/activity"),
+  statsTopChats: () => request("/api/stats/top-chats"),
+  statsModelQuality: () => request("/api/stats/model-quality"),
+  statsResponseTime: () => request("/api/stats/response-time"),
 };
 
 export function streamEvents(path, onEvent) {
