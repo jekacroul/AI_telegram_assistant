@@ -400,9 +400,11 @@ export default function Dialogs() {
                             {m.sender_name || "собеседник"}
                           </div>
                         )}
-                        <div className="whitespace-pre-wrap break-words">
-                          {m.text}
-                        </div>
+                        {m.text && (
+                          <div className="whitespace-pre-wrap break-words">
+                            {m.text}
+                          </div>
+                        )}
                         {m.media_type === "photo" && m.media_path && (
                           <button className="mt-2 block" onClick={() => setMediaPreview(m)}>
                             <img

@@ -26,7 +26,9 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
           <span className="text-xs text-muted">в {msg.chat_name}</span>
           <span className="text-xs text-muted ml-auto">{ts}</span>
         </div>
-        <div className="text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+        {msg.text && (
+          <div className="text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+        )}
         {msg.media_type === "photo" && msg.media_path && (
           <button className="mt-2 block" onClick={() => setOpenMedia(true)}>
             <img

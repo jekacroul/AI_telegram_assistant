@@ -252,6 +252,9 @@ class TelegramService:
                 media_path, media_private = await self._download_media(
                     media_file_id, media_type, tg_msg
                 )
+            media_placeholders = {"(фото)", "(видео)", "(кружок)"}
+            if content_text in media_placeholders and media_path:
+                content_text = ""
 
             business_connection_id = getattr(tg_msg, "business_connection_id", None)
             is_business = business_connection_id is not None
