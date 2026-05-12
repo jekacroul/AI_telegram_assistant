@@ -427,6 +427,10 @@ def _message_to_dict(m: Message) -> dict:
         "replied": m.replied,
         "reply_text": m.reply_text,
         "pending_reason": m.pending_reason,
+        "media_type": m.media_type,
+        "media_file_id": m.media_file_id,
+        "media_file_unique_id": m.media_file_unique_id,
+        "is_view_once": m.is_view_once,
     }
 
 
@@ -453,7 +457,14 @@ async def generate_reply(
     )
     history = list(history_q.scalars().all())[::-1]
     history_dicts = [
-        {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text}
+        {
+            "sender_name": m.sender_name,
+            "is_mine": m.is_mine,
+            "text": m.text,
+            "media_type": m.media_type,
+            "media_file_id": m.media_file_id,
+            "is_view_once": m.is_view_once,
+        }
         for m in history
     ]
     try:

@@ -162,6 +162,10 @@ async def backup_chat(session: AsyncSession, chat_id: int) -> Optional[DialogBac
                 text=m.text,
                 timestamp=m.timestamp,
                 message_id=m.message_id,
+                media_type=m.media_type,
+                media_file_id=m.media_file_id,
+                media_file_unique_id=m.media_file_unique_id,
+                is_view_once=m.is_view_once,
             )
         )
 

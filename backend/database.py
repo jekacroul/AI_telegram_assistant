@@ -84,6 +84,10 @@ class DialogBackupMessage(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    media_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    media_file_unique_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    is_view_once: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class TrainingPair(Base):
@@ -184,6 +188,25 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "is_view_once" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN is_view_once BOOLEAN DEFAULT 0 NOT NULL"
+        )
+
+    # Migrate dialog_backup_messages table
+    backup_columns = {col["name"] for col in inspector.get_columns("dialog_backup_messages")}
+    if "media_type" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_type VARCHAR(32)"
+        )
+    if "media_file_id" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_file_id VARCHAR(256)"
+        )
+    if "media_file_unique_id" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_file_unique_id VARCHAR(256)"
+        )
+    if "is_view_once" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN is_view_once BOOLEAN DEFAULT 0 NOT NULL"
         )
 
 
