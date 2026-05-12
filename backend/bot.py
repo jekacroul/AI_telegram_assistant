@@ -173,21 +173,39 @@ class TelegramService:
             log.exception("failed to remember last private chat")
 
     @staticmethod
-    def _is_media_saveable(tg_msg: TgMessage) -> bool:
-        """Check if media can be saved (not view-once or private)."""
-        # View-once photo/video
+    def _is_media_saveable(tg_msg: TgMessage) -> tuple[bool, bool]:
+        """Check if media can be saved (not view-once or private).
+        
+        Returns:
+            Tuple of (can_download, is_private_media)
+            - can_download: True if media can be downloaded and saved
+            - is_private_media: True if media exists but is private/view-once
+        """
+        # Check for self-destructing media (view-once photo/video circles)
         if getattr(tg_msg, "has_protected_content", False):
-            return False
-        # Check for self-destructing media
+            return False, True
         if getattr(tg_msg, "media_has_scheduled", False):
-            return False
-        return True
+            return False, True
+        # Check for view-once photo/video (Telegram API fields)
+        if getattr(tg_msg, "photo", None) and getattr(tg_msg.photo[-1] if tg_msg.photo else None, "file_size", 0) > 0:
+            # Regular photo - can be saved
+            pass
+        return True, False
 
     async def _download_and_save_media(
         self, tg_msg: TgMessage, chat_id: int, message_id: int
     ) -> tuple[Optional[str], Optional[str]]:
         """Download media and save to disk. Returns (media_type, relative_path) or (None, None)."""
-        if not self.bot or not self._is_media_saveable(tg_msg):
+        if not self.bot:
+            return None, None
+        
+        can_download, is_private = self._is_media_saveable(tg_msg)
+        
+        # If media is private/view-once, mark it but don't download
+        if is_private:
+            return "private_media", None
+        
+        if not can_download:
             return None, None
 
         media_dir = ROOT_DIR / "media" / str(chat_id)

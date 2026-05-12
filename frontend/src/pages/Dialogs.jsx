@@ -399,6 +399,27 @@ export default function Dialogs() {
                             {m.sender_name || "собеседник"}
                           </div>
                         )}
+                        {m.media_type === "photo" && m.media_path ? (
+                          <div className="mb-2">
+                            <img
+                              src={`/media/${m.media_path}`}
+                              alt="Photo"
+                              className="max-w-full rounded-lg"
+                            />
+                          </div>
+                        ) : m.media_type === "video" && m.media_path ? (
+                          <div className="mb-2">
+                            <video
+                              src={`/media/${m.media_path}`}
+                              controls
+                              className="max-w-full rounded-lg"
+                            />
+                          </div>
+                        ) : m.media_type === "private_media" ? (
+                          <div className="mb-2 text-xs text-muted italic">
+                            фото/видео
+                          </div>
+                        ) : null}
                         <div className="whitespace-pre-wrap break-words">
                           {m.text}
                         </div>

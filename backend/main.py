@@ -937,6 +937,8 @@ async def dialogs_backup_content(
                 "text": m.text,
                 "timestamp": _iso_utc(m.timestamp),
                 "message_id": m.message_id,
+                "media_type": m.media_type,
+                "media_path": m.media_path,
             }
             for m in rows
         ],

@@ -177,6 +177,17 @@ def _apply_lightweight_migrations(sync_conn) -> None:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN media_path VARCHAR(512)"
         )
+    
+    # Миграция для таблицы dialog_backup_messages
+    backup_msg_columns = {col["name"] for col in inspector.get_columns("dialog_backup_messages")}
+    if "media_type" not in backup_msg_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_type VARCHAR(32)"
+        )
+    if "media_path" not in backup_msg_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN media_path VARCHAR(512)"
+        )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
