@@ -1,6 +1,24 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 
+const dayOptions = [
+  { value: 0, label: "Пн" },
+  { value: 1, label: "Вт" },
+  { value: 2, label: "Ср" },
+  { value: 3, label: "Чт" },
+  { value: 4, label: "Пт" },
+  { value: 5, label: "Сб" },
+  { value: 6, label: "Вс" },
+];
+
+const timezoneOptions = [
+  "Europe/Moscow",
+  "Asia/Yekaterinburg",
+  "Asia/Novosibirsk",
+  "Europe/Kiev",
+  "Asia/Almaty",
+];
+
 export default function Settings() {
   const [s, setS] = useState({
     auto_reply: false,
@@ -14,6 +32,15 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notify, setNotify] = useState({ chat_id: "", enabled: true });
+  const [schedule, setSchedule] = useState({
+    enabled: false,
+    timezone: "Europe/Moscow",
+    days: [0, 1, 2, 3, 4, 5, 6],
+    start: "09:00",
+    end: "23:00",
+    active: true,
+    next_active_text: "",
+  });
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState("");
   const [notifyError, setNotifyError] = useState("");
@@ -27,13 +54,27 @@ export default function Settings() {
   }, [models, s.llm_model]);
 
   const refresh = async () => {
-    const [cs, st] = await Promise.all([api.chats(), api.getSettings()]);
+    const [cs, st, sch] = await Promise.all([
+      api.chats(),
+      api.getSettings(),
+      api.getSchedule(),
+    ]);
     setChats(cs);
     setS((prev) => ({
       ...prev,
       auto_reply: !!st.auto_reply,
       monitored_chats: st.monitored_chats || [],
       llm_model: st.llm_model || "",
+    }));
+    setSchedule((prev) => ({
+      ...prev,
+      enabled: !!sch.enabled,
+      timezone: sch.timezone || "Europe/Moscow",
+      days: sch.days || [0, 1, 2, 3, 4, 5, 6],
+      start: sch.start || "09:00",
+      end: sch.end || "23:00",
+      active: !!sch.active,
+      next_active_text: sch.next_active_text || "",
     }));
     try {
       const m = await api.listModels();
@@ -62,7 +103,7 @@ export default function Settings() {
     setSaving(true);
     setError("");
     try {
-      await api.saveSettings(s);
+      await Promise.all([api.saveSettings(s), api.saveSchedule(schedule)]);
       refresh();
     } catch (e) {
       setError(e.message);
@@ -108,6 +149,15 @@ export default function Settings() {
     } catch (e) {
       setNotifyError(e.message);
     }
+  }
+
+  function toggleScheduleDay(day) {
+    setSchedule((prev) => {
+      const days = new Set(prev.days);
+      if (days.has(day) && days.size > 1) days.delete(day);
+      else days.add(day);
+      return { ...prev, days: Array.from(days).sort() };
+    });
   }
 
   function toggleChat(chat_id) {
@@ -162,6 +212,109 @@ export default function Settings() {
             </div>
           </div>
         </label>
+      </div>
+
+
+      <div className="card">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="label">Расписание</div>
+            <div className="text-xs text-muted mt-1">
+              Ограничивает только авто-ответы. Вне расписания сообщения
+              попадут в ожидание.
+            </div>
+          </div>
+          <span
+            className={`px-3 py-1 rounded-full text-xs ${
+              schedule.active ? "bg-good/15 text-good" : "bg-bad/15 text-bad"
+            }`}
+          >
+            {schedule.active ? "Сейчас активен 🟢" : "Сейчас не активен 🔴"}
+          </span>
+        </div>
+
+        <label className="flex items-start gap-3 mt-4">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!schedule.enabled}
+            onChange={(e) =>
+              setSchedule((prev) => ({ ...prev, enabled: e.target.checked }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">Ограничить часы работы</div>
+            <div className="text-xs text-muted">
+              Если выключено — бот отвечает всегда, как раньше.
+            </div>
+          </div>
+        </label>
+
+        <div className="grid md:grid-cols-3 gap-3 mt-4">
+          <div>
+            <div className="label">Часовой пояс</div>
+            <select
+              className="input mt-1"
+              value={schedule.timezone}
+              onChange={(e) =>
+                setSchedule((prev) => ({ ...prev, timezone: e.target.value }))
+              }
+            >
+              {timezoneOptions.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="label">От</div>
+            <input
+              className="input mt-1"
+              type="time"
+              value={schedule.start}
+              onChange={(e) =>
+                setSchedule((prev) => ({ ...prev, start: e.target.value }))
+              }
+            />
+          </div>
+          <div>
+            <div className="label">До</div>
+            <input
+              className="input mt-1"
+              type="time"
+              value={schedule.end}
+              onChange={(e) =>
+                setSchedule((prev) => ({ ...prev, end: e.target.value }))
+              }
+            />
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <div className="label">Дни недели</div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {dayOptions.map((d) => (
+              <label
+                key={d.value}
+                className="flex items-center gap-2 text-sm rounded-lg border border-white/10 px-3 py-2"
+              >
+                <input
+                  type="checkbox"
+                  checked={schedule.days.includes(d.value)}
+                  onChange={() => toggleScheduleDay(d.value)}
+                />
+                {d.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {!schedule.active && schedule.next_active_text && (
+          <div className="text-sm text-muted mt-4">
+            Следующий период: {schedule.next_active_text}
+          </div>
+        )}
       </div>
 
       <div className="card">
