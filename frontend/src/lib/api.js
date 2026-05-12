@@ -22,6 +22,9 @@ export const api = {
   status: () => request("/api/status"),
   chats: () => request("/api/chats"),
   getSettings: () => request("/api/settings"),
+  getSchedule: () => request("/api/schedule"),
+  saveSchedule: (data) =>
+    request("/api/schedule", { method: "POST", body: JSON.stringify(data) }),
   saveSettings: (data) =>
     request("/api/settings", { method: "POST", body: JSON.stringify(data) }),
   pending: () => request("/api/messages/pending"),

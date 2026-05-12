@@ -26,7 +26,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Integer, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -62,6 +62,17 @@ from .notifications import (
     SETTING_LAST_PRIVATE_CHAT_ID,
     SETTING_NOTIFY_CHAT_ID,
     SETTING_NOTIFY_ENABLED,
+)
+from .schedule import (
+    DEFAULT_SCHEDULE_DAYS,
+    DEFAULT_SCHEDULE_ENABLED,
+    DEFAULT_SCHEDULE_END,
+    DEFAULT_SCHEDULE_START,
+    DEFAULT_SCHEDULE_TIMEZONE,
+    get_schedule_settings,
+    save_schedule_settings,
+    schedule_to_dict,
+    validate_schedule_payload,
 )
 from .style_engine import (
     get_latest_profile,
@@ -173,6 +184,14 @@ class SettingsIn(BaseModel):
     llm_model: Optional[str] = None
 
 
+class ScheduleIn(BaseModel):
+    enabled: bool = DEFAULT_SCHEDULE_ENABLED
+    timezone: str = DEFAULT_SCHEDULE_TIMEZONE
+    days: list[int] = Field(default_factory=lambda: DEFAULT_SCHEDULE_DAYS.copy())
+    start: str = DEFAULT_SCHEDULE_START
+    end: str = DEFAULT_SCHEDULE_END
+
+
 @app.post("/api/settings")
 async def save_settings(
     payload: SettingsIn, session: AsyncSession = Depends(get_session)
@@ -201,6 +220,30 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
         "monitored_chats": monitored,
         "llm_model": llm_model,
     }
+
+
+@app.get("/api/schedule")
+async def get_schedule(session: AsyncSession = Depends(get_session)) -> dict:
+    schedule = await get_schedule_settings(session)
+    return schedule_to_dict(schedule)
+
+
+@app.post("/api/schedule")
+async def save_schedule(
+    payload: ScheduleIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    try:
+        schedule = validate_schedule_payload(
+            enabled=payload.enabled,
+            timezone=payload.timezone,
+            days=payload.days,
+            start=payload.start,
+            end=payload.end,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    await save_schedule_settings(session, schedule)
+    return {"ok": True, **schedule_to_dict(schedule)}
 
 
 class NotifyChatIn(BaseModel):
@@ -276,6 +319,7 @@ def _message_to_dict(m: Message) -> dict:
         "message_id": m.message_id,
         "replied": m.replied,
         "reply_text": m.reply_text,
+        "pending_reason": m.pending_reason,
     }
 
 

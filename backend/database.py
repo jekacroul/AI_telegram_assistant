@@ -42,6 +42,7 @@ class Message(Base):
     message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     replied: Mapped[bool] = mapped_column(Boolean, default=False)
     reply_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pending_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     business_connection_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True
     )
@@ -138,6 +139,10 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "deleted" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN deleted BOOLEAN DEFAULT 0 NOT NULL"
+        )
+    if "pending_reason" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN pending_reason VARCHAR(32)"
         )
 
 

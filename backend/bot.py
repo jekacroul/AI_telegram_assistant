@@ -35,6 +35,7 @@ from .notifications import (
     SETTING_NOTIFY_CHAT_ID,
     notify_owner,
 )
+from .schedule import is_within_schedule
 
 ALLOWED_UPDATES = [
     "message",
@@ -280,6 +281,11 @@ class TelegramService:
                     session, "auto_reply", "1" if settings.auto_reply else "0"
                 )
                 auto_reply = auto_reply_setting in ("1", "true", "True")
+                within_schedule = await is_within_schedule(session)
+                if auto_reply and should_reply and not within_schedule:
+                    row.pending_reason = "schedule"
+                    should_reply = False
+                    await session.commit()
 
             await message_bus.publish("incoming", {
                 "id": msg_id,
@@ -292,6 +298,7 @@ class TelegramService:
                 "timestamp": _iso_utc_now(),
                 "auto_reply": auto_reply,
                 "will_reply": should_reply,
+                "pending_reason": row.pending_reason,
             })
 
             if is_mine:
@@ -299,6 +306,10 @@ class TelegramService:
                 return
 
             if not should_reply:
+                if row.pending_reason:
+                    await message_bus.publish(
+                        "pending", {"id": msg_id, "reason": row.pending_reason}
+                    )
                 return
 
             if auto_reply:
@@ -336,7 +347,9 @@ class TelegramService:
                     log.exception("auto reply failed: %s", e)
                     self.last_error = str(e)
             else:
-                await message_bus.publish("pending", {"id": msg_id})
+                await message_bus.publish(
+                    "pending", {"id": msg_id, "reason": "auto_reply_disabled"}
+                )
 
             await self._maybe_reanalyze()
         except Exception as e:  # noqa: BLE001
