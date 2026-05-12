@@ -47,6 +47,7 @@ from .database import (
     set_setting,
 )
 from .dataset_builder import build_dataset_file, dataset_stats
+from .delay import delay_to_dict, get_delay_settings, save_delay_settings
 from .dialog_backup import (
     DEFAULT_INTERVAL_HOURS,
     SETTING_INTERVAL,
@@ -184,6 +185,12 @@ class SettingsIn(BaseModel):
     llm_model: Optional[str] = None
 
 
+class DelayIn(BaseModel):
+    delay_enabled: bool = False
+    delay_min_seconds: int = Field(default=60, ge=30, le=600)
+    delay_max_seconds: int = Field(default=180, ge=30, le=600)
+
+
 class ScheduleIn(BaseModel):
     enabled: bool = DEFAULT_SCHEDULE_ENABLED
     timezone: str = DEFAULT_SCHEDULE_TIMEZONE
@@ -220,6 +227,25 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
         "monitored_chats": monitored,
         "llm_model": llm_model,
     }
+
+
+@app.get("/api/delay")
+async def get_delay(session: AsyncSession = Depends(get_session)) -> dict:
+    delay = await get_delay_settings(session)
+    return delay_to_dict(delay)
+
+
+@app.post("/api/delay")
+async def save_delay(
+    payload: DelayIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    delay = await save_delay_settings(
+        session,
+        payload.delay_enabled,
+        payload.delay_min_seconds,
+        payload.delay_max_seconds,
+    )
+    return {"ok": True, **delay_to_dict(delay)}
 
 
 @app.get("/api/schedule")

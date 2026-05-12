@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -29,6 +30,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .database import Message, SessionLocal, get_setting, set_setting
+from .delay import get_delay_settings
 from .dialog_backup import mark_messages_deleted
 from .notifications import (
     SETTING_LAST_PRIVATE_CHAT_ID,
@@ -89,6 +91,7 @@ class TelegramService:
         self.last_update_kind: str = ""
         self.update_count: int = 0
         self.last_error: str = ""
+        self._delayed_reply_tasks: dict[int, asyncio.Task] = {}
 
     @property
     def is_configured(self) -> bool:
@@ -233,6 +236,8 @@ class TelegramService:
                 or (sender.full_name if sender else str(chat_id))
             )
 
+            self._cancel_delayed_reply(chat_id)
+
             should_reply = not is_mine
             if not is_business and tg_msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
                 mentioned = False
@@ -318,6 +323,7 @@ class TelegramService:
                         content_text, sender_name, chat_id
                     )
                     chosen = pick_auto_variant(variants) or "ок"
+                    await self._delay_before_auto_reply(chat_id, chat_name)
                     await self.send_reply(
                         chat_id, chosen,
                         reply_to=tg_msg.message_id,
@@ -325,6 +331,9 @@ class TelegramService:
                     )
                     await self._record_reply(msg_id, chosen, sender_name, chat_id, chat_name)
                     await notify_owner(chat_name, sender_name, content_text, chosen)
+                except asyncio.CancelledError:
+                    log.info("Отменяю отложенный ответ в %s", chat_name)
+                    return
                 except LLMUnavailableError as e:
                     log.warning("LLM unavailable: %s", e)
                     self.last_error = str(e)
@@ -355,6 +364,35 @@ class TelegramService:
         except Exception as e:  # noqa: BLE001
             self.last_error = str(e)
             log.exception("handle_incoming error")
+
+
+    def _cancel_delayed_reply(self, chat_id: int) -> None:
+        task = self._delayed_reply_tasks.get(chat_id)
+        current_task = asyncio.current_task()
+        if task and task is not current_task and not task.done():
+            task.cancel()
+
+    async def _delay_before_auto_reply(self, chat_id: int, chat_name: str) -> None:
+        async with SessionLocal() as session:
+            delay = await get_delay_settings(session)
+        if not delay.enabled:
+            return
+
+        seconds = random.uniform(delay.min_seconds, delay.max_seconds)
+        display_seconds = int(round(seconds))
+        log.info("Жду %s сек перед отправкой в %s", display_seconds, chat_name)
+
+        task = asyncio.current_task()
+        if task is None:
+            await asyncio.sleep(seconds)
+            return
+
+        self._delayed_reply_tasks[chat_id] = task
+        try:
+            await asyncio.sleep(seconds)
+        finally:
+            if self._delayed_reply_tasks.get(chat_id) is task:
+                self._delayed_reply_tasks.pop(chat_id, None)
 
     async def _business_owner_id(self, connection_id: Optional[str]) -> Optional[int]:
         if not connection_id or not self.bot:
