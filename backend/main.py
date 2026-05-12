@@ -23,6 +23,7 @@ def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
         return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
+
 from aiogram.exceptions import TelegramBadRequest
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +41,7 @@ from .database import (
     DialogBackup,
     DialogBackupMessage,
     Message,
+    QualityLog,
     SessionLocal,
     TrainingPair,
     TrainingRun,
@@ -60,6 +62,7 @@ from .dialog_backup import (
 )
 from .event_bus import message_bus, training_bus
 from .llm_engine import LLMUnavailableError, get_client
+from .quality_filter import is_good_response
 from .notifications import (
     SETTING_LAST_PRIVATE_CHAT_ID,
     SETTING_NOTIFY_CHAT_ID,
@@ -91,7 +94,6 @@ from .trainer import (
     start_training,
     training_state,
 )
-
 
 setup_logging(settings.logs_dir, level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -152,9 +154,7 @@ async def _best_contact_name(
     candidates.extend(row.sender_name for row in backups.all())
 
     usable = [
-        name.strip()
-        for name in candidates
-        if _is_usable_contact_name(name, username)
+        name.strip() for name in candidates if _is_usable_contact_name(name, username)
     ]
     if not usable:
         return None
@@ -168,7 +168,9 @@ async def lifespan(app: FastAPI):
         async with SessionLocal() as session:
             current = await get_setting(session, SETTING_NOTIFY_CHAT_ID, "")
             if not current:
-                await set_setting(session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id)
+                await set_setting(
+                    session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id
+                )
     token = settings.telegram_bot_token
     if token:
         try:
@@ -205,7 +207,9 @@ async def status() -> dict:
         db_ok = False
     async with SessionLocal() as session:
         auto_reply = (
-            await get_setting(session, "auto_reply", "1" if settings.auto_reply else "0")
+            await get_setting(
+                session, "auto_reply", "1" if settings.auto_reply else "0"
+            )
         ) in ("1", "true", "True")
         llm_model = await get_setting(session, "llm_model", settings.openai_model)
     return {
@@ -347,10 +351,14 @@ class NotifyChatIn(BaseModel):
 
 @app.get("/api/settings/notify-chat")
 async def get_notify_chat(session: AsyncSession = Depends(get_session)) -> dict:
-    chat_id = await get_setting(session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id)
-    enabled = (
-        await get_setting(session, SETTING_NOTIFY_ENABLED, "1")
-    ) in ("1", "true", "True")
+    chat_id = await get_setting(
+        session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id
+    )
+    enabled = (await get_setting(session, SETTING_NOTIFY_ENABLED, "1")) in (
+        "1",
+        "true",
+        "True",
+    )
     return {"chat_id": chat_id, "enabled": enabled}
 
 
@@ -367,7 +375,9 @@ async def save_notify_chat(
                 raise HTTPException(400, "chat_id must be an integer")
         await set_setting(session, SETTING_NOTIFY_CHAT_ID, value)
     if payload.enabled is not None:
-        await set_setting(session, SETTING_NOTIFY_ENABLED, "1" if payload.enabled else "0")
+        await set_setting(
+            session, SETTING_NOTIFY_ENABLED, "1" if payload.enabled else "0"
+        )
     return {"ok": True}
 
 
@@ -387,13 +397,16 @@ async def pending(session: AsyncSession = Depends(get_session)) -> list[dict]:
     result = await session.execute(
         select(Message)
         .where(Message.is_mine == False, Message.replied == False)  # noqa: E712
-        .order_by(desc(Message.timestamp)).limit(100)
+        .order_by(desc(Message.timestamp))
+        .limit(100)
     )
     return [_message_to_dict(m) for m in result.scalars().all()]
 
 
 @app.get("/api/messages/recent")
-async def recent(limit: int = 100, session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def recent(
+    limit: int = 100, session: AsyncSession = Depends(get_session)
+) -> list[dict]:
     result = await session.execute(
         select(Message).order_by(desc(Message.timestamp)).limit(limit)
     )
@@ -425,21 +438,26 @@ class GenerateIn(BaseModel):
 async def generate_reply(
     payload: GenerateIn, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    result = await session.execute(select(Message).where(Message.id == payload.message_id))
+    result = await session.execute(
+        select(Message).where(Message.id == payload.message_id)
+    )
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(404, "message not found")
     profile = await get_latest_profile(session)
     history_q = await session.execute(
-        select(Message).where(Message.chat_id == msg.chat_id)
-        .order_by(desc(Message.timestamp)).limit(8)
+        select(Message)
+        .where(Message.chat_id == msg.chat_id)
+        .order_by(desc(Message.timestamp))
+        .limit(8)
     )
     history = list(history_q.scalars().all())[::-1]
     history_dicts = [
-        {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text} for m in history
+        {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text}
+        for m in history
     ]
     try:
-        variants = await get_client().generate_reply(
+        variants, reason = await _generate_quality_variants(
             incoming_text=msg.text,
             sender_name=msg.sender_name,
             style_profile=profile,
@@ -447,7 +465,63 @@ async def generate_reply(
         )
     except LLMUnavailableError as e:
         raise HTTPException(503, str(e))
+    if not variants:
+        msg.pending_reason = "quality_filter"
+        await session.commit()
+        await message_bus.publish(
+            "pending",
+            {"id": msg.id, "reason": "quality_filter", "quality_reason": reason},
+        )
+        return {"variants": [], "pending": True, "reason": reason}
     return {"variants": variants}
+
+
+async def _generate_quality_variants(
+    incoming_text: str,
+    sender_name: str,
+    style_profile: dict | None,
+    chat_history: list[dict],
+) -> tuple[list[str], str]:
+    client = get_client()
+    last_reason = "no_variants"
+    logged_rejection = False
+    for _ in range(3):
+        variants = await client.generate_reply(
+            incoming_text=incoming_text,
+            sender_name=sender_name,
+            style_profile=style_profile,
+            chat_history=chat_history,
+        )
+        accepted: list[str] = []
+        for variant in variants:
+            ok, reason = is_good_response(variant, incoming_text, style_profile)
+            if ok:
+                accepted.append(variant)
+            else:
+                last_reason = reason
+                logged_rejection = True
+                async with SessionLocal() as log_session:
+                    log_session.add(
+                        QualityLog(
+                            reason=reason,
+                            incoming_text=incoming_text,
+                            rejected_text=variant,
+                        )
+                    )
+                    await log_session.commit()
+        if accepted:
+            return accepted, "ok"
+    if not logged_rejection:
+        async with SessionLocal() as log_session:
+            log_session.add(
+                QualityLog(
+                    reason=last_reason,
+                    incoming_text=incoming_text,
+                    rejected_text="",
+                )
+            )
+            await log_session.commit()
+    return [], last_reason
 
 
 class ApproveIn(BaseModel):
@@ -459,7 +533,9 @@ class ApproveIn(BaseModel):
 async def approve_reply(
     payload: ApproveIn, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    result = await session.execute(select(Message).where(Message.id == payload.message_id))
+    result = await session.execute(
+        select(Message).where(Message.id == payload.message_id)
+    )
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(404, "message not found")
@@ -467,18 +543,23 @@ async def approve_reply(
         raise HTTPException(400, "bot not configured")
     try:
         await telegram_service.send_and_record(
-            msg.chat_id, payload.text, reply_to=msg.message_id, original_id=msg.id,
+            msg.chat_id,
+            payload.text,
+            reply_to=msg.message_id,
+            original_id=msg.id,
             business_connection_id=msg.business_connection_id,
         )
     except TelegramBadRequest as e:
         raise HTTPException(400, _telegram_error_message(e))
-    session.add(TrainingPair(
-        input_text=msg.text,
-        output_text=payload.text,
-        chat_id=msg.chat_id,
-        timestamp=datetime.utcnow(),
-        feedback="good",
-    ))
+    session.add(
+        TrainingPair(
+            input_text=msg.text,
+            output_text=payload.text,
+            chat_id=msg.chat_id,
+            timestamp=datetime.utcnow(),
+            feedback="good",
+        )
+    )
     await session.commit()
     return {"ok": True}
 
@@ -506,8 +587,10 @@ async def send_reply(payload: SendIn) -> dict:
                 business_connection_id = original.business_connection_id
     try:
         await telegram_service.send_and_record(
-            payload.chat_id, payload.text,
-            reply_to=payload.reply_to, original_id=payload.original_id,
+            payload.chat_id,
+            payload.text,
+            reply_to=payload.reply_to,
+            original_id=payload.original_id,
             business_connection_id=business_connection_id,
         )
     except TelegramBadRequest as e:
@@ -538,7 +621,9 @@ async def reply_feedback(
 ) -> dict:
     if payload.feedback not in ("good", "bad"):
         raise HTTPException(400, "feedback must be good or bad")
-    result = await session.execute(select(Message).where(Message.id == payload.message_id))
+    result = await session.execute(
+        select(Message).where(Message.id == payload.message_id)
+    )
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(404, "message not found")
@@ -547,21 +632,46 @@ async def reply_feedback(
         if telegram_service.is_configured:
             try:
                 await telegram_service.send_reply(
-                    msg.chat_id, payload.corrected_text,
+                    msg.chat_id,
+                    payload.corrected_text,
                     business_connection_id=msg.business_connection_id,
                 )
             except Exception:  # noqa: BLE001
                 log.exception("re-send failed")
         msg.reply_text = payload.corrected_text
-    session.add(TrainingPair(
-        input_text=msg.text,
-        output_text=out_text,
-        chat_id=msg.chat_id,
-        timestamp=datetime.utcnow(),
-        feedback=payload.feedback,
-    ))
+    session.add(
+        TrainingPair(
+            input_text=msg.text,
+            output_text=out_text,
+            chat_id=msg.chat_id,
+            timestamp=datetime.utcnow(),
+            feedback=payload.feedback,
+        )
+    )
     await session.commit()
     return {"ok": True}
+
+
+@app.get("/api/quality/stats")
+async def quality_stats(session: AsyncSession = Depends(get_session)) -> dict:
+    rejected_total = await session.execute(select(func.count(QualityLog.id)))
+    accepted_total = await session.execute(
+        select(func.count(Message.id)).where(Message.reply_text.is_not(None))
+    )
+    reason_rows = await session.execute(
+        select(QualityLog.reason, func.count(QualityLog.id))
+        .group_by(QualityLog.reason)
+        .order_by(desc(func.count(QualityLog.id)))
+    )
+    total_rejected = rejected_total.scalar() or 0
+    total_accepted = accepted_total.scalar() or 0
+    return {
+        "total_generated": total_accepted + total_rejected,
+        "total_rejected": total_rejected,
+        "reasons": [
+            {"reason": reason, "count": count} for reason, count in reason_rows.all()
+        ],
+    }
 
 
 @app.get("/api/training/status")
@@ -705,7 +815,9 @@ async def llm_models() -> dict:
 
 
 @app.post("/api/llm/test")
-async def llm_test(payload: TestIn, session: AsyncSession = Depends(get_session)) -> dict:
+async def llm_test(
+    payload: TestIn, session: AsyncSession = Depends(get_session)
+) -> dict:
     profile = await get_latest_profile(session)
     try:
         variants = await get_client().generate_reply(
@@ -827,7 +939,6 @@ async def dialogs_backup_content(
             for m in rows
         ],
     }
-
 
 
 def _format_dialog_backup_text(
@@ -1003,23 +1114,33 @@ async def dialogs_run_backup() -> dict:
 
 @app.get("/api/stats/overview")
 async def stats_overview(session: AsyncSession = Depends(get_session)) -> dict:
-    received = (await session.execute(
-        select(func.count(Message.id)).where(Message.is_mine == False)  # noqa: E712
-    )).scalar() or 0
-    sent = (await session.execute(
-        select(func.count(Message.id)).where(Message.is_mine == True)  # noqa: E712
-    )).scalar() or 0
-    replied = (await session.execute(
-        select(func.count(Message.id)).where(
-            Message.is_mine == False, Message.replied == True  # noqa: E712
+    received = (
+        await session.execute(
+            select(func.count(Message.id)).where(Message.is_mine == False)  # noqa: E712
         )
-    )).scalar() or 0
-    approved_manual = (await session.execute(
-        select(func.count(TrainingPair.id)).where(TrainingPair.feedback == "good")
-    )).scalar() or 0
-    rejected = (await session.execute(
-        select(func.count(TrainingPair.id)).where(TrainingPair.feedback == "bad")
-    )).scalar() or 0
+    ).scalar() or 0
+    sent = (
+        await session.execute(
+            select(func.count(Message.id)).where(Message.is_mine == True)  # noqa: E712
+        )
+    ).scalar() or 0
+    replied = (
+        await session.execute(
+            select(func.count(Message.id)).where(
+                Message.is_mine == False, Message.replied == True  # noqa: E712
+            )
+        )
+    ).scalar() or 0
+    approved_manual = (
+        await session.execute(
+            select(func.count(TrainingPair.id)).where(TrainingPair.feedback == "good")
+        )
+    ).scalar() or 0
+    rejected = (
+        await session.execute(
+            select(func.count(TrainingPair.id)).where(TrainingPair.feedback == "bad")
+        )
+    ).scalar() or 0
     total_feedback = approved_manual + rejected
     approval_rate = (approved_manual / total_feedback) if total_feedback else 0.0
     return {
@@ -1039,14 +1160,21 @@ async def stats_activity(session: AsyncSession = Depends(get_session)) -> list[d
     result = await session.execute(
         select(
             day,
-            func.sum(func.cast(Message.is_mine == False, Integer)).label("received"),  # noqa: E712
-            func.sum(func.cast(Message.is_mine == True, Integer)).label("sent"),  # noqa: E712
+            func.sum(func.cast(Message.is_mine == False, Integer)).label(
+                "received"
+            ),  # noqa: E712
+            func.sum(func.cast(Message.is_mine == True, Integer)).label(
+                "sent"
+            ),  # noqa: E712
         )
         .where(Message.timestamp >= since)
         .group_by(day)
         .order_by(day)
     )
-    rows = {r.day: {"received": int(r.received or 0), "sent": int(r.sent or 0)} for r in result.all()}
+    rows = {
+        r.day: {"received": int(r.received or 0), "sent": int(r.sent or 0)}
+        for r in result.all()
+    }
     out: list[dict] = []
     today = datetime.utcnow().date()
     for i in range(29, -1, -1):
@@ -1105,7 +1233,9 @@ async def stats_top_chats(session: AsyncSession = Depends(get_session)) -> list[
 
 
 @app.get("/api/stats/model-quality")
-async def stats_model_quality(session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def stats_model_quality(
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
     runs_q = await session.execute(
         select(TrainingRun)
         .where(TrainingRun.finished_at.is_not(None))
@@ -1119,36 +1249,44 @@ async def stats_model_quality(session: AsyncSession = Depends(get_session)) -> l
         cond = [TrainingPair.timestamp >= start]
         if end is not None:
             cond.append(TrainingPair.timestamp < end)
-        good = (await session.execute(
-            select(func.count(TrainingPair.id)).where(
-                *cond, TrainingPair.feedback == "good"
+        good = (
+            await session.execute(
+                select(func.count(TrainingPair.id)).where(
+                    *cond, TrainingPair.feedback == "good"
+                )
             )
-        )).scalar() or 0
-        bad = (await session.execute(
-            select(func.count(TrainingPair.id)).where(
-                *cond, TrainingPair.feedback == "bad"
+        ).scalar() or 0
+        bad = (
+            await session.execute(
+                select(func.count(TrainingPair.id)).where(
+                    *cond, TrainingPair.feedback == "bad"
+                )
             )
-        )).scalar() or 0
+        ).scalar() or 0
         total = good + bad
         approval_rate = (good / total) if total else 0.0
         rejection_rate = (bad / total) if total else 0.0
-        out.append({
-            "version": run.version,
-            "run_id": run.id,
-            "is_active": run.is_active,
-            "status": run.status,
-            "finished_at": _iso_utc(run.finished_at),
-            "approved": good,
-            "rejected": bad,
-            "total": total,
-            "approval_rate": approval_rate,
-            "rejection_rate": rejection_rate,
-        })
+        out.append(
+            {
+                "version": run.version,
+                "run_id": run.id,
+                "is_active": run.is_active,
+                "status": run.status,
+                "finished_at": _iso_utc(run.finished_at),
+                "approved": good,
+                "rejected": bad,
+                "total": total,
+                "approval_rate": approval_rate,
+                "rejection_rate": rejection_rate,
+            }
+        )
     return out
 
 
 @app.get("/api/stats/response-time")
-async def stats_response_time(session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def stats_response_time(
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
     result = await session.execute(
         select(
             Message.chat_id,
@@ -1177,12 +1315,14 @@ async def stats_response_time(session: AsyncSession = Depends(get_session)) -> l
     for chat_id, agg in by_chat.items():
         if agg["count"] == 0:
             continue
-        out.append({
-            "chat_id": chat_id,
-            "chat_name": chat_names.get(chat_id, ""),
-            "avg_seconds": agg["total"] / agg["count"],
-            "replies": agg["count"],
-        })
+        out.append(
+            {
+                "chat_id": chat_id,
+                "chat_name": chat_names.get(chat_id, ""),
+                "avg_seconds": agg["total"] / agg["count"],
+                "replies": agg["count"],
+            }
+        )
     out.sort(key=lambda x: x["avg_seconds"])
     return out
 
@@ -1201,9 +1341,12 @@ async def telegram_webhook(token: str, request: Request) -> JSONResponse:
 
 frontend_dist = ROOT_DIR / "frontend" / "dist"
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    app.mount(
+        "/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend"
+    )
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False)

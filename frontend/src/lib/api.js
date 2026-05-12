@@ -57,6 +57,7 @@ export const api = {
       body: JSON.stringify({ message_id, feedback, corrected_text }),
     }),
   trainingStatus: () => request("/api/training/status"),
+  qualityStats: () => request("/api/quality/stats"),
   buildDataset: () => request("/api/training/build-dataset", { method: "POST" }),
   startTraining: () => request("/api/training/start", { method: "POST" }),
   cancelTraining: () => request("/api/training/cancel", { method: "POST" }),

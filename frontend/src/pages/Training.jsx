@@ -15,15 +15,21 @@ export default function Training() {
   const [progress, setProgress] = useState(null);
   const [lossHistory, setLossHistory] = useState([]);
   const [datasetInfo, setDatasetInfo] = useState(null);
+  const [qualityStats, setQualityStats] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [runLogs, setRunLogs] = useState({});
   const [loadingLogId, setLoadingLogId] = useState(null);
 
   const refresh = async () => {
-    const [st, rs] = await Promise.all([api.trainingStatus(), api.trainingRuns()]);
+    const [st, rs, qs] = await Promise.all([
+      api.trainingStatus(),
+      api.trainingRuns(),
+      api.qualityStats(),
+    ]);
     setStatus(st);
     setRuns(rs);
+    setQualityStats(qs);
   };
 
   useEffect(() => {
@@ -148,6 +154,29 @@ export default function Training() {
           title="Активный адаптер"
           value={status?.active_adapter ? `v${status.active_adapter.version}` : "—"}
         />
+      </div>
+
+      <div className="card">
+        <div className="label">Отклонено фильтром качества</div>
+        <div className="text-xl font-semibold mt-1">
+          {qualityStats
+            ? `${qualityStats.total_rejected} из ${qualityStats.total_generated}`
+            : "—"}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 text-sm">
+          {qualityStats?.reasons?.length ? (
+            qualityStats.reasons.map((item) => (
+              <span
+                key={item.reason}
+                className="rounded-full bg-white/10 px-3 py-1 text-muted"
+              >
+                {reasonLabel(item.reason)}: {item.count}
+              </span>
+            ))
+          ) : (
+            <span className="text-muted">Нет отклонений</span>
+          )}
+        </div>
       </div>
 
       <div className="card flex flex-wrap gap-2 items-center">
@@ -359,6 +388,18 @@ export default function Training() {
       </div>
     </div>
   );
+}
+
+function reasonLabel(reason) {
+  const labels = {
+    too_short: "Слишком короткий ответ",
+    language_mismatch: "Другой язык",
+    identical_to_incoming: "Повтор входящего",
+    ai_phrase: "AI-фраза",
+    emoji_only: "Только emoji",
+    no_variants: "Нет вариантов",
+  };
+  return labels[reason] || reason;
 }
 
 function Stat({ title, value }) {
