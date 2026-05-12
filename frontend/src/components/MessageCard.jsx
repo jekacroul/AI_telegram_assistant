@@ -10,6 +10,39 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
   const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "";
   const isMine = msg.is_mine;
 
+  // Render media if present
+  const renderMedia = () => {
+    if (!msg.media_path || !msg.media_type) return null;
+    
+    const mediaUrl = `/media/${msg.media_path}`;
+    
+    if (msg.media_type === "photo") {
+      return (
+        <div className="mt-2">
+          <img 
+            src={mediaUrl} 
+            alt="Photo" 
+            className="max-w-full rounded-lg max-h-96 object-contain"
+          />
+        </div>
+      );
+    }
+    
+    if (msg.media_type === "video" || msg.media_type === "gif") {
+      return (
+        <div className="mt-2">
+          <video 
+            src={mediaUrl} 
+            controls 
+            className="max-w-full rounded-lg max-h-96"
+          />
+        </div>
+      );
+    }
+    
+    return null;
+  };
+
   return (
     <div className="card flex gap-3 items-start">
       <div
@@ -26,6 +59,7 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
           <span className="text-xs text-muted ml-auto">{ts}</span>
         </div>
         <div className="text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+        {renderMedia()}
         {msg.replied && msg.reply_text && (
           <div className="mt-2 pl-3 border-l-2 border-accent/50 text-sm text-muted">
             <div className="text-[10px] uppercase tracking-wide mb-1">

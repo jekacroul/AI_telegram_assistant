@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 
@@ -29,7 +31,7 @@ from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
 from sqlalchemy import select
 
-from .config import settings
+from .config import ROOT_DIR, settings
 from .database import Message, QualityLog, SessionLocal, get_setting, set_setting
 from .delay import get_delay_settings
 from .dialog_backup import mark_messages_deleted
@@ -171,6 +173,74 @@ class TelegramService:
             log.exception("failed to remember last private chat")
 
     @staticmethod
+    def _is_media_saveable(tg_msg: TgMessage) -> bool:
+        """Check if media can be saved (not view-once or private)."""
+        # View-once photo/video
+        if getattr(tg_msg, "has_protected_content", False):
+            return False
+        # Check for self-destructing media
+        if getattr(tg_msg, "media_has_scheduled", False):
+            return False
+        return True
+
+    async def _download_and_save_media(
+        self, tg_msg: TgMessage, chat_id: int, message_id: int
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Download media and save to disk. Returns (media_type, relative_path) or (None, None)."""
+        if not self.bot or not self._is_media_saveable(tg_msg):
+            return None, None
+
+        media_dir = ROOT_DIR / "media" / str(chat_id)
+        media_dir.mkdir(parents=True, exist_ok=True)
+
+        file_id = None
+        media_type = None
+
+        # Priority: photo > video > animation > document
+        if getattr(tg_msg, "photo", None):
+            photos = tg_msg.photo
+            if photos:
+                # Get highest resolution photo
+                file_id = photos[-1].file_id
+                media_type = "photo"
+
+        if not file_id and getattr(tg_msg, "video", None):
+            file_id = tg_msg.video.file_id
+            media_type = "video"
+
+        if not file_id and getattr(tg_msg, "animation", None):
+            file_id = tg_msg.animation.file_id
+            media_type = "gif"
+
+        if not file_id and getattr(tg_msg, "document", None):
+            doc = tg_msg.document
+            if doc.mime_type and doc.mime_type.startswith(("image/", "video/")):
+                file_id = doc.file_id
+                media_type = "document"
+
+        if not file_id:
+            return None, None
+
+        try:
+            file = await self.bot.get_file(file_id)
+            ext = Path(file.file_path).suffix if file.file_path else ""
+            if not ext and media_type:
+                ext_map = {"photo": ".jpg", "video": ".mp4", "gif": ".gif", "document": ""}
+                ext = ext_map.get(media_type, "")
+
+            filename = f"{message_id}{ext}" if ext else f"{message_id}"
+            file_path = media_dir / filename
+
+            await self.bot.download_file(file.file_path, str(file_path))
+
+            # Return relative path from ROOT_DIR
+            relative_path = str(Path("media") / str(chat_id) / filename)
+            return media_type, relative_path
+        except Exception as e:  # noqa: BLE001
+            log.exception("Failed to download media: %s", e)
+            return None, None
+
+    @staticmethod
     def _extract_message_content(tg_msg: TgMessage) -> str:
         text = (tg_msg.text or "").strip()
         if text:
@@ -267,6 +337,12 @@ class TelegramService:
                 should_reply = mentioned
 
             tg_ts = _naive_utc(getattr(tg_msg, "date", None))
+            
+            # Download and save media if present
+            media_type, media_path = await self._download_and_save_media(
+                tg_msg, chat_id, tg_msg.message_id
+            )
+            
             async with SessionLocal() as session:
                 row = Message(
                     chat_id=chat_id,
@@ -279,6 +355,8 @@ class TelegramService:
                     timestamp=tg_ts,
                     message_id=tg_msg.message_id,
                     business_connection_id=business_connection_id,
+                    media_type=media_type,
+                    media_path=media_path,
                 )
                 session.add(row)
                 await session.commit()

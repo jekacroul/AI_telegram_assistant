@@ -427,6 +427,8 @@ def _message_to_dict(m: Message) -> dict:
         "replied": m.replied,
         "reply_text": m.reply_text,
         "pending_reason": m.pending_reason,
+        "media_type": m.media_type,
+        "media_path": m.media_path,
     }
 
 
@@ -1344,6 +1346,11 @@ if frontend_dist.exists():
     app.mount(
         "/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend"
     )
+
+# Serve media files
+media_dir = ROOT_DIR / "media"
+if media_dir.exists():
+    app.mount("/media", StaticFiles(directory=str(media_dir)), name="media")
 
 
 if __name__ == "__main__":
