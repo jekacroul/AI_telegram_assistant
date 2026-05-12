@@ -17,7 +17,7 @@ export default function Dialogs() {
   const [chats, setChats] = useState([]);
   const [settings, setSettings] = useState({
     excluded_chats: [],
-    interval_hours: 24,
+    interval_minutes: 1440,
     last_run_at: null,
   });
   const [selectedChatId, setSelectedChatId] = useState(null);
@@ -27,7 +27,7 @@ export default function Dialogs() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [intervalDraft, setIntervalDraft] = useState("24");
+  const [intervalDraft, setIntervalDraft] = useState("1440");
   const [savingInterval, setSavingInterval] = useState(false);
   const [intervalSaved, setIntervalSaved] = useState(false);
 
@@ -41,7 +41,7 @@ export default function Dialogs() {
       const [c, s] = await Promise.all([api.dialogsChats(), api.dialogsSettings()]);
       setChats(c);
       setSettings(s);
-      setIntervalDraft(String(s.interval_hours ?? 24));
+      setIntervalDraft(String(s.interval_minutes ?? 1440));
     } catch (e) {
       setError(e.message || String(e));
     }
@@ -132,8 +132,8 @@ export default function Dialogs() {
     setSavingInterval(true);
     setError("");
     try {
-      await api.saveDialogsSettings({ interval_hours: parsed });
-      setSettings((s) => ({ ...s, interval_hours: parsed }));
+      await api.saveDialogsSettings({ interval_minutes: parsed });
+      setSettings((s) => ({ ...s, interval_minutes: parsed }));
       setIntervalDraft(String(parsed));
       setIntervalSaved(true);
       setTimeout(() => setIntervalSaved(false), 1500);
@@ -144,8 +144,54 @@ export default function Dialogs() {
     }
   }
 
+  async function deleteSelectedBackup() {
+    if (!selectedBackup) return;
+    const version = versions.find((v) => v.id === selectedBackup);
+    const label = version ? `v${version.version}` : "выбранную версию";
+    if (!window.confirm(`Удалить ${label} резервной копии?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.deleteDialogsBackup(selectedBackup);
+      await loadChats();
+      if (selectedChatId != null) await loadVersions(selectedChatId);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteChatHistory() {
+    if (selectedChatId == null || !selectedChat) return;
+    const name = selectedChat.chat_name || `chat ${selectedChat.chat_id}`;
+    if (
+      !window.confirm(
+        `Удалить всю историю резервных копий для «${name}»? Это действие нельзя отменить.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.deleteDialogsHistory(selectedChatId);
+      await loadChats();
+      await loadVersions(selectedChatId);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function exportSelectedBackup() {
+    if (!selectedBackup) return;
+    window.location.href = api.dialogsBackupExportUrl(selectedBackup);
+  }
+
   const intervalDirty =
-    String(settings.interval_hours ?? "") !== intervalDraft.trim();
+    String(settings.interval_minutes ?? "") !== intervalDraft.trim();
 
   const selectedChat = chats.find((c) => c.chat_id === selectedChatId);
 
@@ -160,11 +206,11 @@ export default function Dialogs() {
             Последний запуск: {formatDate(settings.last_run_at) || "—"}
           </div>
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-muted">Интервал, ч:</span>
+            <span className="text-xs text-muted">Интервал, мин:</span>
             <input
               type="number"
               min={1}
-              className="input w-20 py-1 text-xs"
+              className="input w-24 py-1 text-xs"
               value={intervalDraft}
               onChange={(e) => setIntervalDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -274,7 +320,7 @@ export default function Dialogs() {
                     className="input py-1 text-sm w-32"
                     value={selectedBackup || ""}
                     onChange={(e) => selectBackup(Number(e.target.value))}
-                    disabled={versions.length === 0}
+                    disabled={versions.length === 0 || busy}
                   >
                     {versions.length === 0 && (
                       <option value="">нет копий</option>
@@ -285,6 +331,29 @@ export default function Dialogs() {
                       </option>
                     ))}
                   </select>
+                  <button
+                    className="btn-secondary disabled:opacity-50"
+                    onClick={exportSelectedBackup}
+                    disabled={!selectedBackup || busy}
+                  >
+                    Скачать TXT
+                  </button>
+                  <button
+                    className="btn-secondary disabled:opacity-50"
+                    onClick={deleteSelectedBackup}
+                    disabled={!selectedBackup || busy}
+                    title="Удалить выбранную версию резервной копии"
+                  >
+                    Удалить версию
+                  </button>
+                  <button
+                    className="btn-secondary text-bad disabled:opacity-50"
+                    onClick={deleteChatHistory}
+                    disabled={versions.length === 0 || busy}
+                    title="Удалить все версии резервных копий этого чата"
+                  >
+                    Удалить историю
+                  </button>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1 bg-bg/50">

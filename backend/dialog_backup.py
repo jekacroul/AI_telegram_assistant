@@ -22,9 +22,10 @@ from .database import (
 log = logging.getLogger(__name__)
 
 
-DEFAULT_INTERVAL_HOURS = 24
+DEFAULT_INTERVAL_MINUTES = 24 * 60
 SETTING_EXCLUDED = "dialog_backup_excluded"
-SETTING_INTERVAL = "dialog_backup_interval_hours"
+SETTING_INTERVAL = "dialog_backup_interval_minutes"
+LEGACY_SETTING_INTERVAL_HOURS = "dialog_backup_interval_hours"
 SETTING_LAST_RUN = "dialog_backup_last_run"
 
 
@@ -57,13 +58,24 @@ async def set_excluded_chats(session: AsyncSession, chat_ids: list[int]) -> None
     await set_setting(session, SETTING_EXCLUDED, csv)
 
 
-async def get_interval_hours(session: AsyncSession) -> int:
-    raw = await get_setting(session, SETTING_INTERVAL, str(DEFAULT_INTERVAL_HOURS))
-    try:
-        value = int(raw)
-    except ValueError:
-        value = DEFAULT_INTERVAL_HOURS
-    return max(1, value)
+async def get_interval_minutes(session: AsyncSession) -> int:
+    raw = await get_setting(session, SETTING_INTERVAL, "")
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = DEFAULT_INTERVAL_MINUTES
+        return max(1, value)
+
+    legacy_hours = await get_setting(session, LEGACY_SETTING_INTERVAL_HOURS, "")
+    if legacy_hours:
+        try:
+            value = int(legacy_hours) * 60
+        except ValueError:
+            value = DEFAULT_INTERVAL_MINUTES
+        return max(1, value)
+
+    return DEFAULT_INTERVAL_MINUTES
 
 
 def _compute_signature(rows: list[Message]) -> str:
@@ -241,11 +253,11 @@ class DialogBackupScheduler:
         while not self._stop_event.is_set():
             try:
                 async with SessionLocal() as session:
-                    interval_hours = await get_interval_hours(session)
+                    interval_minutes = await get_interval_minutes(session)
                 await self.run_now()
             except Exception:  # noqa: BLE001
-                interval_hours = DEFAULT_INTERVAL_HOURS
-            sleep_seconds = max(60, interval_hours * 3600)
+                interval_minutes = DEFAULT_INTERVAL_MINUTES
+            sleep_seconds = max(60, interval_minutes * 60)
             try:
                 await asyncio.wait_for(self._wake_event.wait(), timeout=sleep_seconds)
             except asyncio.TimeoutError:
