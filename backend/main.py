@@ -84,6 +84,9 @@ from .style_engine import (
 from .trainer import (
     activate_adapter,
     cancel_training,
+    deactivate_adapter,
+    delete_training_run,
+    get_training_run_error_log,
     list_runs,
     start_training,
     training_state,
@@ -599,6 +602,29 @@ async def training_cancel() -> dict:
 async def training_activate(run_id: int) -> dict:
     ok = await activate_adapter(run_id)
     return {"ok": ok}
+
+
+@app.post("/api/training/deactivate")
+async def training_deactivate() -> dict:
+    ok = await deactivate_adapter()
+    return {"ok": ok}
+
+
+@app.delete("/api/training/runs/{run_id}")
+async def training_delete_run(run_id: int) -> dict:
+    ok, reason = await delete_training_run(run_id)
+    if not ok:
+        status_code = 404 if reason == "not found" else 409
+        raise HTTPException(status_code=status_code, detail=reason)
+    return {"ok": True}
+
+
+@app.get("/api/training/runs/{run_id}/error-log")
+async def training_run_error_log(run_id: int) -> dict:
+    log_info = await get_training_run_error_log(run_id)
+    if log_info.get("error") == "run not found":
+        raise HTTPException(status_code=404, detail="run not found")
+    return log_info
 
 
 @app.get("/api/training/runs")

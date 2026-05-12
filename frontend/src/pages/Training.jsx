@@ -17,6 +17,8 @@ export default function Training() {
   const [datasetInfo, setDatasetInfo] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [runLogs, setRunLogs] = useState({});
+  const [loadingLogId, setLoadingLogId] = useState(null);
 
   const refresh = async () => {
     const [st, rs] = await Promise.all([api.trainingStatus(), api.trainingRuns()]);
@@ -81,6 +83,52 @@ export default function Training() {
     refresh();
   }
 
+  async function deactivate() {
+    await api.deactivateAdapter();
+    refresh();
+  }
+
+  async function removeRun(run) {
+    const confirmed = window.confirm(`Удалить v${run.version} из истории?`);
+    if (!confirmed) return;
+    setError("");
+    try {
+      await api.deleteTrainingRun(run.id);
+      setRunLogs((prev) => {
+        const next = { ...prev };
+        delete next[run.id];
+        return next;
+      });
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function toggleLog(run) {
+    if (runLogs[run.id]?.open) {
+      setRunLogs((prev) => ({
+        ...prev,
+        [run.id]: { ...prev[run.id], open: false },
+      }));
+      return;
+    }
+
+    setLoadingLogId(run.id);
+    setError("");
+    try {
+      const logInfo = runLogs[run.id]?.data || (await api.trainingRunErrorLog(run.id));
+      setRunLogs((prev) => ({
+        ...prev,
+        [run.id]: { open: true, data: logInfo },
+      }));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoadingLogId(null);
+    }
+  }
+
   const canTrain = (status?.training_pairs || 0) >= 50 && !status?.running;
 
   return (
@@ -117,6 +165,11 @@ export default function Training() {
         {status?.running && (
           <button className="btn-danger" onClick={cancel}>
             Отменить
+          </button>
+        )}
+        {status?.active_adapter && (
+          <button className="btn-secondary" onClick={deactivate}>
+            Деактивировать адаптер
           </button>
         )}
         {datasetInfo && datasetInfo.total_pairs > 0 && (
@@ -212,31 +265,94 @@ export default function Training() {
               </tr>
             )}
             {runs.map((r) => (
-              <tr key={r.id} className="border-t border-white/5">
-                <td className="py-2">v{r.version}</td>
-                <td>
-                  {r.started_at ? new Date(r.started_at).toLocaleString() : "—"}
-                </td>
-                <td>{r.pair_count}</td>
-                <td>{r.final_loss?.toFixed?.(4) ?? "—"}</td>
-                <td>
-                  {r.is_active ? (
-                    <span className="text-good">активный</span>
-                  ) : (
-                    r.status
-                  )}
-                </td>
-                <td className="text-right">
-                  {!r.is_active && r.status === "done" && (
-                    <button
-                      className="btn-secondary"
-                      onClick={() => activate(r.id)}
-                    >
-                      Активировать
-                    </button>
-                  )}
-                </td>
-              </tr>
+              <React.Fragment key={r.id}>
+                <tr className="border-t border-white/5">
+                  <td className="py-2">v{r.version}</td>
+                  <td>
+                    {r.started_at ? new Date(r.started_at).toLocaleString() : "—"}
+                  </td>
+                  <td>{r.pair_count}</td>
+                  <td>{r.final_loss?.toFixed?.(4) ?? "—"}</td>
+                  <td>
+                    {r.is_active ? (
+                      <span className="text-good">активный</span>
+                    ) : (
+                      r.status
+                    )}
+                  </td>
+                  <td className="text-right">
+                    <div className="flex justify-end gap-2 flex-wrap">
+                      {!r.is_active && r.status === "done" && (
+                        <button
+                          className="btn-secondary"
+                          onClick={() => activate(r.id)}
+                        >
+                          Активировать
+                        </button>
+                      )}
+                      {r.is_active && (
+                        <button className="btn-secondary" onClick={deactivate}>
+                          Деактивировать
+                        </button>
+                      )}
+                      {r.status !== "running" && (
+                        <button
+                          className="btn-secondary"
+                          onClick={() => toggleLog(r)}
+                        >
+                          {loadingLogId === r.id
+                            ? "Загрузка..."
+                            : runLogs[r.id]?.open
+                              ? "Скрыть лог"
+                              : "Лог"}
+                        </button>
+                      )}
+                      {(r.status === "failed" || r.status === "cancelled") &&
+                        !r.is_active && (
+                        <button
+                          className="btn-danger"
+                          onClick={() => removeRun(r)}
+                        >
+                          Удалить
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                {runLogs[r.id]?.open && (
+                  <tr className="border-t border-white/5">
+                    <td colSpan="6" className="pb-3">
+                      <div className="mt-2 rounded-lg border border-white/10 bg-black/30 p-3">
+                        <div className="flex flex-wrap gap-2 items-center text-xs text-muted mb-2">
+                          <span>Лог запуска v{r.version}</span>
+                          {runLogs[r.id].data?.log_path && (
+                            <code className="break-all">{runLogs[r.id].data.log_path}</code>
+                          )}
+                        </div>
+                        {runLogs[r.id].data?.error && (
+                          <div
+                            className={`text-sm mb-2 ${
+                              r.status === "failed" ? "text-bad" : "text-muted"
+                            }`}
+                          >
+                            {r.status === "failed" ? "Ошибка: " : "Последняя строка: "}
+                            {runLogs[r.id].data.error}
+                          </div>
+                        )}
+                        {runLogs[r.id].data?.excerpt ? (
+                          <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-white/90">
+                            {runLogs[r.id].data.excerpt}
+                          </pre>
+                        ) : (
+                          <div className="text-muted text-sm">
+                            Не удалось найти лог запуска.
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>
