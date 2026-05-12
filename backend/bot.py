@@ -19,6 +19,7 @@ def _naive_utc(dt: Optional[datetime]) -> datetime:
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
@@ -29,7 +30,7 @@ from aiogram.types import Update
 from sqlalchemy import select
 
 from .config import settings
-from .database import Message, SessionLocal, get_setting, set_setting
+from .database import Message, QualityLog, SessionLocal, get_setting, set_setting
 from .delay import get_delay_settings
 from .dialog_backup import mark_messages_deleted
 from .notifications import (
@@ -50,8 +51,8 @@ ALLOWED_UPDATES = [
 ]
 from .event_bus import message_bus
 from .llm_engine import LLMUnavailableError, get_client, pick_auto_variant
+from .quality_filter import is_good_response
 from .style_engine import get_latest_profile, reanalyze_and_store
-
 
 log = logging.getLogger(__name__)
 
@@ -220,7 +221,11 @@ class TelegramService:
                 except Exception:  # noqa: BLE001
                     me = None
 
-            owner_id = await self._business_owner_id(business_connection_id) if is_business else None
+            owner_id = (
+                await self._business_owner_id(business_connection_id)
+                if is_business
+                else None
+            )
             sender = tg_msg.from_user
             sender_id = sender.id if sender else 0
             sender_name = sender.full_name if sender else "unknown"
@@ -243,7 +248,10 @@ class TelegramService:
             self._cancel_delayed_reply(chat_id)
 
             should_reply = not is_mine
-            if not is_business and tg_msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            if not is_business and tg_msg.chat.type in (
+                ChatType.GROUP,
+                ChatType.SUPERGROUP,
+            ):
                 mentioned = False
                 if me and tg_msg.text and f"@{me.username}" in tg_msg.text:
                     mentioned = True
@@ -297,19 +305,22 @@ class TelegramService:
                     should_reply = False
                     await session.commit()
 
-            await message_bus.publish("incoming", {
-                "id": msg_id,
-                "chat_id": chat_id,
-                "chat_name": chat_name,
-                "sender_name": row.sender_name,
-                "text": content_text,
-                "is_mine": is_mine,
-                "business": is_business,
-                "timestamp": _iso_utc_now(),
-                "auto_reply": auto_reply,
-                "will_reply": should_reply,
-                "pending_reason": row.pending_reason,
-            })
+            await message_bus.publish(
+                "incoming",
+                {
+                    "id": msg_id,
+                    "chat_id": chat_id,
+                    "chat_name": chat_name,
+                    "sender_name": row.sender_name,
+                    "text": content_text,
+                    "is_mine": is_mine,
+                    "business": is_business,
+                    "timestamp": _iso_utc_now(),
+                    "auto_reply": auto_reply,
+                    "will_reply": should_reply,
+                    "pending_reason": row.pending_reason,
+                },
+            )
 
             if is_mine:
                 await self._maybe_reanalyze()
@@ -324,17 +335,24 @@ class TelegramService:
 
             if auto_reply:
                 try:
-                    variants = await self._generate_variants(
+                    variants, reject_reason = await self._generate_variants(
                         content_text, sender_name, chat_id
                     )
-                    chosen = pick_auto_variant(variants) or "ок"
+                    chosen = pick_auto_variant(variants)
+                    if not chosen:
+                        await self._mark_pending_quality(msg_id, reject_reason)
+                        await self._maybe_reanalyze()
+                        return
                     await self._delay_before_auto_reply(chat_id, chat_name)
                     await self.send_reply(
-                        chat_id, chosen,
+                        chat_id,
+                        chosen,
                         reply_to=tg_msg.message_id,
                         business_connection_id=business_connection_id,
                     )
-                    await self._record_reply(msg_id, chosen, sender_name, chat_id, chat_name)
+                    await self._record_reply(
+                        msg_id, chosen, sender_name, chat_id, chat_name
+                    )
                     await notify_owner(chat_name, sender_name, content_text, chosen)
                 except asyncio.CancelledError:
                     log.info("Отменяю отложенный ответ в %s", chat_name)
@@ -346,7 +364,8 @@ class TelegramService:
                     if "BUSINESS_PEER_INVALID" in str(e):
                         log.warning(
                             "auto reply blocked by business privacy for chat %s: %s",
-                            chat_id, e,
+                            chat_id,
+                            e,
                         )
                         self.last_error = (
                             "Telegram business privacy blocks the bot for this chat "
@@ -369,7 +388,6 @@ class TelegramService:
         except Exception as e:  # noqa: BLE001
             self.last_error = str(e)
             log.exception("handle_incoming error")
-
 
     def _cancel_delayed_reply(self, chat_id: int) -> None:
         task = self._delayed_reply_tasks.get(chat_id)
@@ -418,12 +436,14 @@ class TelegramService:
 
     async def _generate_variants(
         self, text: str, sender_name: str, chat_id: int
-    ) -> list[str]:
+    ) -> tuple[list[str], str]:
         async with SessionLocal() as session:
             profile = await get_latest_profile(session)
             history_q = await session.execute(
-                select(Message).where(Message.chat_id == chat_id)
-                .order_by(Message.timestamp.desc()).limit(8)
+                select(Message)
+                .where(Message.chat_id == chat_id)
+                .order_by(Message.timestamp.desc())
+                .limit(8)
             )
             history = list(history_q.scalars().all())[::-1]
             history_dicts = [
@@ -431,11 +451,59 @@ class TelegramService:
                 for m in history
             ]
         client = get_client()
-        return await client.generate_reply(
-            incoming_text=text,
-            sender_name=sender_name,
-            style_profile=profile,
-            chat_history=history_dicts,
+        last_reason = "no_variants"
+        logged_rejection = False
+        for _ in range(3):
+            variants = await client.generate_reply(
+                incoming_text=text,
+                sender_name=sender_name,
+                style_profile=profile,
+                chat_history=history_dicts,
+            )
+            accepted: list[str] = []
+            async with SessionLocal() as session:
+                for variant in variants:
+                    ok, reason = is_good_response(variant, text, profile)
+                    if ok:
+                        accepted.append(variant)
+                    else:
+                        last_reason = reason
+                        logged_rejection = True
+                        session.add(
+                            QualityLog(
+                                reason=reason,
+                                incoming_text=text,
+                                rejected_text=variant,
+                            )
+                        )
+                await session.commit()
+            if accepted:
+                return accepted, "ok"
+        if not logged_rejection:
+            async with SessionLocal() as session:
+                session.add(
+                    QualityLog(
+                        reason=last_reason,
+                        incoming_text=text,
+                        rejected_text="",
+                    )
+                )
+                await session.commit()
+        return [], last_reason
+
+    async def _mark_pending_quality(self, msg_id: int, reason: str) -> None:
+        async with SessionLocal() as session:
+            result = await session.execute(select(Message).where(Message.id == msg_id))
+            row = result.scalar_one_or_none()
+            if row:
+                row.pending_reason = "quality_filter"
+                await session.commit()
+        log.warning(
+            "quality filter rejected all attempts for message %s: %s", msg_id, reason
+        )
+        await message_bus.publish(
+            "pending",
+            {"id": msg_id, "reason": "quality_filter", "quality_reason": reason},
         )
 
     async def _record_reply(
@@ -447,29 +515,36 @@ class TelegramService:
         chat_name: str,
     ) -> None:
         async with SessionLocal() as session:
-            result = await session.execute(select(Message).where(Message.id == original_id))
+            result = await session.execute(
+                select(Message).where(Message.id == original_id)
+            )
             original = result.scalar_one_or_none()
             if original:
                 original.replied = True
                 original.reply_text = reply_text
-            session.add(Message(
-                chat_id=chat_id,
-                chat_name=chat_name,
-                sender_id=0,
-                sender_name=settings.user_name,
-                is_mine=True,
-                text=reply_text,
-                timestamp=datetime.utcnow(),
-            ))
+            session.add(
+                Message(
+                    chat_id=chat_id,
+                    chat_name=chat_name,
+                    sender_id=0,
+                    sender_name=settings.user_name,
+                    is_mine=True,
+                    text=reply_text,
+                    timestamp=datetime.utcnow(),
+                )
+            )
             await session.commit()
-        await message_bus.publish("sent", {
-            "chat_id": chat_id,
-            "chat_name": chat_name,
-            "to": sender_name,
-            "text": reply_text,
-            "timestamp": _iso_utc_now(),
-            "original_id": original_id,
-        })
+        await message_bus.publish(
+            "sent",
+            {
+                "chat_id": chat_id,
+                "chat_name": chat_name,
+                "to": sender_name,
+                "text": reply_text,
+                "timestamp": _iso_utc_now(),
+                "original_id": original_id,
+            },
+        )
 
     async def send_reply(
         self,
@@ -490,39 +565,51 @@ class TelegramService:
             kwargs.pop("reply_to_message_id", None)
 
     async def send_and_record(
-        self, chat_id: int, text: str, reply_to: Optional[int] = None,
+        self,
+        chat_id: int,
+        text: str,
+        reply_to: Optional[int] = None,
         original_id: Optional[int] = None,
         business_connection_id: Optional[str] = None,
     ) -> None:
         await self.send_reply(
-            chat_id, text, reply_to=reply_to,
+            chat_id,
+            text,
+            reply_to=reply_to,
             business_connection_id=business_connection_id,
         )
         async with SessionLocal() as session:
             chat_name = ""
             if original_id is not None:
-                result = await session.execute(select(Message).where(Message.id == original_id))
+                result = await session.execute(
+                    select(Message).where(Message.id == original_id)
+                )
                 original = result.scalar_one_or_none()
                 if original:
                     chat_name = original.chat_name
                     original.replied = True
                     original.reply_text = text
-            session.add(Message(
-                chat_id=chat_id,
-                chat_name=chat_name,
-                sender_id=0,
-                sender_name=settings.user_name,
-                is_mine=True,
-                text=text,
-                timestamp=datetime.utcnow(),
-            ))
+            session.add(
+                Message(
+                    chat_id=chat_id,
+                    chat_name=chat_name,
+                    sender_id=0,
+                    sender_name=settings.user_name,
+                    is_mine=True,
+                    text=text,
+                    timestamp=datetime.utcnow(),
+                )
+            )
             await session.commit()
-        await message_bus.publish("sent", {
-            "chat_id": chat_id,
-            "text": text,
-            "timestamp": _iso_utc_now(),
-            "original_id": original_id,
-        })
+        await message_bus.publish(
+            "sent",
+            {
+                "chat_id": chat_id,
+                "text": text,
+                "timestamp": _iso_utc_now(),
+                "original_id": original_id,
+            },
+        )
 
     async def feed_update(self, raw: dict) -> None:
         if not self.dp or not self.bot:
@@ -548,7 +635,9 @@ class TelegramService:
             "has_custom_certificate": info.has_custom_certificate,
             "pending_update_count": info.pending_update_count,
             "ip_address": info.ip_address,
-            "last_error_date": info.last_error_date.isoformat() if info.last_error_date else None,
+            "last_error_date": (
+                info.last_error_date.isoformat() if info.last_error_date else None
+            ),
             "last_error_message": info.last_error_message,
             "max_connections": info.max_connections,
             "allowed_updates": info.allowed_updates,

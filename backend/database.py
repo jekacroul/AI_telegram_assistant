@@ -39,7 +39,9 @@ class Message(Base):
     sender_name: Mapped[str] = mapped_column(String(255), default="")
     is_mine: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     text: Mapped[str] = mapped_column(Text, default="")
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
     message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     replied: Mapped[bool] = mapped_column(Boolean, default=False)
     reply_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -57,7 +59,9 @@ class DialogBackup(Base):
     chat_id: Mapped[int] = mapped_column(Integer, index=True)
     chat_name: Mapped[str] = mapped_column(String(255), default="")
     version: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
     message_count: Mapped[int] = mapped_column(Integer, default=0)
     signature: Mapped[str] = mapped_column(String(64), default="")
 
@@ -111,6 +115,18 @@ class StyleProfile(Base):
     profile_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     messages_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class QualityLog(Base):
+    __tablename__ = "quality_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    reason: Mapped[str] = mapped_column(String(64), index=True)
+    incoming_text: Mapped[str] = mapped_column(Text, default="")
+    rejected_text: Mapped[str] = mapped_column(Text, default="")
 
 
 class Setting(Base):
