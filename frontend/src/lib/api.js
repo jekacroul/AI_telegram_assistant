@@ -90,6 +90,7 @@ export const api = {
   statsTopChats: () => request("/api/stats/top-chats"),
   statsModelQuality: () => request("/api/stats/model-quality"),
   statsResponseTime: () => request("/api/stats/response-time"),
+  qualityStats: () => request("/api/quality/stats"),
 };
 
 export function streamEvents(path, onEvent) {

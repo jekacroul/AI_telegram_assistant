@@ -118,6 +118,18 @@ class Setting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
 
 
+class QualityLog(Base):
+    __tablename__ = "quality_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    reason: Mapped[str] = mapped_column(String(64), index=True)
+    incoming_text: Mapped[str] = mapped_column(Text, default="")
+    rejected_text: Mapped[str] = mapped_column(Text, default="")
+
+
 engine = create_async_engine(settings.db_url, echo=False, future=True)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

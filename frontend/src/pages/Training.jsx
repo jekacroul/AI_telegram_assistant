@@ -9,6 +9,15 @@ function formatEta(seconds) {
   return `${m}m ${s}s`;
 }
 
+const REASON_LABELS = {
+  empty: "Пустой ответ",
+  too_short: "Слишком короткий",
+  echoes_incoming: "Повторяет сообщение",
+  ai_phrase: "AI-фраза в начале",
+  language_mismatch: "Другой язык",
+  emoji_only: "Только эмодзи",
+};
+
 export default function Training() {
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
@@ -17,11 +26,17 @@ export default function Training() {
   const [datasetInfo, setDatasetInfo] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [quality, setQuality] = useState(null);
 
   const refresh = async () => {
-    const [st, rs] = await Promise.all([api.trainingStatus(), api.trainingRuns()]);
+    const [st, rs, q] = await Promise.all([
+      api.trainingStatus(),
+      api.trainingRuns(),
+      api.qualityStats().catch(() => null),
+    ]);
     setStatus(st);
     setRuns(rs);
+    setQuality(q);
   };
 
   useEffect(() => {
@@ -101,6 +116,42 @@ export default function Training() {
           value={status?.active_adapter ? `v${status.active_adapter.version}` : "—"}
         />
       </div>
+
+      {quality && (
+        <div className="card">
+          <div className="label">
+            Отклонено фильтром качества: {quality.total_rejected} из{" "}
+            {quality.total_generated}
+          </div>
+          {quality.total_generated > 0 && (
+            <div className="mt-2 h-2 bg-white/10 rounded">
+              <div
+                className="h-2 bg-accent rounded"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    (quality.total_rejected / quality.total_generated) * 100
+                  )}%`,
+                }}
+              />
+            </div>
+          )}
+          {quality.reasons && Object.keys(quality.reasons).length > 0 ? (
+            <ul className="mt-3 text-sm space-y-1">
+              {Object.entries(quality.reasons)
+                .sort((a, b) => b[1] - a[1])
+                .map(([reason, count]) => (
+                  <li key={reason} className="flex justify-between">
+                    <span>{REASON_LABELS[reason] || reason}</span>
+                    <span className="text-muted">{count}</span>
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <div className="text-muted text-sm mt-2">Отклонений ещё не было.</div>
+          )}
+        </div>
+      )}
 
       <div className="card flex flex-wrap gap-2 items-center">
         <button className="btn-secondary" onClick={build}>

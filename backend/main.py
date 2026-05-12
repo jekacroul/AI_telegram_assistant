@@ -38,6 +38,7 @@ from .database import (
     DialogBackup,
     DialogBackupMessage,
     Message,
+    QualityLog,
     SessionLocal,
     TrainingPair,
     TrainingRun,
@@ -58,6 +59,10 @@ from .dialog_backup import (
 )
 from .event_bus import message_bus, training_bus
 from .llm_engine import LLMUnavailableError, get_client
+from .quality_filter import (
+    SETTING_TOTAL_GENERATED,
+    generate_with_filter,
+)
 from .notifications import (
     SETTING_LAST_PRIVATE_CHAT_ID,
     SETTING_NOTIFY_CHAT_ID,
@@ -300,16 +305,30 @@ async def generate_reply(
     history_dicts = [
         {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text} for m in history
     ]
-    try:
-        variants = await get_client().generate_reply(
+    client = get_client()
+
+    async def _call_llm() -> list[str]:
+        return await client.generate_reply(
             incoming_text=msg.text,
             sender_name=msg.sender_name,
             style_profile=profile,
             chat_history=history_dicts,
         )
+
+    try:
+        variants, rejected = await generate_with_filter(
+            _call_llm,
+            incoming_text=msg.text,
+            style_profile=profile,
+            session=session,
+        )
     except LLMUnavailableError as e:
         raise HTTPException(503, str(e))
-    return {"variants": variants}
+    return {
+        "variants": variants,
+        "rejected_count": len(rejected),
+        "rejected_reasons": [r for _, r in rejected],
+    }
 
 
 class ApproveIn(BaseModel):
@@ -833,6 +852,33 @@ async def stats_model_quality(session: AsyncSession = Depends(get_session)) -> l
             "rejection_rate": rejection_rate,
         })
     return out
+
+
+@app.get("/api/quality/stats")
+async def quality_stats(session: AsyncSession = Depends(get_session)) -> dict:
+    total_rejected = (await session.execute(
+        select(func.count(QualityLog.id))
+    )).scalar() or 0
+
+    rows = await session.execute(
+        select(QualityLog.reason, func.count(QualityLog.id))
+        .group_by(QualityLog.reason)
+    )
+    reasons = {reason: int(count) for reason, count in rows.all()}
+
+    total_generated_raw = await get_setting(session, SETTING_TOTAL_GENERATED, "0")
+    try:
+        total_generated = int(total_generated_raw or "0")
+    except ValueError:
+        total_generated = 0
+    if total_generated < total_rejected:
+        total_generated = total_rejected
+
+    return {
+        "total_generated": total_generated,
+        "total_rejected": int(total_rejected),
+        "reasons": reasons,
+    }
 
 
 @app.get("/api/stats/response-time")

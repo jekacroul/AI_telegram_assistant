@@ -47,6 +47,7 @@ ALLOWED_UPDATES = [
 ]
 from .event_bus import message_bus
 from .llm_engine import LLMUnavailableError, get_client, pick_auto_variant
+from .quality_filter import generate_with_filter
 from .style_engine import get_latest_profile, reanalyze_and_store
 
 
@@ -306,6 +307,15 @@ class TelegramService:
                     variants = await self._generate_variants(
                         content_text, sender_name, chat_id
                     )
+                    if not variants:
+                        log.info(
+                            "quality filter rejected all variants for msg %s; "
+                            "pushing to pending",
+                            msg_id,
+                        )
+                        await message_bus.publish("pending", {"id": msg_id})
+                        await self._maybe_reanalyze()
+                        return
                     chosen = pick_auto_variant(variants) or "ок"
                     await self.send_reply(
                         chat_id, chosen,
@@ -374,13 +384,23 @@ class TelegramService:
                 {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text}
                 for m in history
             ]
-        client = get_client()
-        return await client.generate_reply(
-            incoming_text=text,
-            sender_name=sender_name,
-            style_profile=profile,
-            chat_history=history_dicts,
-        )
+            client = get_client()
+
+            async def _call_llm() -> list[str]:
+                return await client.generate_reply(
+                    incoming_text=text,
+                    sender_name=sender_name,
+                    style_profile=profile,
+                    chat_history=history_dicts,
+                )
+
+            accepted, _rejected = await generate_with_filter(
+                _call_llm,
+                incoming_text=text,
+                style_profile=profile,
+                session=session,
+            )
+            return accepted
 
     async def _record_reply(
         self,
