@@ -7,6 +7,7 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import quote
 
 
 def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
@@ -25,10 +26,10 @@ def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
 from aiogram.exceptions import TelegramBadRequest
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, desc, func, select
+from sqlalchemy import Integer, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -50,11 +51,10 @@ from .database import (
 from .dataset_builder import build_dataset_file, dataset_stats
 from .delay import delay_to_dict, get_delay_settings, save_delay_settings
 from .dialog_backup import (
-    DEFAULT_INTERVAL_HOURS,
     SETTING_INTERVAL,
     SETTING_LAST_RUN,
     get_excluded_chats,
-    get_interval_hours,
+    get_interval_minutes,
     scheduler as dialog_backup_scheduler,
     set_excluded_chats,
 )
@@ -803,10 +803,118 @@ async def dialogs_backup_content(
     }
 
 
+
+def _format_dialog_backup_text(
+    backup: DialogBackup, messages: list[DialogBackupMessage]
+) -> str:
+    chat_title = backup.chat_name or f"chat {backup.chat_id}"
+    lines = [
+        f"Диалог: {chat_title}",
+        f"chat_id: {backup.chat_id}",
+        f"Версия: v{backup.version}",
+        f"Создано: {_iso_utc(backup.created_at) or ''}",
+        f"Сообщений: {backup.message_count}",
+        "",
+        "=" * 48,
+        "",
+    ]
+    for message in messages:
+        author = (
+            settings.user_name
+            if message.is_mine
+            else (message.sender_name or "собеседник")
+        )
+        sent_at = _iso_utc(message.timestamp) or ""
+        text = (message.text or "").strip()
+        lines.append(f"[{sent_at}] {author}:")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _download_filename(backup: DialogBackup) -> str:
+    safe_chat = re.sub(
+        r"[^A-Za-z0-9А-Яа-я_.-]+",
+        "_",
+        backup.chat_name or f"chat_{backup.chat_id}",
+    ).strip("_")
+    if not safe_chat:
+        safe_chat = f"chat_{backup.chat_id}"
+    return f"dialog_{safe_chat}_v{backup.version}.txt"
+
+
+@app.get("/api/dialogs/backup/{backup_id}/export")
+async def dialogs_backup_export(
+    backup_id: int, session: AsyncSession = Depends(get_session)
+) -> PlainTextResponse:
+    backup_q = await session.execute(
+        select(DialogBackup).where(DialogBackup.id == backup_id)
+    )
+    backup = backup_q.scalar_one_or_none()
+    if not backup:
+        raise HTTPException(404, "backup not found")
+    msg_q = await session.execute(
+        select(DialogBackupMessage)
+        .where(DialogBackupMessage.backup_id == backup_id)
+        .order_by(DialogBackupMessage.timestamp, DialogBackupMessage.id)
+    )
+    messages = list(msg_q.scalars().all())
+    filename = _download_filename(backup)
+    return PlainTextResponse(
+        _format_dialog_backup_text(backup, messages),
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename=dialog_backup.txt; "
+                f"filename*=UTF-8''{quote(filename)}"
+            )
+        },
+    )
+
+
+@app.delete("/api/dialogs/backup/{backup_id}")
+async def dialogs_delete_backup(
+    backup_id: int, session: AsyncSession = Depends(get_session)
+) -> dict:
+    backup_q = await session.execute(
+        select(DialogBackup).where(DialogBackup.id == backup_id)
+    )
+    backup = backup_q.scalar_one_or_none()
+    if not backup:
+        raise HTTPException(404, "backup not found")
+    chat_id = backup.chat_id
+    await session.execute(
+        delete(DialogBackupMessage).where(DialogBackupMessage.backup_id == backup_id)
+    )
+    await session.delete(backup)
+    await session.commit()
+    return {"ok": True, "chat_id": chat_id}
+
+
+@app.delete("/api/dialogs/{chat_id}/history")
+async def dialogs_delete_chat_history(
+    chat_id: int, session: AsyncSession = Depends(get_session)
+) -> dict:
+    backups_q = await session.execute(
+        select(DialogBackup.id).where(DialogBackup.chat_id == chat_id)
+    )
+    backup_ids = [row.id for row in backups_q.all()]
+    if not backup_ids:
+        return {"ok": True, "deleted_versions": 0}
+    await session.execute(
+        delete(DialogBackupMessage).where(
+            DialogBackupMessage.backup_id.in_(backup_ids)
+        )
+    )
+    await session.execute(delete(DialogBackup).where(DialogBackup.id.in_(backup_ids)))
+    await session.commit()
+    return {"ok": True, "deleted_versions": len(backup_ids)}
+
+
 @app.get("/api/dialogs/settings")
 async def dialogs_settings(session: AsyncSession = Depends(get_session)) -> dict:
     excluded = sorted(await get_excluded_chats(session))
-    interval = await get_interval_hours(session)
+    interval = await get_interval_minutes(session)
     last_run = await get_setting(session, SETTING_LAST_RUN, "")
     last_run_iso: Optional[str] = None
     if last_run:
@@ -816,7 +924,7 @@ async def dialogs_settings(session: AsyncSession = Depends(get_session)) -> dict
             last_run_iso = last_run
     return {
         "excluded_chats": list(excluded),
-        "interval_hours": interval,
+        "interval_minutes": interval,
         "last_run_at": last_run_iso,
         "running": dialog_backup_scheduler.last_result is not None,
         "last_error": dialog_backup_scheduler.last_error,
@@ -825,6 +933,7 @@ async def dialogs_settings(session: AsyncSession = Depends(get_session)) -> dict
 
 class DialogSettingsIn(BaseModel):
     excluded_chats: Optional[list[int]] = None
+    interval_minutes: Optional[int] = None
     interval_hours: Optional[int] = None
 
 
@@ -834,8 +943,11 @@ async def save_dialogs_settings(
 ) -> dict:
     if payload.excluded_chats is not None:
         await set_excluded_chats(session, payload.excluded_chats)
-    if payload.interval_hours is not None:
-        value = max(1, int(payload.interval_hours))
+    interval_value = payload.interval_minutes
+    if interval_value is None and payload.interval_hours is not None:
+        interval_value = int(payload.interval_hours) * 60
+    if interval_value is not None:
+        value = max(1, int(interval_value))
         await set_setting(session, SETTING_INTERVAL, str(value))
         dialog_backup_scheduler.trigger()
     return {"ok": True}

@@ -1,5 +1,9 @@
 const BASE = "";
 
+export function apiUrl(path) {
+  return BASE + path;
+}
+
 async function request(path, options = {}) {
   const res = await fetch(BASE + path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -76,6 +80,12 @@ export const api = {
   dialogsChats: () => request("/api/dialogs/chats"),
   dialogsVersions: (chat_id) => request(`/api/dialogs/${chat_id}/versions`),
   dialogsBackup: (backup_id) => request(`/api/dialogs/backup/${backup_id}`),
+  dialogsBackupExportUrl: (backup_id) =>
+    apiUrl(`/api/dialogs/backup/${backup_id}/export`),
+  deleteDialogsBackup: (backup_id) =>
+    request(`/api/dialogs/backup/${backup_id}`, { method: "DELETE" }),
+  deleteDialogsHistory: (chat_id) =>
+    request(`/api/dialogs/${chat_id}/history`, { method: "DELETE" }),
   dialogsSettings: () => request("/api/dialogs/settings"),
   saveDialogsSettings: (data) =>
     request("/api/dialogs/settings", {
