@@ -34,6 +34,7 @@ class Message(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chat_id: Mapped[int] = mapped_column(Integer, index=True)
     chat_name: Mapped[str] = mapped_column(String(255), default="")
+    chat_username: Mapped[str] = mapped_column(String(255), default="")
     sender_id: Mapped[int] = mapped_column(Integer, index=True)
     sender_name: Mapped[str] = mapped_column(String(255), default="")
     is_mine: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
@@ -143,6 +144,10 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "pending_reason" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN pending_reason VARCHAR(32)"
+        )
+    if "chat_username" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN chat_username VARCHAR(255) DEFAULT '' NOT NULL"
         )
 
 

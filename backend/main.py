@@ -849,17 +849,56 @@ async def stats_top_chats(session: AsyncSession = Depends(get_session)) -> list[
     result = await session.execute(
         select(
             Message.chat_id,
-            func.max(Message.chat_name).label("chat_name"),
             func.count(Message.id).label("count"),
         )
         .group_by(Message.chat_id)
         .order_by(desc("count"))
         .limit(10)
     )
-    return [
-        {"chat_id": r.chat_id, "chat_name": r.chat_name or "", "count": r.count}
-        for r in result.all()
-    ]
+    rows = result.all()
+
+    out: list[dict] = []
+    for row in rows:
+        chat_id = row.chat_id
+
+        incoming_latest = (
+            await session.execute(
+                select(Message.sender_name)
+                .where(
+                    Message.chat_id == chat_id,
+                    Message.is_mine == False,  # noqa: E712
+                    Message.sender_name != "",
+                    Message.sender_name != "unknown",
+                )
+                .order_by(Message.timestamp.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        latest = (
+            await session.execute(
+                select(Message.chat_name, Message.chat_username)
+                .where(Message.chat_id == chat_id)
+                .order_by(Message.timestamp.desc())
+                .limit(1)
+            )
+        ).first()
+
+        stored_name = latest.chat_name if latest else ""
+        stored_username = latest.chat_username if latest else ""
+        display_name = incoming_latest or stored_name or f"chat {chat_id}"
+        username = stored_username or (
+            stored_name if incoming_latest and stored_name else ""
+        )
+
+        out.append(
+            {
+                "chat_id": chat_id,
+                "chat_name": display_name,
+                "chat_username": username,
+                "count": row.count,
+            }
+        )
+    return out
 
 
 @app.get("/api/stats/model-quality")

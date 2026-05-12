@@ -230,10 +230,14 @@ class TelegramService:
             )
 
             chat_id = tg_msg.chat.id
+            chat_username = getattr(tg_msg.chat, "username", None) or (
+                sender.username if sender else ""
+            )
             chat_name = (
                 tg_msg.chat.title
-                or tg_msg.chat.username
-                or (sender.full_name if sender else str(chat_id))
+                or (sender.full_name if sender else "")
+                or chat_username
+                or str(chat_id)
             )
 
             self._cancel_delayed_reply(chat_id)
@@ -259,6 +263,7 @@ class TelegramService:
                 row = Message(
                     chat_id=chat_id,
                     chat_name=chat_name,
+                    chat_username=chat_username,
                     sender_id=sender_id,
                     sender_name=settings.user_name if is_mine else sender_name,
                     is_mine=is_mine,
