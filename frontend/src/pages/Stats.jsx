@@ -39,6 +39,23 @@ function shortDay(day) {
   return parts.length === 3 ? `${parts[2]}.${parts[1]}` : day;
 }
 
+function formatUsername(username) {
+  if (!username) return "—";
+  return username.startsWith("@") ? username : `@${username}`;
+}
+
+function TopChatTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const item = payload[0].payload;
+  return (
+    <div style={tooltipStyle} className="px-3 py-2 text-sm shadow-lg">
+      <div className="font-semibold text-white">{item.name}</div>
+      <div className="text-muted">Ник: {formatUsername(item.username)}</div>
+      <div className="text-muted">Сообщений: {item.count}</div>
+    </div>
+  );
+}
+
 function Card({ title, value, hint }) {
   return (
     <div className="card">
@@ -93,8 +110,14 @@ export default function Stats() {
 
   const topChatsData = topChats.map((c) => ({
     name: c.chat_name || `chat ${c.chat_id}`,
+    username: c.chat_username || "",
     count: c.count,
   }));
+
+  const topChatsAxisWidth = Math.min(
+    220,
+    Math.max(140, ...topChatsData.map((c) => c.name.length * 8))
+  );
 
   return (
     <div className="space-y-4">
@@ -159,16 +182,25 @@ export default function Stats() {
         <div className="label mb-2">Топ чатов по числу сообщений</div>
         <div className="h-64">
           <ResponsiveContainer>
-            <BarChart data={topChatsData} layout="vertical">
+            <BarChart
+              data={topChatsData}
+              layout="vertical"
+              margin={{ left: 8, right: 12 }}
+            >
               <CartesianGrid stroke="#1f2430" strokeDasharray="3 3" />
               <XAxis type="number" stroke="#9aa3b2" allowDecimals={false} />
               <YAxis
                 type="category"
                 dataKey="name"
                 stroke="#9aa3b2"
-                width={140}
+                width={topChatsAxisWidth}
+                interval={0}
               />
-              <Tooltip contentStyle={tooltipStyle} />
+              <Tooltip
+                content={<TopChatTooltip />}
+                cursor={{ fill: "rgba(91, 140, 255, 0.12)" }}
+                shared={false}
+              />
               <Bar dataKey="count" fill="#5b8cff" />
             </BarChart>
           </ResponsiveContainer>
