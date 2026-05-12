@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -91,6 +92,70 @@ from .trainer import (
 
 setup_logging(settings.logs_dir, level=logging.INFO)
 log = logging.getLogger(__name__)
+
+
+TELEGRAM_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
+
+
+def _normalize_username(username: Optional[str]) -> str:
+    return (username or "").strip().lstrip("@")
+
+
+def _is_usable_contact_name(name: Optional[str], username: str = "") -> bool:
+    value = (name or "").strip()
+    if not value:
+        return False
+    lowered = value.casefold()
+    if lowered in {"unknown", settings.user_name.casefold()}:
+        return False
+    normalized_username = _normalize_username(username).casefold()
+    return not normalized_username or lowered != normalized_username
+
+
+def _name_rank(name: str) -> tuple[int, int, int]:
+    stripped = name.strip()
+    return (
+        int(" " in stripped),
+        int(not TELEGRAM_USERNAME_RE.fullmatch(stripped)),
+        len(stripped),
+    )
+
+
+async def _best_contact_name(
+    session: AsyncSession, chat_id: int, username: str
+) -> Optional[str]:
+    candidates: list[str] = []
+
+    messages = await session.execute(
+        select(Message.sender_name)
+        .where(
+            Message.chat_id == chat_id,
+            Message.is_mine == False,  # noqa: E712
+        )
+        .order_by(Message.timestamp.desc())
+        .limit(100)
+    )
+    candidates.extend(row.sender_name for row in messages.all())
+
+    backups = await session.execute(
+        select(DialogBackupMessage.sender_name)
+        .where(
+            DialogBackupMessage.chat_id == chat_id,
+            DialogBackupMessage.is_mine == False,  # noqa: E712
+        )
+        .order_by(DialogBackupMessage.timestamp.desc())
+        .limit(100)
+    )
+    candidates.extend(row.sender_name for row in backups.all())
+
+    usable = [
+        name.strip()
+        for name in candidates
+        if _is_usable_contact_name(name, username)
+    ]
+    if not usable:
+        return None
+    return max(usable, key=_name_rank)
 
 
 @asynccontextmanager
@@ -861,19 +926,6 @@ async def stats_top_chats(session: AsyncSession = Depends(get_session)) -> list[
     for row in rows:
         chat_id = row.chat_id
 
-        incoming_latest = (
-            await session.execute(
-                select(Message.sender_name)
-                .where(
-                    Message.chat_id == chat_id,
-                    Message.is_mine == False,  # noqa: E712
-                    Message.sender_name != "",
-                    Message.sender_name != "unknown",
-                )
-                .order_by(Message.timestamp.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
         latest = (
             await session.execute(
                 select(Message.chat_name, Message.chat_username)
@@ -884,10 +936,14 @@ async def stats_top_chats(session: AsyncSession = Depends(get_session)) -> list[
         ).first()
 
         stored_name = latest.chat_name if latest else ""
-        stored_username = latest.chat_username if latest else ""
-        display_name = incoming_latest or stored_name or f"chat {chat_id}"
+        stored_username = _normalize_username(latest.chat_username if latest else "")
         username = stored_username or (
-            stored_name if incoming_latest and stored_name else ""
+            stored_name if TELEGRAM_USERNAME_RE.fullmatch(stored_name or "") else ""
+        )
+        display_name = (
+            await _best_contact_name(session, chat_id, username)
+            or stored_name
+            or f"chat {chat_id}"
         )
 
         out.append(
