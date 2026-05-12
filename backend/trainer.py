@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,66 @@ from .train_worker import EVENT_PREFIX
 log = logging.getLogger(__name__)
 
 MIN_PAIRS = 50
+
+
+ERROR_MARKERS = (
+    "FATAL python exception",
+    "Traceback (most recent call last)",
+    "training process exited with code",
+    "training failed",
+    "RuntimeError:",
+    "Exception:",
+    "ERROR",
+)
+
+
+def _is_safe_adapter_path(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(settings.models_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _read_text_tail(path: Path, max_bytes: int = 512_000) -> str:
+    with path.open("rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - max_bytes))
+        data = f.read()
+    return data.decode("utf-8", errors="replace")
+
+
+def _extract_error_excerpt(text: str, max_lines: int = 120) -> tuple[str, str]:
+    lines = text.splitlines()
+    if not lines:
+        return "", ""
+
+    marker_index = -1
+    for i, line in enumerate(lines):
+        if any(marker in line for marker in ERROR_MARKERS):
+            marker_index = i
+
+    if marker_index < 0:
+        excerpt_lines = lines[-min(max_lines, len(lines)):]
+        summary = excerpt_lines[-1] if excerpt_lines else ""
+        return summary.strip(), "\n".join(excerpt_lines).strip()
+
+    start = max(0, marker_index - 8)
+    end = min(len(lines), marker_index + max_lines)
+    summary = lines[marker_index].strip()
+    return summary, "\n".join(lines[start:end]).strip()
+
+
+def _candidate_app_logs(started_at: Optional[datetime] = None) -> list[Path]:
+    logs_dir = settings.logs_dir
+    files = [p for p in logs_dir.rglob("*.log") if p.is_file()]
+    if started_at is not None:
+        ts = started_at.timestamp()
+        files.sort(key=lambda p: (abs(p.stat().st_mtime - ts), -p.stat().st_mtime))
+        return files[:40]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[:40]
 
 
 class TrainingState:
@@ -273,6 +334,91 @@ async def activate_adapter(run_id: int) -> bool:
         target.version, target.adapter_path,
     )
     return True
+
+
+async def deactivate_adapter() -> bool:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(TrainingRun).where(TrainingRun.is_active == True)  # noqa: E712
+        )
+        runs = list(result.scalars().all())
+        if not runs:
+            return False
+        for run in runs:
+            run.is_active = False
+        await session.commit()
+    log.info("deactivated active fine-tune adapter")
+    return True
+
+
+async def delete_training_run(run_id: int) -> tuple[bool, str]:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(TrainingRun).where(TrainingRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            return False, "not found"
+        if training_state.current_run_id == run_id or run.status == "running":
+            return False, "running run cannot be deleted"
+        if run.is_active:
+            return False, "active adapter must be deactivated before deletion"
+        if run.status not in {"failed", "cancelled"}:
+            return False, "only failed or cancelled runs can be deleted"
+
+        adapter_path = Path(run.adapter_path) if run.adapter_path else None
+        await session.delete(run)
+        await session.commit()
+
+    if adapter_path and adapter_path.exists() and _is_safe_adapter_path(adapter_path):
+        shutil.rmtree(adapter_path, ignore_errors=True)
+    return True, "deleted"
+
+
+async def get_training_run_error_log(run_id: int) -> dict:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(TrainingRun).where(TrainingRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            return {
+                "found": False,
+                "error": "run not found",
+                "excerpt": "",
+                "log_path": None,
+            }
+
+        paths: list[Path] = []
+        if run.adapter_path:
+            worker_log = Path(run.adapter_path) / "train_worker.log"
+            if worker_log.exists():
+                paths.append(worker_log)
+        paths.extend(_candidate_app_logs(run.started_at))
+
+    seen: set[Path] = set()
+    for path in paths:
+        if path in seen or not path.exists() or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            text = _read_text_tail(path)
+        except OSError:
+            continue
+        summary, excerpt = _extract_error_excerpt(text)
+        if excerpt:
+            return {
+                "found": bool(summary),
+                "error": summary or "log excerpt",
+                "excerpt": excerpt,
+                "log_path": str(path),
+            }
+    return {
+        "found": False,
+        "error": "log not found",
+        "excerpt": "",
+        "log_path": None,
+    }
 
 
 async def list_runs() -> list[dict]:

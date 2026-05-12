@@ -62,6 +62,12 @@ export const api = {
   cancelTraining: () => request("/api/training/cancel", { method: "POST" }),
   activateAdapter: (run_id) =>
     request(`/api/training/activate/${run_id}`, { method: "POST" }),
+  deactivateAdapter: () =>
+    request("/api/training/deactivate", { method: "POST" }),
+  deleteTrainingRun: (run_id) =>
+    request(`/api/training/runs/${run_id}`, { method: "DELETE" }),
+  trainingRunErrorLog: (run_id) =>
+    request(`/api/training/runs/${run_id}/error-log`),
   trainingRuns: () => request("/api/training/runs"),
   styleProfile: () => request("/api/style/profile"),
   saveStyle: (profile) =>
