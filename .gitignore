@@ -1,1 +1,42 @@
-Nothing should be ignored based on the provided file changes. The only modified file is `backend/bot.py`, which is a source code file and should not be added to .gitignore.
+```gitignore
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+logs/
+*.log
+
+# Database
+data/database.db
+
+# Dependencies
+.venv/
+venv/
+env/
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.swp
+*.swo
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+```
