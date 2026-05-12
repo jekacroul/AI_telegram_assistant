@@ -167,7 +167,7 @@ export default function Dialogs() {
     const name = selectedChat.chat_name || `chat ${selectedChat.chat_id}`;
     if (
       !window.confirm(
-        `Удалить всю историю резервных копий для «${name}»? Это действие нельзя отменить.`
+        `Удалить всю историю и чат «${name}»? Будут удалены все сообщения и резервные копии. Это действие нельзя отменить.`
       )
     ) {
       return;
@@ -176,8 +176,11 @@ export default function Dialogs() {
     setError("");
     try {
       await api.deleteDialogsHistory(selectedChatId);
+      setSelectedChatId(null);
+      setVersions([]);
+      setSelectedBackup(null);
+      setBackupData(null);
       await loadChats();
-      await loadVersions(selectedChatId);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -354,8 +357,8 @@ export default function Dialogs() {
                   <button
                     className="btn-secondary text-bad disabled:opacity-50"
                     onClick={deleteChatHistory}
-                    disabled={versions.length === 0 || busy}
-                    title="Удалить все версии резервных копий этого чата"
+                    disabled={busy}
+                    title="Удалить все сообщения и все версии резервных копий этого чата"
                   >
                     Удалить историю
                   </button>
