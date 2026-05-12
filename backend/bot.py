@@ -26,7 +26,7 @@ from aiogram.enums import ChatType, ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
-from aiogram.types import Update
+from aiogram.types import Update, PhotoSize
 from sqlalchemy import select
 
 from .config import settings
@@ -171,35 +171,89 @@ class TelegramService:
             log.exception("failed to remember last private chat")
 
     @staticmethod
-    def _extract_message_content(tg_msg: TgMessage) -> str:
+    def _extract_message_content(tg_msg: TgMessage) -> tuple[str, Optional[str], Optional[str], Optional[str], bool]:
+        """Extract text content and media info from message.
+        
+        Returns:
+            Tuple of (text, media_type, media_file_id, media_file_unique_id, is_view_once)
+            For view-once media, file_id will be None as per Telegram policy.
+        """
         text = (tg_msg.text or "").strip()
         if text:
-            return text
+            return text, None, None, None, False
+            
         caption = (tg_msg.caption or "").strip()
         if caption:
-            return caption
+            # Check if this is view-once media (has_protected_content indicates view-once or protected)
+            is_view_once = getattr(tg_msg, "has_protected_content", False) or False
+            return caption, None, None, None, is_view_once
+        
         sticker = getattr(tg_msg, "sticker", None)
         if sticker is not None:
             emoji_char = (getattr(sticker, "emoji", None) or "").strip()
             if emoji_char:
-                return emoji_char
-            return "(стикер)"
+                return emoji_char, None, None, None, False
+            file_id = getattr(sticker, "file_id", None)
+            file_unique_id = getattr(sticker, "file_unique_id", None)
+            return "(стикер)", "sticker", file_id, file_unique_id, False
+            
         animation = getattr(tg_msg, "animation", None)
         if animation is not None:
-            return "(гиф)"
-        if getattr(tg_msg, "photo", None):
-            return "(фото)"
-        if getattr(tg_msg, "video", None) is not None:
-            return "(видео)"
-        if getattr(tg_msg, "voice", None) is not None:
-            return "(голосовое)"
-        if getattr(tg_msg, "video_note", None) is not None:
-            return "(кружок)"
-        if getattr(tg_msg, "audio", None) is not None:
-            return "(аудио)"
-        if getattr(tg_msg, "document", None) is not None:
-            return "(документ)"
-        return ""
+            is_view_once = getattr(tg_msg, "has_protected_content", False) or False
+            file_id = getattr(animation, "file_id", None)
+            file_unique_id = getattr(animation, "file_unique_id", None)
+            if is_view_once:
+                return "(гиф)", None, None, None, True
+            return "(гиф)", "animation", file_id, file_unique_id, False
+            
+        photo = getattr(tg_msg, "photo", None)
+        if photo is not None and len(photo) > 0:
+            is_view_once = getattr(tg_msg, "has_protected_content", False) or False
+            # Get the highest resolution photo (last in list)
+            best_photo: PhotoSize = photo[-1]
+            file_id = getattr(best_photo, "file_id", None)
+            file_unique_id = getattr(best_photo, "file_unique_id", None)
+            if is_view_once:
+                return "(фото)", None, None, None, True
+            return "(фото)", "photo", file_id, file_unique_id, False
+            
+        video = getattr(tg_msg, "video", None)
+        if video is not None:
+            is_view_once = getattr(tg_msg, "has_protected_content", False) or False
+            file_id = getattr(video, "file_id", None)
+            file_unique_id = getattr(video, "file_unique_id", None)
+            if is_view_once:
+                return "(видео)", None, None, None, True
+            return "(видео)", "video", file_id, file_unique_id, False
+            
+        voice = getattr(tg_msg, "voice", None)
+        if voice is not None:
+            file_id = getattr(voice, "file_id", None)
+            file_unique_id = getattr(voice, "file_unique_id", None)
+            return "(голосовое)", "voice", file_id, file_unique_id, False
+            
+        video_note = getattr(tg_msg, "video_note", None)
+        if video_note is not None:
+            is_view_once = getattr(tg_msg, "has_protected_content", False) or False
+            file_id = getattr(video_note, "file_id", None)
+            file_unique_id = getattr(video_note, "file_unique_id", None)
+            if is_view_once:
+                return "(кружок)", None, None, None, True
+            return "(кружок)", "video_note", file_id, file_unique_id, False
+            
+        audio = getattr(tg_msg, "audio", None)
+        if audio is not None:
+            file_id = getattr(audio, "file_id", None)
+            file_unique_id = getattr(audio, "file_unique_id", None)
+            return "(аудио)", "audio", file_id, file_unique_id, False
+            
+        document = getattr(tg_msg, "document", None)
+        if document is not None:
+            file_id = getattr(document, "file_id", None)
+            file_unique_id = getattr(document, "file_unique_id", None)
+            return "(документ)", "document", file_id, file_unique_id, False
+            
+        return "", None, None, None, False
 
     async def handle_incoming(self, tg_msg: TgMessage) -> None:
         try:
@@ -207,7 +261,7 @@ class TelegramService:
                 return
             if tg_msg.chat.type == ChatType.CHANNEL:
                 return
-            content_text = self._extract_message_content(tg_msg)
+            content_text, media_type, media_file_id, media_file_unique_id, is_view_once = self._extract_message_content(tg_msg)
             if not content_text:
                 return
 
@@ -279,6 +333,10 @@ class TelegramService:
                     timestamp=tg_ts,
                     message_id=tg_msg.message_id,
                     business_connection_id=business_connection_id,
+                    media_type=media_type,
+                    media_file_id=media_file_id,
+                    media_file_unique_id=media_file_unique_id,
+                    is_view_once=is_view_once,
                 )
                 session.add(row)
                 await session.commit()

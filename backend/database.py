@@ -50,6 +50,10 @@ class Message(Base):
         String(128), nullable=True
     )
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    media_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    media_file_unique_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    is_view_once: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class DialogBackup(Base):
@@ -164,6 +168,22 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "chat_username" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN chat_username VARCHAR(255) DEFAULT '' NOT NULL"
+        )
+    if "media_type" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN media_type VARCHAR(32)"
+        )
+    if "media_file_id" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN media_file_id VARCHAR(256)"
+        )
+    if "media_file_unique_id" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN media_file_unique_id VARCHAR(256)"
+        )
+    if "is_view_once" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN is_view_once BOOLEAN DEFAULT 0 NOT NULL"
         )
 
 
