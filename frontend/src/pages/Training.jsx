@@ -295,7 +295,7 @@ export default function Training() {
                           Деактивировать
                         </button>
                       )}
-                      {r.status === "failed" && (
+                      {r.status !== "running" && (
                         <button
                           className="btn-secondary"
                           onClick={() => toggleLog(r)}
@@ -324,13 +324,18 @@ export default function Training() {
                     <td colSpan="6" className="pb-3">
                       <div className="mt-2 rounded-lg border border-white/10 bg-black/30 p-3">
                         <div className="flex flex-wrap gap-2 items-center text-xs text-muted mb-2">
-                          <span>Лог ошибки v{r.version}</span>
+                          <span>Лог запуска v{r.version}</span>
                           {runLogs[r.id].data?.log_path && (
                             <code className="break-all">{runLogs[r.id].data.log_path}</code>
                           )}
                         </div>
                         {runLogs[r.id].data?.error && (
-                          <div className="text-bad text-sm mb-2">
+                          <div
+                            className={`text-sm mb-2 ${
+                              r.status === "failed" ? "text-bad" : "text-muted"
+                            }`}
+                          >
+                            {r.status === "failed" ? "Ошибка: " : "Последняя строка: "}
                             {runLogs[r.id].data.error}
                           </div>
                         )}
@@ -340,7 +345,7 @@ export default function Training() {
                           </pre>
                         ) : (
                           <div className="text-muted text-sm">
-                            Не удалось найти фрагмент ошибки в логах.
+                            Не удалось найти лог запуска.
                           </div>
                         )}
                       </div>
