@@ -899,16 +899,25 @@ async def dialogs_delete_chat_history(
         select(DialogBackup.id).where(DialogBackup.chat_id == chat_id)
     )
     backup_ids = [row.id for row in backups_q.all()]
-    if not backup_ids:
-        return {"ok": True, "deleted_versions": 0}
-    await session.execute(
-        delete(DialogBackupMessage).where(
-            DialogBackupMessage.backup_id.in_(backup_ids)
+    if backup_ids:
+        await session.execute(
+            delete(DialogBackupMessage).where(
+                DialogBackupMessage.backup_id.in_(backup_ids)
+            )
         )
+        await session.execute(
+            delete(DialogBackup).where(DialogBackup.id.in_(backup_ids))
+        )
+
+    messages_result = await session.execute(
+        delete(Message).where(Message.chat_id == chat_id)
     )
-    await session.execute(delete(DialogBackup).where(DialogBackup.id.in_(backup_ids)))
     await session.commit()
-    return {"ok": True, "deleted_versions": len(backup_ids)}
+    return {
+        "ok": True,
+        "deleted_versions": len(backup_ids),
+        "deleted_messages": messages_result.rowcount or 0,
+    }
 
 
 @app.get("/api/dialogs/settings")
