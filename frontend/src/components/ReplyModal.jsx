@@ -13,15 +13,16 @@ function formatDuration(seconds) {
 export default function ReplyModal({ message, onClose, onSent }) {
   const isVoice = !!message.is_voice;
   const initialTranscription = message.transcription || "";
+  const autoGenerateOnOpen = !isVoice || initialTranscription.trim().length > 0;
   const [variants, setVariants] = useState([]);
-  const [loading, setLoading] = useState(!isVoice);
+  const [loading, setLoading] = useState(autoGenerateOnOpen);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [quickReplies, setQuickReplies] = useState([]);
   const [newQuickText, setNewQuickText] = useState("");
   const [transcription, setTranscription] = useState(initialTranscription);
-  const [generated, setGenerated] = useState(!isVoice);
+  const [generated, setGenerated] = useState(false);
   const navigate = useNavigate();
 
   async function generate(override) {
@@ -41,8 +42,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!isVoice) {
-      setLoading(true);
+    if (autoGenerateOnOpen) {
       api
         .generateReply(message.id)
         .then((res) => {
@@ -57,7 +57,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
     return () => {
       cancelled = true;
     };
-  }, [message.id, isVoice]);
+  }, [message.id, autoGenerateOnOpen]);
 
   useEffect(() => {
     api.quickReplies().then((rows) => setQuickReplies(rows.slice(0, 5))).catch(() => {});

@@ -716,9 +716,6 @@ export default function Settings() {
               Выгрузить Whisper из VRAM
             </button>
           )}
-          <span className="text-xs text-muted ml-2">
-            Модель загружена: {whisper.model_loaded ? "да" : "нет"}
-          </span>
           {whisperMsg && (
             <span className="text-good text-sm">{whisperMsg}</span>
           )}
