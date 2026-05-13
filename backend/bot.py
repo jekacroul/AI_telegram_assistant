@@ -534,6 +534,20 @@ class TelegramService:
                                 result.text and not result.error
                             )
                             voice_low_confidence = result.low_confidence
+                    # Notify the dashboard the moment the transcription is
+                    # persisted, so the card doesn't sit empty while reply
+                    # routing / LLM generation finishes.
+                    await message_bus.publish(
+                        "transcribed",
+                        {
+                            "id": msg_id,
+                            "chat_id": chat_id,
+                            "transcription": result.text,
+                            "confidence": result.confidence,
+                            "low_confidence": result.low_confidence,
+                            "error": result.error,
+                        },
+                    )
                 else:
                     voice_download_failed = True
                     async with SessionLocal() as session:
@@ -546,6 +560,15 @@ class TelegramService:
                                 "voice download failed"
                             )
                             await session.commit()
+                    await message_bus.publish(
+                        "transcribed",
+                        {
+                            "id": msg_id,
+                            "chat_id": chat_id,
+                            "transcription": "",
+                            "error": "voice download failed",
+                        },
+                    )
 
             # Reply routing for incoming voice messages (skip own here).
             if is_voice and not is_mine:

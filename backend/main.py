@@ -530,6 +530,17 @@ async def _transcribe_message(
     if not tr.error and tr.text:
         msg.text = tr.text
     await session.commit()
+    await message_bus.publish(
+        "transcribed",
+        {
+            "id": msg.id,
+            "chat_id": msg.chat_id,
+            "transcription": tr.text,
+            "confidence": tr.confidence,
+            "low_confidence": tr.low_confidence,
+            "error": tr.error,
+        },
+    )
     return {
         "transcription": tr.text,
         "confidence": tr.confidence,
