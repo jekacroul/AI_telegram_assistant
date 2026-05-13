@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import random
 from pathlib import Path
@@ -28,6 +29,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
+import httpx
 from sqlalchemy import select
 
 from .config import settings
@@ -203,6 +205,33 @@ class TelegramService:
             return "(документ)"
         return ""
 
+    async def _transcribe_voice(self, tg_msg: TgMessage) -> str:
+        if not self.bot or getattr(tg_msg, "voice", None) is None:
+            return ""
+        buffer = io.BytesIO()
+        try:
+            await self.bot.download(tg_msg.voice.file_id, destination=buffer)
+            payload = buffer.getvalue()
+            if not payload:
+                return ""
+            files = {"file": ("voice.ogg", payload, "audio/ogg")}
+            data = {"model": settings.openai_model}
+            headers = {"Authorization": f"Bearer {settings.openai_api_key}"}
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    f"{settings.openai_base_url.rstrip('/')}/audio/transcriptions",
+                    headers=headers,
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                body = response.json()
+            text = (body.get("text") or "").strip()
+            return text
+        except Exception:
+            log.exception("voice transcription failed")
+            return ""
+
     @staticmethod
     def _extract_media(tg_msg: TgMessage) -> tuple[Optional[str], Optional[str]]:
         if getattr(tg_msg, "photo", None):
@@ -264,6 +293,10 @@ class TelegramService:
             content_text = self._extract_message_content(tg_msg)
             if not content_text:
                 return
+            if content_text == "(голосовое)":
+                voice_text = await self._transcribe_voice(tg_msg)
+                if voice_text:
+                    content_text = f"голосовое сообщение: {voice_text}"
             media_type, media_file_id = self._extract_media(tg_msg)
             media_path = None
             media_private = False
