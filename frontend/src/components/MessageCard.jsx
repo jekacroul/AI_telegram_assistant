@@ -15,6 +15,8 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
   const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "";
   const isMine = msg.is_mine;
   const [openMedia, setOpenMedia] = useState(false);
+  const username = (msg.chat_username || "").trim();
+  const usernameLabel = username ? ` @${username}` : "";
 
   return (
     <div className="card flex gap-3 items-start">
@@ -28,7 +30,10 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm font-medium truncate">{msg.sender_name}</span>
-          <span className="text-xs text-muted">в чате {msg.chat_name}</span>
+          <span className="text-xs text-muted">
+            в чате {msg.chat_name}
+            {usernameLabel}
+          </span>
           <span className="text-xs text-muted ml-auto">{ts}</span>
         </div>
         {msg.text && !(msg.media_path && isMediaPlaceholder(msg.text)) && (

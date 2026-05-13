@@ -423,6 +423,7 @@ def _message_to_dict(m: Message) -> dict:
         "id": m.id,
         "chat_id": m.chat_id,
         "chat_name": m.chat_name,
+        "chat_username": m.chat_username,
         "sender_id": m.sender_id,
         "sender_name": m.sender_name,
         "is_mine": m.is_mine,
