@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
+import { useNavigate } from "react-router-dom";
 
 export default function ReplyModal({ message, onClose, onSent }) {
   const [variants, setVariants] = useState([]);
@@ -7,6 +8,9 @@ export default function ReplyModal({ message, onClose, onSent }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [quickReplies, setQuickReplies] = useState([]);
+  const [newQuickText, setNewQuickText] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -26,6 +30,10 @@ export default function ReplyModal({ message, onClose, onSent }) {
     };
   }, [message.id]);
 
+  useEffect(() => {
+    api.quickReplies().then((rows) => setQuickReplies(rows.slice(0, 5))).catch(() => {});
+  }, []);
+
   async function send() {
     setSending(true);
     setError("");
@@ -38,6 +46,19 @@ export default function ReplyModal({ message, onClose, onSent }) {
     } finally {
       setSending(false);
     }
+  }
+
+  async function addQuickReply() {
+    if (!newQuickText.trim()) return;
+    await api.createQuickReply({ text: newQuickText.trim(), category: "general" });
+    setNewQuickText("");
+    const rows = await api.quickReplies();
+    setQuickReplies(rows.slice(0, 5));
+  }
+
+  async function applyQuickReply(reply) {
+    setText(reply.text);
+    await api.useQuickReply(reply.id);
   }
 
   return (
@@ -74,6 +95,24 @@ export default function ReplyModal({ message, onClose, onSent }) {
         )}
 
         <div className="label mt-4">Текст ответа (можно отредактировать)</div>
+        <div className="mt-2">
+          <div className="label">Быстрые ответы</div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {quickReplies.map((q) => (
+              <button key={q.id} className="btn-secondary text-xs" onClick={() => applyQuickReply(q)}>
+                {q.text}
+              </button>
+            ))}
+            <input
+              className="input max-w-[220px]"
+              value={newQuickText}
+              onChange={(e) => setNewQuickText(e.target.value)}
+              placeholder="+ новый"
+            />
+            <button className="btn-secondary" onClick={addQuickReply}>+</button>
+            <button className="btn-secondary" onClick={() => navigate("/quick-replies")}>Управление</button>
+          </div>
+        </div>
         <textarea
           className="input mt-1 min-h-[100px]"
           value={text}

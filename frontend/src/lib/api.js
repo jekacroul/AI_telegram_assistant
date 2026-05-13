@@ -113,6 +113,18 @@ export const api = {
   statsTopChats: () => request("/api/stats/top-chats"),
   statsModelQuality: () => request("/api/stats/model-quality"),
   statsResponseTime: () => request("/api/stats/response-time"),
+  quickReplies: () => request("/api/quick-replies"),
+  createQuickReply: (data) =>
+    request("/api/quick-replies", { method: "POST", body: JSON.stringify(data) }),
+  updateQuickReply: (id, data) =>
+    request(`/api/quick-replies/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteQuickReply: (id) =>
+    request(`/api/quick-replies/${id}`, { method: "DELETE" }),
+  useQuickReply: (id) =>
+    request(`/api/quick-replies/${id}/use`, { method: "POST" }),
 };
 
 export function streamEvents(path, onEvent) {
