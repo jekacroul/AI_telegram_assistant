@@ -243,22 +243,20 @@ class TelegramService:
             if tg_msg.chat.type == ChatType.CHANNEL:
                 return
 
-            me = None
-            if self.bot:
-                try:
-                    me = await self.bot.me()
-                except Exception:  # noqa: BLE001
-                    me = None
-
             # Telegram can deliver outgoing owner messages twice in business mode:
             # as a business update (needed) and as a regular private message from owner
             # to themselves (must be ignored to avoid duplicate rows in dashboard).
+            sender = tg_msg.from_user
+            sender_id = sender.id if sender else 0
+            owner_ids = {
+                int(v)
+                for v in getattr(self, "_business_owner_cache", {}).values()
+                if isinstance(v, int)
+            }
             if (
-                me
-                and tg_msg.chat.type == ChatType.PRIVATE
+                tg_msg.chat.type == ChatType.PRIVATE
                 and getattr(tg_msg, "business_connection_id", None) is None
-                and tg_msg.from_user
-                and tg_msg.from_user.id == me.id
+                and sender_id in owner_ids
             ):
                 return
 
@@ -286,8 +284,6 @@ class TelegramService:
                 if is_business
                 else None
             )
-            sender = tg_msg.from_user
-            sender_id = sender.id if sender else 0
             sender_name = sender.full_name if sender else "unknown"
 
             is_mine = bool(
@@ -335,6 +331,22 @@ class TelegramService:
 
             tg_ts = _naive_utc(getattr(tg_msg, "date", None))
             async with SessionLocal() as session:
+                if (
+                    tg_msg.chat.type == ChatType.PRIVATE
+                    and not is_business
+                    and sender_id
+                    and content_text
+                ):
+                    dupe_q = await session.execute(
+                        select(Message.id).where(
+                            Message.business_connection_id.isnot(None),
+                            Message.sender_id == sender_id,
+                            Message.text == content_text,
+                        ).order_by(Message.id.desc()).limit(1)
+                    )
+                    if dupe_q.scalar_one_or_none() is not None:
+                        return
+
                 row = Message(
                     chat_id=chat_id,
                     chat_name=chat_name,
