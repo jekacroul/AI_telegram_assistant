@@ -242,6 +242,26 @@ class TelegramService:
                 return
             if tg_msg.chat.type == ChatType.CHANNEL:
                 return
+
+            me = None
+            if self.bot:
+                try:
+                    me = await self.bot.me()
+                except Exception:  # noqa: BLE001
+                    me = None
+
+            # Telegram can deliver outgoing owner messages twice in business mode:
+            # as a business update (needed) and as a regular private message from owner
+            # to themselves (must be ignored to avoid duplicate rows in dashboard).
+            if (
+                me
+                and tg_msg.chat.type == ChatType.PRIVATE
+                and getattr(tg_msg, "business_connection_id", None) is None
+                and tg_msg.from_user
+                and tg_msg.from_user.id == me.id
+            ):
+                return
+
             content_text = self._extract_message_content(tg_msg)
             if not content_text:
                 return
@@ -255,16 +275,11 @@ class TelegramService:
             media_placeholders = {"(фото)", "(видео)", "(кружок)"}
             if content_text in media_placeholders and media_path:
                 content_text = ""
+            elif content_text in media_placeholders and media_private:
+                content_text = "Приватное сообщение"
 
             business_connection_id = getattr(tg_msg, "business_connection_id", None)
             is_business = business_connection_id is not None
-
-            me = None
-            if self.bot:
-                try:
-                    me = await self.bot.me()
-                except Exception:  # noqa: BLE001
-                    me = None
 
             owner_id = (
                 await self._business_owner_id(business_connection_id)
