@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 
 function initials(name) {
@@ -28,6 +28,10 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
   const [transcription, setTranscription] = useState(msg.transcription || "");
   const [retranscribing, setRetranscribing] = useState(false);
   const [retErr, setRetErr] = useState("");
+
+  useEffect(() => {
+    setTranscription(msg.transcription || "");
+  }, [msg.transcription]);
   const username = (msg.chat_username || "").trim();
   const usernameLabel = username ? ` @${username}` : "";
 
