@@ -252,6 +252,30 @@ class TelegramService:
             return ""
 
     @staticmethod
+    def _extract_telegram_voice_text(tg_msg: TgMessage) -> str:
+        """Try to read Telegram-provided voice transcription from update payload."""
+        candidates = [
+            getattr(tg_msg, "voice_transcription", None),
+            getattr(tg_msg, "transcript", None),
+            getattr(tg_msg, "transcription", None),
+        ]
+        extra = getattr(tg_msg, "model_extra", None) or {}
+        if isinstance(extra, dict):
+            candidates.extend(
+                [
+                    extra.get("voice_transcription"),
+                    extra.get("transcript"),
+                    extra.get("transcription"),
+                    extra.get("voice_text"),
+                ]
+            )
+        for value in candidates:
+            text = (value or "").strip() if isinstance(value, str) else ""
+            if text:
+                return text
+        return ""
+
+    @staticmethod
     def _extract_media(tg_msg: TgMessage) -> tuple[Optional[str], Optional[str]]:
         if getattr(tg_msg, "photo", None):
             photo_sizes = tg_msg.photo or []
@@ -313,7 +337,9 @@ class TelegramService:
             if not content_text:
                 return
             if content_text == "(голосовое)":
-                voice_text = await self._transcribe_voice(tg_msg)
+                voice_text = self._extract_telegram_voice_text(tg_msg)
+                if not voice_text:
+                    voice_text = await self._transcribe_voice(tg_msg)
                 if voice_text:
                     content_text = f"голосовое сообщение: {voice_text}"
             media_type, media_file_id = self._extract_media(tg_msg)
