@@ -482,106 +482,135 @@ class TelegramService:
 
             transcription_text: Optional[str] = None
             reply_input_text = content_text
+            voice_transcribed_ok = False
+            voice_download_failed = False
+            voice_low_confidence = False
 
-            if is_voice and not is_mine:
-                # voice_reply_mode: skip → mark pending with reason, no transcription
-                if voice_reply_mode == VOICE_REPLY_MODE_SKIP:
+            # Transcribe all voice messages (both incoming and own) so the
+            # dataset and history contain real text instead of "(голосовое)".
+            # Reply routing happens further down only for not-is_mine messages.
+            if is_voice:
+                if not whisper_enabled:
+                    log.info(
+                        "voice msg %s skipped: whisper_enabled=False", msg_id
+                    )
+                elif not voice_file_id:
+                    log.warning(
+                        "voice msg %s skipped: no voice_file_id", msg_id
+                    )
+                elif voice_reply_mode == VOICE_REPLY_MODE_SKIP:
+                    log.info(
+                        "voice msg %s skipped: voice_reply_mode=skip", msg_id
+                    )
+            if (
+                is_voice
+                and whisper_enabled
+                and voice_file_id
+                and voice_reply_mode != VOICE_REPLY_MODE_SKIP
+            ):
+                log.info("transcribing voice msg %s (is_mine=%s)", msg_id, is_mine)
+                src = await self._download_voice(voice_file_id, msg_id)
+                if src:
+                    result = await self._transcribe_voice_file(src, msg_id)
                     async with SessionLocal() as session:
-                        result = await session.execute(
+                        sres = await session.execute(
                             select(Message).where(Message.id == msg_id)
                         )
-                        row_db = result.scalar_one_or_none()
+                        row_db = sres.scalar_one_or_none()
+                        if row_db:
+                            row_db.transcription = result.text
+                            row_db.transcription_confidence = result.confidence
+                            row_db.transcription_low_confidence = (
+                                result.low_confidence
+                            )
+                            row_db.transcription_error = result.error
+                            if not result.error and result.text:
+                                row_db.text = result.text
+                            await session.commit()
+                            transcription_text = result.text
+                            if result.text:
+                                reply_input_text = result.text
+                            voice_transcribed_ok = bool(
+                                result.text and not result.error
+                            )
+                            voice_low_confidence = result.low_confidence
+                else:
+                    voice_download_failed = True
+                    async with SessionLocal() as session:
+                        sres = await session.execute(
+                            select(Message).where(Message.id == msg_id)
+                        )
+                        row_db = sres.scalar_one_or_none()
+                        if row_db:
+                            row_db.transcription_error = (
+                                "voice download failed"
+                            )
+                            await session.commit()
+
+            # Reply routing for incoming voice messages (skip own here).
+            if is_voice and not is_mine:
+                if voice_reply_mode == VOICE_REPLY_MODE_SKIP:
+                    async with SessionLocal() as session:
+                        sres = await session.execute(
+                            select(Message).where(Message.id == msg_id)
+                        )
+                        row_db = sres.scalar_one_or_none()
                         if row_db:
                             row_db.pending_reason = "voice_skipped"
                             await session.commit()
+                    row.pending_reason = "voice_skipped"
                     should_reply = False
-                elif whisper_enabled and voice_file_id:
-                    src = await self._download_voice(voice_file_id, msg_id)
-                    if src:
-                        result = await self._transcribe_voice_file(src, msg_id)
-                        async with SessionLocal() as session:
-                            sres = await session.execute(
-                                select(Message).where(Message.id == msg_id)
+                elif not whisper_enabled:
+                    reason = (
+                        "voice_pending"
+                        if voice_reply_mode == VOICE_REPLY_MODE_PENDING
+                        else "voice_no_transcription"
+                    )
+                    async with SessionLocal() as session:
+                        sres = await session.execute(
+                            select(Message).where(Message.id == msg_id)
+                        )
+                        row_db = sres.scalar_one_or_none()
+                        if row_db:
+                            row_db.pending_reason = reason
+                            await session.commit()
+                    row.pending_reason = reason
+                    should_reply = False
+                elif voice_download_failed or not voice_transcribed_ok:
+                    async with SessionLocal() as session:
+                        sres = await session.execute(
+                            select(Message).where(Message.id == msg_id)
+                        )
+                        row_db = sres.scalar_one_or_none()
+                        if row_db:
+                            row_db.pending_reason = (
+                                "voice_transcription_error"
                             )
-                            row_db = sres.scalar_one_or_none()
-                            if row_db:
-                                row_db.transcription = result.text
-                                row_db.transcription_confidence = (
-                                    result.confidence
-                                )
-                                row_db.transcription_low_confidence = (
-                                    result.low_confidence
-                                )
-                                row_db.transcription_error = result.error
-                                if not result.error and result.text:
-                                    row_db.text = result.text
-                                await session.commit()
-                                transcription_text = result.text
-                                if result.text:
-                                    reply_input_text = result.text
-                                # Voice routing decisions:
-                                # - error or empty → pending
-                                # - low confidence → pending (user verifies)
-                                # - mode == pending → never auto-reply
-                                if (
-                                    result.error
-                                    or not result.text
-                                    or result.low_confidence
-                                    or voice_reply_mode
-                                    == VOICE_REPLY_MODE_PENDING
-                                ):
-                                    reason = (
-                                        "voice_pending"
-                                        if voice_reply_mode
-                                        == VOICE_REPLY_MODE_PENDING
-                                        else (
-                                            "voice_low_confidence"
-                                            if result.low_confidence
-                                            else "voice_transcription_error"
-                                        )
-                                    )
-                                    row_db.pending_reason = reason
-                                    await session.commit()
-                                    should_reply = False
-                    else:
-                        async with SessionLocal() as session:
-                            sres = await session.execute(
-                                select(Message).where(Message.id == msg_id)
-                            )
-                            row_db = sres.scalar_one_or_none()
-                            if row_db:
-                                row_db.transcription_error = (
-                                    "voice download failed"
-                                )
-                                row_db.pending_reason = (
-                                    "voice_transcription_error"
-                                )
-                                await session.commit()
-                        should_reply = False
-                else:
-                    # whisper disabled: route by voice_reply_mode
-                    if voice_reply_mode == VOICE_REPLY_MODE_PENDING:
-                        async with SessionLocal() as session:
-                            sres = await session.execute(
-                                select(Message).where(Message.id == msg_id)
-                            )
-                            row_db = sres.scalar_one_or_none()
-                            if row_db:
-                                row_db.pending_reason = "voice_pending"
-                                await session.commit()
-                        should_reply = False
-                    # for VOICE_REPLY_MODE_TEXT without whisper there's no
-                    # text to feed the LLM, so push to pending too
-                    else:
-                        async with SessionLocal() as session:
-                            sres = await session.execute(
-                                select(Message).where(Message.id == msg_id)
-                            )
-                            row_db = sres.scalar_one_or_none()
-                            if row_db:
-                                row_db.pending_reason = "voice_no_transcription"
-                                await session.commit()
-                        should_reply = False
+                            await session.commit()
+                    row.pending_reason = "voice_transcription_error"
+                    should_reply = False
+                elif voice_low_confidence:
+                    async with SessionLocal() as session:
+                        sres = await session.execute(
+                            select(Message).where(Message.id == msg_id)
+                        )
+                        row_db = sres.scalar_one_or_none()
+                        if row_db:
+                            row_db.pending_reason = "voice_low_confidence"
+                            await session.commit()
+                    row.pending_reason = "voice_low_confidence"
+                    should_reply = False
+                elif voice_reply_mode == VOICE_REPLY_MODE_PENDING:
+                    async with SessionLocal() as session:
+                        sres = await session.execute(
+                            select(Message).where(Message.id == msg_id)
+                        )
+                        row_db = sres.scalar_one_or_none()
+                        if row_db:
+                            row_db.pending_reason = "voice_pending"
+                            await session.commit()
+                    row.pending_reason = "voice_pending"
+                    should_reply = False
 
             await message_bus.publish(
                 "incoming",
