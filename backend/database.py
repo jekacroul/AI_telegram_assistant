@@ -123,6 +123,17 @@ class StyleProfile(Base):
     messages_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ChatPersona(Base):
+    __tablename__ = "chat_personas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(Integer, index=True, unique=True)
+    chat_name: Mapped[str] = mapped_column(String(255), default="")
+    profile_json: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    messages_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class QualityLog(Base):
     __tablename__ = "quality_log"
 
@@ -211,6 +222,19 @@ def _apply_lightweight_migrations(sync_conn) -> None:
         )
 
     tables = set(inspector.get_table_names())
+    if "chat_personas" not in tables:
+        sync_conn.exec_driver_sql(
+            """
+            CREATE TABLE chat_personas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL UNIQUE,
+                chat_name VARCHAR(255) DEFAULT '' NOT NULL,
+                profile_json TEXT NOT NULL,
+                updated_at DATETIME,
+                messages_count INTEGER DEFAULT 0 NOT NULL
+            )
+            """
+        )
     if "quick_replies" in tables:
         qr_count = sync_conn.exec_driver_sql(
             "SELECT COUNT(*) FROM quick_replies"

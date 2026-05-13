@@ -53,7 +53,7 @@ ALLOWED_UPDATES = [
 from .event_bus import message_bus
 from .llm_engine import LLMUnavailableError, get_client, pick_auto_variant
 from .quality_filter import is_good_response
-from .style_engine import get_latest_profile, reanalyze_and_store
+from .style_engine import get_profile_for_chat, reanalyze_and_store, reanalyze_chat_persona
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ class TelegramService:
         self._token: str = ""
         self._lock = asyncio.Lock()
         self._messages_since_reanalyze = 0
+        self._chat_new_my_messages: dict[int, int] = {}
         self.last_update_at: Optional[datetime] = None
         self.last_update_kind: str = ""
         self.update_count: int = 0
@@ -405,7 +406,7 @@ class TelegramService:
             )
 
             if is_mine:
-                await self._maybe_reanalyze()
+                await self._maybe_reanalyze(chat_id=chat_id)
                 return
 
             if not should_reply:
@@ -423,7 +424,7 @@ class TelegramService:
                     chosen = pick_auto_variant(variants)
                     if not chosen:
                         await self._mark_pending_quality(msg_id, reject_reason)
-                        await self._maybe_reanalyze()
+                        await self._maybe_reanalyze(chat_id=chat_id)
                         return
                     await self._delay_before_auto_reply(chat_id, chat_name)
                     await self.send_reply(
@@ -466,7 +467,7 @@ class TelegramService:
                     "pending", {"id": msg_id, "reason": "auto_reply_disabled"}
                 )
 
-            await self._maybe_reanalyze()
+            await self._maybe_reanalyze(chat_id=chat_id)
         except Exception as e:  # noqa: BLE001
             self.last_error = str(e)
             log.exception("handle_incoming error")
@@ -520,7 +521,7 @@ class TelegramService:
         self, text: str, sender_name: str, chat_id: int
     ) -> tuple[list[str], str]:
         async with SessionLocal() as session:
-            profile = await get_latest_profile(session)
+            profile = await get_profile_for_chat(session, chat_id)
             history_q = await session.execute(
                 select(Message)
                 .where(Message.chat_id == chat_id)
@@ -735,7 +736,15 @@ class TelegramService:
             raise RuntimeError("Bot not configured")
         await self.dp.start_polling(self.bot, allowed_updates=ALLOWED_UPDATES)
 
-    async def _maybe_reanalyze(self) -> None:
+    async def _maybe_reanalyze(self, chat_id: int) -> None:
+        self._chat_new_my_messages[chat_id] = self._chat_new_my_messages.get(chat_id, 0) + 1
+        if self._chat_new_my_messages[chat_id] >= 10:
+            self._chat_new_my_messages[chat_id] = 0
+            try:
+                async with SessionLocal() as session:
+                    await reanalyze_chat_persona(session, chat_id)
+            except Exception:  # noqa: BLE001
+                log.exception("chat persona reanalyze failed")
         self._messages_since_reanalyze += 1
         if self._messages_since_reanalyze < 20:
             return

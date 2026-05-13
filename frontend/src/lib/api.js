@@ -78,6 +78,13 @@ export const api = {
     }),
   reanalyzeStyle: () =>
     request("/api/style/reanalyze", { method: "POST" }),
+  personas: () => request("/api/personas"),
+  persona: (chatId) => request(`/api/personas/${chatId}`),
+  savePersona: (chatId, profile) =>
+    request(`/api/personas/${chatId}`, { method: "PUT", body: JSON.stringify(profile) }),
+  reanalyzePersona: (chatId) =>
+    request(`/api/personas/${chatId}/reanalyze`, { method: "POST" }),
+  deletePersona: (chatId) => request(`/api/personas/${chatId}`, { method: "DELETE" }),
   testLLM: (text) =>
     request("/api/llm/test", {
       method: "POST",

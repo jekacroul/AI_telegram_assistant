@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 
 const FIELDS = [
@@ -11,172 +11,113 @@ const FIELDS = [
   ["avg_response_delay_minutes", "Средняя задержка ответа (мин)", "number"],
 ];
 
-const LIST_FIELDS = [
-  ["common_words", "Частые слова"],
-  ["greeting_patterns", "Приветствия"],
-  ["farewell_patterns", "Прощания"],
-];
+function ProfileEditor({ profile, setProfile }) {
+  const updateField = (key, value) => setProfile((p) => ({ ...(p || {}), [key]: value }));
+  return <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+    {FIELDS.map(([key, label, type]) => <div key={key} className="card">
+      <div className="label">{label}</div>
+      {type === "bool" ? (
+        <label className="flex items-center gap-2 mt-2 text-sm">
+          <input type="checkbox" checked={!!profile?.[key]} onChange={(e) => updateField(key, e.target.checked)} />
+          {profile?.[key] ? "да" : "нет"}
+        </label>
+      ) : (
+        <input
+          className="input mt-1"
+          type={type === "number" ? "number" : "text"}
+          step="0.01"
+          value={profile?.[key] ?? ""}
+          onChange={(e) => updateField(key, type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)}
+        />
+      )}
+    </div>)}
+  </div>;
+}
 
 export default function StyleProfile() {
-  const [profile, setProfile] = useState(null);
-  const [error, setError] = useState("");
+  const [settings, setSettings] = useState({ persona_mode: "global" });
+  const [globalProfile, setGlobalProfile] = useState({});
+  const [personas, setPersonas] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [selected, setSelected] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const refresh = async () => {
-    try {
-      const p = await api.styleProfile();
-      setProfile(p && Object.keys(p).length ? p : { samples: [] });
-    } catch (e) {
-      setError(e.message);
-    }
+    setError("");
+    const [s, gp, ps, cs] = await Promise.all([
+      api.getSettings(),
+      api.styleProfile(),
+      api.personas(),
+      api.chats(),
+    ]);
+    setSettings(s);
+    setGlobalProfile(gp || {});
+    setPersonas(ps || []);
+    setChats(cs || []);
   };
 
   useEffect(() => {
-    refresh();
+    refresh().catch((e) => setError(e.message));
   }, []);
 
-  function updateField(key, value) {
-    setProfile((prev) => ({ ...(prev || {}), [key]: value }));
-  }
-
-  function updateList(key, idx, value) {
-    setProfile((prev) => {
-      const arr = [...((prev || {})[key] || [])];
-      arr[idx] = value;
-      return { ...(prev || {}), [key]: arr };
-    });
-  }
-
-  function addToList(key) {
-    setProfile((prev) => ({
-      ...(prev || {}),
-      [key]: [...((prev || {})[key] || []), ""],
-    }));
-  }
-
-  function removeFromList(key, idx) {
-    setProfile((prev) => {
-      const arr = [...((prev || {})[key] || [])];
-      arr.splice(idx, 1);
-      return { ...(prev || {}), [key]: arr };
-    });
-  }
-
-  async function save() {
+  const saveMode = async (mode) => {
     setSaving(true);
-    setError("");
     try {
-      await api.saveStyle(profile);
-    } catch (e) {
-      setError(e.message);
+      await api.saveSettings({ persona_mode: mode });
+      setSettings((p) => ({ ...p, persona_mode: mode }));
     } finally {
       setSaving(false);
     }
-  }
+  };
 
-  async function reanalyze() {
-    setSaving(true);
-    try {
-      const p = await api.reanalyzeStyle();
-      setProfile(p);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  }
+  const chatCards = useMemo(() => {
+    const byId = new Map((personas || []).map((p) => [p.chat_id, p]));
+    return (chats || []).map((c) => {
+      const persona = byId.get(c.chat_id);
+      return {
+        chat_id: c.chat_id,
+        chat_name: c.chat_name,
+        updated_at: persona?.updated_at || null,
+        profile: persona?.profile || null,
+      };
+    });
+  }, [personas, chats]);
 
-  if (!profile) return <div className="card text-muted">Загрузка...</div>;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <button className="btn-primary" onClick={save} disabled={saving}>
-          Сохранить
-        </button>
-        <button className="btn-secondary" onClick={reanalyze} disabled={saving}>
-          Пересоздать из БД
-        </button>
-        {error && <span className="text-bad text-sm self-center">{error}</span>}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {FIELDS.map(([key, label, type]) => (
-          <div key={key} className="card">
-            <div className="label">{label}</div>
-            {type === "bool" ? (
-              <label className="flex items-center gap-2 mt-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={!!profile[key]}
-                  onChange={(e) => updateField(key, e.target.checked)}
-                />
-                {profile[key] ? "да" : "нет"}
-              </label>
-            ) : (
-              <input
-                className="input mt-1"
-                type={type === "number" ? "number" : "text"}
-                step="0.01"
-                value={profile[key] ?? ""}
-                onChange={(e) =>
-                  updateField(
-                    key,
-                    type === "number" ? parseFloat(e.target.value) || 0 : e.target.value
-                  )
-                }
-              />
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {LIST_FIELDS.map(([key, label]) => (
-          <div key={key} className="card">
-            <div className="label flex items-center justify-between">
-              <span>{label}</span>
-              <button className="text-accent text-xs" onClick={() => addToList(key)}>
-                + добавить
-              </button>
-            </div>
-            <div className="mt-2 space-y-1">
-              {(profile[key] || []).map((v, i) => (
-                <div key={i} className="flex gap-1">
-                  <input
-                    className="input"
-                    value={v}
-                    onChange={(e) => updateList(key, i, e.target.value)}
-                  />
-                  <button
-                    className="btn-secondary"
-                    onClick={() => removeFromList(key, i)}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-              {(profile[key] || []).length === 0 && (
-                <div className="text-sm text-muted">пусто</div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="card">
-        <div className="label">Примеры моих сообщений</div>
-        <div className="mt-2 space-y-1 text-sm">
-          {(profile.samples || []).map((s, i) => (
-            <div key={i} className="text-muted border-l-2 border-white/10 pl-2">
-              {s}
-            </div>
-          ))}
-          {!(profile.samples || []).length && (
-            <div className="text-muted">пусто</div>
-          )}
-        </div>
-      </div>
+  return <div className="space-y-4">
+    <div className="card flex gap-2 items-center">
+      <button className={`btn-secondary ${settings.persona_mode === "global" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("global")} disabled={saving}>Глобальный стиль</button>
+      <button className={`btn-secondary ${settings.persona_mode === "per_chat" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("per_chat")} disabled={saving}>Стиль по чатам</button>
+      {error && <span className="text-bad text-sm">{error}</span>}
     </div>
-  );
+
+    {settings.persona_mode === "global" && <>
+      <div className="flex gap-2">
+        <button className="btn-primary" onClick={async () => { setSaving(true); try { await api.saveStyle(globalProfile || {}); } finally { setSaving(false); } }} disabled={saving}>Сохранить</button>
+        <button className="btn-secondary" onClick={async () => { setSaving(true); try { setGlobalProfile(await api.reanalyzeStyle()); } finally { setSaving(false); } }} disabled={saving}>Пересчитать из сообщений</button>
+      </div>
+      <ProfileEditor profile={globalProfile} setProfile={setGlobalProfile} />
+    </>}
+
+    {settings.persona_mode === "per_chat" && <>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {chatCards.map((p) => <div key={p.chat_id} className="card cursor-pointer" onClick={() => setSelected({ ...p, profile: p.profile || { ...globalProfile } })}>
+          <div className="font-medium">{p.chat_name || p.chat_id}</div>
+          <div className="text-sm text-muted">Тон: {p.profile?.tone || "—"}</div>
+          <div className="text-sm text-muted">Средняя длина: {p.profile?.avg_message_length || 0}</div>
+          <div className="text-xs text-muted">Обновлено: {p.updated_at || "нет"}</div>
+        </div>)}
+      </div>
+      {!chatCards.length && <div className="card text-muted text-sm">Нет чатов для персонализации.</div>}
+      {selected && <div className="space-y-3">
+        <div className="card font-medium">Редактирование: {selected.chat_name || selected.chat_id}</div>
+        <ProfileEditor profile={selected.profile || {}} setProfile={(updater) => setSelected((prev) => ({ ...prev, profile: typeof updater === "function" ? updater(prev.profile || {}) : updater }))} />
+        <div className="flex gap-2">
+          <button className="btn-primary" disabled={saving} onClick={async () => { setSaving(true); try { await api.savePersona(selected.chat_id, selected.profile || {}); await refresh(); } finally { setSaving(false); } }}>Сохранить</button>
+          <button className="btn-secondary" disabled={saving} onClick={async () => { setSaving(true); try { const p = await api.reanalyzePersona(selected.chat_id); setSelected((s) => ({ ...s, profile: p })); await refresh(); } finally { setSaving(false); } }}>Пересчитать из сообщений</button>
+          <button className="btn-secondary" disabled={saving} onClick={async () => { setSaving(true); try { await api.deletePersona(selected.chat_id); setSelected(null); await refresh(); } finally { setSaving(false); } }}>Удалить</button>
+        </div>
+      </div>}
+    </>}
+  </div>;
 }
