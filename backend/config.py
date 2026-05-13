@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     lm_studio_models_dir: Optional[str] = Field(default=None, alias="LM_STUDIO_MODELS_DIR")
     gguf_quant: str = Field(default="Q8_0", alias="GGUF_QUANT")
     notify_chat_id: str = Field(default="", alias="NOTIFY_CHAT_ID")
+    media_path: str = Field(default="./media/", alias="MEDIA_PATH")
 
     @property
     def db_url(self) -> str:
@@ -64,6 +65,14 @@ class Settings(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         path = Path(self.logs_path)
+        if not path.is_absolute():
+            path = ROOT_DIR / path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def media_dir(self) -> Path:
+        path = Path(self.media_path)
         if not path.is_absolute():
             path = ROOT_DIR / path
         path.mkdir(parents=True, exist_ok=True)

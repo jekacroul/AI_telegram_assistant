@@ -100,6 +100,7 @@ log = logging.getLogger(__name__)
 
 
 TELEGRAM_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
+MEDIA_PLACEHOLDERS = {"(фото)", "(видео)", "(кружок)"}
 
 
 def _normalize_username(username: Optional[str]) -> str:
@@ -186,6 +187,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Telegram Local AI Assistant", lifespan=lifespan)
+app.mount("/media", StaticFiles(directory=str(settings.media_dir)), name="media")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -414,19 +416,26 @@ async def recent(
 
 
 def _message_to_dict(m: Message) -> dict:
+    text = m.text
+    if text in MEDIA_PLACEHOLDERS and m.media_path:
+        text = ""
     return {
         "id": m.id,
         "chat_id": m.chat_id,
         "chat_name": m.chat_name,
+        "chat_username": m.chat_username,
         "sender_id": m.sender_id,
         "sender_name": m.sender_name,
         "is_mine": m.is_mine,
-        "text": m.text,
+        "text": text,
         "timestamp": _iso_utc(m.timestamp),
         "message_id": m.message_id,
         "replied": m.replied,
         "reply_text": m.reply_text,
         "pending_reason": m.pending_reason,
+        "media_type": m.media_type,
+        "media_path": m.media_path,
+        "media_private": m.media_private,
     }
 
 
@@ -932,9 +941,12 @@ async def dialogs_backup_content(
                 "sender_id": m.sender_id,
                 "sender_name": m.sender_name,
                 "is_mine": m.is_mine,
-                "text": m.text,
+                "text": "" if (m.text in MEDIA_PLACEHOLDERS and m.media_path) else m.text,
                 "timestamp": _iso_utc(m.timestamp),
                 "message_id": m.message_id,
+                "media_type": m.media_type,
+                "media_path": m.media_path,
+                "media_private": m.media_private,
             }
             for m in rows
         ],

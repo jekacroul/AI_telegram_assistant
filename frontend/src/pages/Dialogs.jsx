@@ -12,6 +12,11 @@ function formatTime(iso) {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+function isMediaPlaceholder(text) {
+  return ["(фото)", "(видео)", "(кружок)", "(photo)", "(video)"].includes(
+    (text || "").trim().toLowerCase()
+  );
+}
 
 export default function Dialogs() {
   const [chats, setChats] = useState([]);
@@ -30,6 +35,7 @@ export default function Dialogs() {
   const [intervalDraft, setIntervalDraft] = useState("1440");
   const [savingInterval, setSavingInterval] = useState(false);
   const [intervalSaved, setIntervalSaved] = useState(false);
+  const [mediaPreview, setMediaPreview] = useState(null);
 
   const excludedSet = useMemo(
     () => new Set((settings.excluded_chats || []).map((x) => Number(x))),
@@ -399,9 +405,34 @@ export default function Dialogs() {
                             {m.sender_name || "собеседник"}
                           </div>
                         )}
-                        <div className="whitespace-pre-wrap break-words">
-                          {m.text}
-                        </div>
+                        {m.text && !(m.media_path && isMediaPlaceholder(m.text)) && (
+                          <div className="whitespace-pre-wrap break-words">
+                            {m.text}
+                          </div>
+                        )}
+                        {m.media_type === "photo" && m.media_path && (
+                          <button className="mt-2 block" onClick={() => setMediaPreview(m)}>
+                            <img
+                              src={m.media_path}
+                              alt="backup photo"
+                              className="max-h-44 rounded-md border border-white/10 object-cover"
+                            />
+                          </button>
+                        )}
+                        {(m.media_type === "video" || m.media_type === "video_note") &&
+                          m.media_path && (
+                            <button className="mt-2 block" onClick={() => setMediaPreview(m)}>
+                              <video
+                                src={m.media_path}
+                                className="max-h-44 rounded-md border border-white/10"
+                              />
+                            </button>
+                          )}
+                        {m.media_private && !m.media_path && (
+                          <div className="mt-2 text-[11px] text-white/70">
+                            Приватное {m.media_type === "photo" ? "фото" : "видео"} (одноразовое)
+                          </div>
+                        )}
                         <div className="text-[10px] text-white/60 mt-1 text-right">
                           {formatTime(m.timestamp)}
                         </div>
@@ -417,6 +448,27 @@ export default function Dialogs() {
           )}
         </div>
       </div>
+      {mediaPreview?.media_path && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setMediaPreview(null)}
+        >
+          {mediaPreview.media_type === "photo" ? (
+            <img
+              src={mediaPreview.media_path}
+              alt="fullscreen media"
+              className="max-w-full max-h-full object-contain"
+            />
+          ) : (
+            <video
+              src={mediaPreview.media_path}
+              controls
+              autoPlay
+              className="max-w-full max-h-full"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
