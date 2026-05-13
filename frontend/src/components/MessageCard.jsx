@@ -28,7 +28,7 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm font-medium truncate">{msg.sender_name}</span>
-          <span className="text-xs text-muted">в {msg.chat_name}</span>
+          <span className="text-xs text-muted">в чате {msg.chat_name}</span>
           <span className="text-xs text-muted ml-auto">{ts}</span>
         </div>
         {msg.text && !(msg.media_path && isMediaPlaceholder(msg.text)) && (
