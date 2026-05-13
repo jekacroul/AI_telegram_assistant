@@ -880,6 +880,28 @@ async def reanalyze_style(session: AsyncSession = Depends(get_session)) -> dict:
 
 @app.get("/api/personas")
 async def personas_list(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    mode = await get_setting(session, "persona_mode", "global")
+    if mode == "per_chat":
+        mine_chats_q = await session.execute(
+            select(Message.chat_id)
+            .where(Message.is_mine == True)  # noqa: E712
+            .group_by(Message.chat_id)
+        )
+        for (chat_id,) in mine_chats_q.all():
+            existing = await session.execute(
+                select(Message.id)
+                .where(Message.chat_id == chat_id)
+                .limit(1)
+            )
+            if existing.first() is None:
+                continue
+            from .database import ChatPersona
+            row = await session.execute(
+                select(ChatPersona.id).where(ChatPersona.chat_id == chat_id)
+            )
+            if row.first() is None:
+                await reanalyze_chat_persona(session, chat_id)
+
     rows = await list_chat_personas(session)
     return [
         {
