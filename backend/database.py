@@ -142,6 +142,18 @@ class Setting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
 
 
+class QuickReply(Base):
+    __tablename__ = "quick_replies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    text: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), default="general", index=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+
+
 engine = create_async_engine(settings.db_url, echo=False, future=True)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -197,6 +209,27 @@ def _apply_lightweight_migrations(sync_conn) -> None:
         sync_conn.exec_driver_sql(
             "ALTER TABLE dialog_backup_messages ADD COLUMN media_private BOOLEAN DEFAULT 0 NOT NULL"
         )
+
+    tables = set(inspector.get_table_names())
+    if "quick_replies" in tables:
+        qr_count = sync_conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM quick_replies"
+        ).scalar_one()
+        if qr_count == 0:
+            default_replies = [
+                "ок",
+                "понял",
+                "буду через час",
+                "давай завтра",
+                "перезвоню позже",
+                "не могу сейчас",
+                "хорошо, договорились",
+            ]
+            for text in default_replies:
+                sync_conn.exec_driver_sql(
+                    "INSERT INTO quick_replies (text, category, usage_count, created_at) VALUES (?, 'general', 0, CURRENT_TIMESTAMP)",
+                    (text,),
+                )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

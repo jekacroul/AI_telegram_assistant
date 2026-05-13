@@ -42,6 +42,7 @@ from .database import (
     DialogBackupMessage,
     Message,
     QualityLog,
+    QuickReply,
     SessionLocal,
     TrainingPair,
     TrainingRun,
@@ -257,6 +258,81 @@ class SettingsIn(BaseModel):
     auto_reply: Optional[bool] = None
     monitored_chats: Optional[list[int]] = None
     llm_model: Optional[str] = None
+
+
+class QuickReplyIn(BaseModel):
+    text: str = Field(min_length=1, max_length=255)
+    category: str = Field(default="general", min_length=1, max_length=64)
+
+
+class QuickReplyUpdateIn(BaseModel):
+    text: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+
+def _quick_reply_to_dict(reply: QuickReply) -> dict:
+    return {
+        "id": reply.id,
+        "text": reply.text,
+        "category": reply.category,
+        "usage_count": reply.usage_count,
+        "created_at": _iso_utc(reply.created_at),
+    }
+
+
+@app.get("/api/quick-replies")
+async def list_quick_replies(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    result = await session.execute(
+        select(QuickReply).order_by(desc(QuickReply.usage_count), desc(QuickReply.created_at))
+    )
+    return [_quick_reply_to_dict(row) for row in result.scalars().all()]
+
+
+@app.post("/api/quick-replies")
+async def create_quick_reply(
+    payload: QuickReplyIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    reply = QuickReply(text=payload.text.strip(), category=payload.category.strip())
+    session.add(reply)
+    await session.commit()
+    await session.refresh(reply)
+    return _quick_reply_to_dict(reply)
+
+
+@app.put("/api/quick-replies/{reply_id}")
+async def update_quick_reply(
+    reply_id: int, payload: QuickReplyUpdateIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    reply = await session.get(QuickReply, reply_id)
+    if not reply:
+        raise HTTPException(404, "Quick reply not found")
+    if payload.text is not None:
+        reply.text = payload.text.strip()
+    if payload.category is not None:
+        reply.category = payload.category.strip()
+    await session.commit()
+    await session.refresh(reply)
+    return _quick_reply_to_dict(reply)
+
+
+@app.delete("/api/quick-replies/{reply_id}", status_code=204)
+async def delete_quick_reply(reply_id: int, session: AsyncSession = Depends(get_session)) -> None:
+    reply = await session.get(QuickReply, reply_id)
+    if not reply:
+        raise HTTPException(404, "Quick reply not found")
+    await session.delete(reply)
+    await session.commit()
+
+
+@app.post("/api/quick-replies/{reply_id}/use")
+async def use_quick_reply(reply_id: int, session: AsyncSession = Depends(get_session)) -> dict:
+    reply = await session.get(QuickReply, reply_id)
+    if not reply:
+        raise HTTPException(404, "Quick reply not found")
+    reply.usage_count += 1
+    await session.commit()
+    await session.refresh(reply)
+    return _quick_reply_to_dict(reply)
 
 
 class DelayIn(BaseModel):

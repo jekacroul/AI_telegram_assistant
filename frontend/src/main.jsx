@@ -8,6 +8,7 @@ import Training from "./pages/Training.jsx";
 import StyleProfile from "./pages/StyleProfile.jsx";
 import Settings from "./pages/Settings.jsx";
 import Stats from "./pages/Stats.jsx";
+import QuickReplies from "./pages/QuickReplies.jsx";
 
 function Layout() {
   const linkBase = "px-4 py-2 rounded-md text-sm transition-colors";
@@ -27,6 +28,7 @@ function Layout() {
               ["/style", "Стиль"],
               ["/stats", "Статистика"],
               ["/settings", "Настройки"],
+              ["/quick-replies", "Быстрые ответы"],
             ].map(([to, label]) => (
               <NavLink
                 key={to}
@@ -50,6 +52,7 @@ function Layout() {
           <Route path="/style" element={<StyleProfile />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/quick-replies" element={<QuickReplies />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
