@@ -217,7 +217,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
                 try:
                     event = json.loads(payload)
                 except json.JSONDecodeError:
-                    log.warning("malformed train event: %s", payload[:200])
+                    log.error("malformed train event: %s", payload[:200])
                     continue
                 phase = event.get("phase")
                 if phase == "result":

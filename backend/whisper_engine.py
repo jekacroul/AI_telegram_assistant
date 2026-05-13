@@ -121,7 +121,7 @@ class WhisperEngine:
                 model = whisper.load_model(model_name, device=device)
             except Exception as e:  # noqa: BLE001
                 if device == "cuda":
-                    log.warning(
+                    log.error(
                         "CUDA load failed for whisper %s (%s); falling back to CPU",
                         model_name,
                         e,
@@ -234,7 +234,7 @@ class WhisperEngine:
                 timeout=TRANSCRIBE_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
-            log.warning("whisper transcription timed out for %s", file_path)
+            log.error("whisper transcription timed out for %s", file_path)
             return TranscribeResult(text="", error="transcription timed out")
         if lazy_load:
             try:

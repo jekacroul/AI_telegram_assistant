@@ -286,7 +286,7 @@ class TelegramService:
                     if path and Path(path).exists():
                         Path(path).unlink()
                 except Exception:  # noqa: BLE001
-                    log.warning("failed to remove temp voice file %s", path)
+                    log.error("failed to remove temp voice file %s", path)
 
     async def _download_media(
         self, file_id: str, media_type: str, tg_msg: TgMessage
@@ -691,11 +691,11 @@ class TelegramService:
                     log.info("Отменяю отложенный ответ в %s", chat_name)
                     return
                 except LLMUnavailableError as e:
-                    log.warning("LLM unavailable: %s", e)
+                    log.error("LLM unavailable: %s", e)
                     self.last_error = str(e)
                 except TelegramBadRequest as e:
                     if "BUSINESS_PEER_INVALID" in str(e):
-                        log.warning(
+                        log.error(
                             "auto reply blocked by business privacy for chat %s: %s",
                             chat_id,
                             e,
