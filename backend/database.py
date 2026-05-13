@@ -53,6 +53,17 @@ class Message(Base):
     media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     media_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     media_private: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_voice: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    voice_duration: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    voice_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    transcription: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    transcription_confidence: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+    transcription_low_confidence: Mapped[bool] = mapped_column(Boolean, default=False)
+    transcription_error: Mapped[Optional[str]] = mapped_column(
+        String(256), nullable=True
+    )
 
 
 class DialogBackup(Base):
@@ -205,6 +216,34 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "media_private" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN media_private BOOLEAN DEFAULT 0 NOT NULL"
+        )
+    if "is_voice" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN is_voice BOOLEAN DEFAULT 0 NOT NULL"
+        )
+    if "voice_duration" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN voice_duration INTEGER"
+        )
+    if "voice_file_id" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN voice_file_id VARCHAR(256)"
+        )
+    if "transcription" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN transcription TEXT"
+        )
+    if "transcription_confidence" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN transcription_confidence FLOAT"
+        )
+    if "transcription_low_confidence" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN transcription_low_confidence BOOLEAN DEFAULT 0 NOT NULL"
+        )
+    if "transcription_error" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN transcription_error VARCHAR(256)"
         )
 
     backup_columns = {col["name"] for col in inspector.get_columns("dialog_backup_messages")}

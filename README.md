@@ -80,7 +80,26 @@ npm run dev      # http://localhost:5173 (проксирует /api на :8000)
 npm run build    # backend сам отдаст dist на /
 ```
 
-### 4. Webhook
+### 4. ffmpeg (для голосовых)
+
+Транскрипция голосовых через Whisper требует ffmpeg в PATH:
+
+```bash
+# Windows
+winget install ffmpeg
+# перезапусти терминал после установки
+
+# проверка
+ffmpeg -version
+```
+
+Проверить что openai-whisper установлен:
+
+```bash
+py -3.11 -c "import whisper; print(whisper.available_models())"
+```
+
+### 5. Webhook
 
 Бот работает через webhook. После старта backend:
 
@@ -113,6 +132,39 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 6. **Обратная связь**. 👎 в режиме авто-ответа открывает редактор: правишь,
    re-send, правильная пара уходит в `training_pairs` со `feedback=bad/good`.
 
+## Голосовые сообщения
+
+Бот умеет принимать голосовые/аудио сообщения и транскрибировать их локально
+через [openai-whisper](https://github.com/openai/whisper). По умолчанию
+используется модель `large-v3` с языком `ru` — она даёт лучшее качество для
+русского.
+
+VRAM (приблизительно):
+
+- `tiny`     — ~1 GB
+- `base`     — ~1 GB
+- `small`    — ~1.5 GB
+- `medium`   — ~3 GB (хороший компромисс)
+- `large-v3` — ~6 GB
+
+Если основная LLM крупная (например saiga 12B Q8 ≈13 GB) и видеокарта на 12 GB,
+включи в Settings → «Голосовые сообщения» опцию *«Освобождать VRAM после
+транскрипции»* (lazy_load): Whisper будет загружаться перед обработкой и
+выгружаться сразу после, освобождая память для LLM.
+
+В Settings → «Голосовые сообщения» можно выбрать как бот реагирует на
+голосовые:
+
+- *Отвечать текстом автоматически* — стандартный режим: транскрипция →
+  генерация ответа → отправка.
+- *Добавлять в очередь для ручного ответа* — голосовые попадают в pending,
+  ответы готовишь сам.
+- *Игнорировать голосовые* — бот их пропускает.
+
+Низкая уверенность транскрипции (avg confidence < 0.5) автоматически
+переводит сообщение в pending, чтобы можно было поправить текст вручную
+перед генерацией.
+
 ## API (выжимка)
 
 | Метод | Путь | Описание |
@@ -133,6 +185,12 @@ POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
 | PUT | `/api/style/profile` | Ручное редактирование |
 | POST | `/api/style/reanalyze` | Пересобрать |
 | GET | `/api/stream/events` | SSE входящих сообщений |
+| GET | `/api/whisper/status` | Статус модели Whisper, VRAM |
+| POST | `/api/whisper/transcribe` | Транскрипция конкретного сообщения |
+| POST | `/api/whisper/retranscribe` | Перегенерация транскрипции |
+| POST | `/api/whisper/unload` | Выгрузить Whisper из VRAM |
+| GET/POST | `/api/settings/whisper` | Настройки Whisper и режима ответа |
+| GET | `/api/stats/voice` | Статистика по голосовым |
 | POST | `/webhook/{token}` | Telegram webhook |
 
 ## .env

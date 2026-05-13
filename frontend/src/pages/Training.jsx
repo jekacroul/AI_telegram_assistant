@@ -16,6 +16,7 @@ export default function Training() {
   const [lossHistory, setLossHistory] = useState([]);
   const [datasetInfo, setDatasetInfo] = useState(null);
   const [qualityStats, setQualityStats] = useState(null);
+  const [voiceStats, setVoiceStats] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [runLogs, setRunLogs] = useState({});
@@ -30,6 +31,12 @@ export default function Training() {
     setStatus(st);
     setRuns(rs);
     setQualityStats(qs);
+    try {
+      const vs = await api.voiceStats();
+      setVoiceStats(vs);
+    } catch {
+      // ignore
+    }
   };
 
   useEffect(() => {
@@ -155,6 +162,34 @@ export default function Training() {
           value={status?.active_adapter ? `v${status.active_adapter.version}` : "—"}
         />
       </div>
+
+      {voiceStats && (
+        <div className="card">
+          <div className="label">Голосовые сообщения</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2 text-sm">
+            <div>
+              <div className="text-muted text-xs">Получено</div>
+              <div className="text-lg font-semibold">{voiceStats.voice_received}</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs">Транскрибировано</div>
+              <div className="text-lg font-semibold">{voiceStats.voice_transcribed}</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs">Низкая уверенность</div>
+              <div className="text-lg font-semibold">{voiceStats.voice_low_confidence}</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs">Средняя уверенность</div>
+              <div className="text-lg font-semibold">
+                {voiceStats.avg_confidence != null
+                  ? `${Math.round((voiceStats.avg_confidence || 0) * 100)}%`
+                  : "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="label">Отклонено фильтром качества</div>

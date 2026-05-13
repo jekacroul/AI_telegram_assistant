@@ -54,6 +54,12 @@ from .event_bus import message_bus
 from .llm_engine import LLMUnavailableError, get_client, pick_auto_variant
 from .quality_filter import is_good_response
 from .style_engine import get_profile_for_chat, reanalyze_and_store, reanalyze_chat_persona
+from .whisper_engine import convert_to_wav, whisper_engine
+
+VOICE_REPLY_MODE_TEXT = "text"
+VOICE_REPLY_MODE_SKIP = "skip"
+VOICE_REPLY_MODE_PENDING = "pending"
+DEFAULT_VOICE_REPLY_MODE = VOICE_REPLY_MODE_TEXT
 
 log = logging.getLogger(__name__)
 
@@ -215,6 +221,73 @@ class TelegramService:
             return "video_note", tg_msg.video_note.file_id
         return None, None
 
+    @staticmethod
+    def _extract_voice(tg_msg: TgMessage) -> tuple[Optional[str], Optional[int]]:
+        """Return (file_id, duration_seconds) for voice/audio messages."""
+        voice = getattr(tg_msg, "voice", None)
+        if voice is not None:
+            return voice.file_id, int(getattr(voice, "duration", 0) or 0)
+        audio = getattr(tg_msg, "audio", None)
+        if audio is not None:
+            return audio.file_id, int(getattr(audio, "duration", 0) or 0)
+        return None, None
+
+    async def _download_voice(
+        self, file_id: str, message_id: int
+    ) -> Optional[str]:
+        if not self.bot:
+            return None
+        temp_dir = settings.media_dir.parent / "data" / "temp"
+        # If MEDIA_PATH already points inside data/, temp lives there too.
+        # Fall back to a stable path under the project root otherwise.
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:  # noqa: BLE001
+            temp_dir = settings.media_dir / "temp"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+        target = temp_dir / f"voice_{message_id}.ogg"
+        try:
+            await self.bot.download(file_id, destination=target)
+            return str(target)
+        except Exception:  # noqa: BLE001
+            log.exception("failed to download voice file")
+            return None
+
+    async def _transcribe_voice_file(
+        self, src_path: str, message_id: int
+    ) -> "TranscribeResult":
+        from .whisper_engine import TranscribeResult  # local import for typing
+
+        wav_path = str(Path(src_path).with_suffix(".wav"))
+        converted = await asyncio.to_thread(convert_to_wav, src_path, wav_path)
+        try:
+            async with SessionLocal() as session:
+                model_name = await get_setting(
+                    session, "whisper_model", "large-v3"
+                )
+                language = await get_setting(
+                    session, "whisper_language", "ru"
+                )
+                lazy_setting = await get_setting(
+                    session, "whisper_lazy_load", "0"
+                )
+                lazy = lazy_setting in ("1", "true", "True")
+            target = wav_path if converted else src_path
+            result = await whisper_engine.transcribe_voice(
+                target,
+                language=language,
+                model_name=model_name,
+                lazy_load=lazy,
+            )
+            return result
+        finally:
+            for path in (src_path, wav_path):
+                try:
+                    if path and Path(path).exists():
+                        Path(path).unlink()
+                except Exception:  # noqa: BLE001
+                    log.warning("failed to remove temp voice file %s", path)
+
     async def _download_media(
         self, file_id: str, media_type: str, tg_msg: TgMessage
     ) -> tuple[Optional[str], bool]:
@@ -262,7 +335,9 @@ class TelegramService:
                 return
 
             content_text = self._extract_message_content(tg_msg)
-            if not content_text:
+            voice_file_id, voice_duration = self._extract_voice(tg_msg)
+            is_voice = voice_file_id is not None
+            if not content_text and not is_voice:
                 return
             media_type, media_file_id = self._extract_media(tg_msg)
             media_path = None
@@ -276,6 +351,8 @@ class TelegramService:
                 content_text = ""
             elif content_text in media_placeholders and media_private:
                 content_text = "Приватное сообщение"
+            if is_voice:
+                content_text = "(голосовое)"
 
             business_connection_id = getattr(tg_msg, "business_connection_id", None)
             is_business = business_connection_id is not None
@@ -362,6 +439,9 @@ class TelegramService:
                     media_type=media_type,
                     media_path=media_path,
                     media_private=media_private,
+                    is_voice=is_voice,
+                    voice_duration=voice_duration if is_voice else None,
+                    voice_file_id=voice_file_id if is_voice else None,
                 )
                 session.add(row)
                 await session.commit()
@@ -382,11 +462,126 @@ class TelegramService:
                     session, "auto_reply", "1" if settings.auto_reply else "0"
                 )
                 auto_reply = auto_reply_setting in ("1", "true", "True")
+                whisper_enabled = (
+                    await get_setting(session, "whisper_enabled", "1")
+                ) in ("1", "true", "True")
+                voice_reply_mode = await get_setting(
+                    session, "voice_reply_mode", DEFAULT_VOICE_REPLY_MODE
+                )
+                if voice_reply_mode not in (
+                    VOICE_REPLY_MODE_TEXT,
+                    VOICE_REPLY_MODE_SKIP,
+                    VOICE_REPLY_MODE_PENDING,
+                ):
+                    voice_reply_mode = DEFAULT_VOICE_REPLY_MODE
                 within_schedule = await is_within_schedule(session)
                 if auto_reply and should_reply and not within_schedule:
                     row.pending_reason = "schedule"
                     should_reply = False
                     await session.commit()
+
+            transcription_text: Optional[str] = None
+            reply_input_text = content_text
+
+            if is_voice and not is_mine:
+                # voice_reply_mode: skip → mark pending with reason, no transcription
+                if voice_reply_mode == VOICE_REPLY_MODE_SKIP:
+                    async with SessionLocal() as session:
+                        result = await session.execute(
+                            select(Message).where(Message.id == msg_id)
+                        )
+                        row_db = result.scalar_one_or_none()
+                        if row_db:
+                            row_db.pending_reason = "voice_skipped"
+                            await session.commit()
+                    should_reply = False
+                elif whisper_enabled and voice_file_id:
+                    src = await self._download_voice(voice_file_id, msg_id)
+                    if src:
+                        result = await self._transcribe_voice_file(src, msg_id)
+                        async with SessionLocal() as session:
+                            sres = await session.execute(
+                                select(Message).where(Message.id == msg_id)
+                            )
+                            row_db = sres.scalar_one_or_none()
+                            if row_db:
+                                row_db.transcription = result.text
+                                row_db.transcription_confidence = (
+                                    result.confidence
+                                )
+                                row_db.transcription_low_confidence = (
+                                    result.low_confidence
+                                )
+                                row_db.transcription_error = result.error
+                                if not result.error and result.text:
+                                    row_db.text = result.text
+                                await session.commit()
+                                transcription_text = result.text
+                                if result.text:
+                                    reply_input_text = result.text
+                                # Voice routing decisions:
+                                # - error or empty → pending
+                                # - low confidence → pending (user verifies)
+                                # - mode == pending → never auto-reply
+                                if (
+                                    result.error
+                                    or not result.text
+                                    or result.low_confidence
+                                    or voice_reply_mode
+                                    == VOICE_REPLY_MODE_PENDING
+                                ):
+                                    reason = (
+                                        "voice_pending"
+                                        if voice_reply_mode
+                                        == VOICE_REPLY_MODE_PENDING
+                                        else (
+                                            "voice_low_confidence"
+                                            if result.low_confidence
+                                            else "voice_transcription_error"
+                                        )
+                                    )
+                                    row_db.pending_reason = reason
+                                    await session.commit()
+                                    should_reply = False
+                    else:
+                        async with SessionLocal() as session:
+                            sres = await session.execute(
+                                select(Message).where(Message.id == msg_id)
+                            )
+                            row_db = sres.scalar_one_or_none()
+                            if row_db:
+                                row_db.transcription_error = (
+                                    "voice download failed"
+                                )
+                                row_db.pending_reason = (
+                                    "voice_transcription_error"
+                                )
+                                await session.commit()
+                        should_reply = False
+                else:
+                    # whisper disabled: route by voice_reply_mode
+                    if voice_reply_mode == VOICE_REPLY_MODE_PENDING:
+                        async with SessionLocal() as session:
+                            sres = await session.execute(
+                                select(Message).where(Message.id == msg_id)
+                            )
+                            row_db = sres.scalar_one_or_none()
+                            if row_db:
+                                row_db.pending_reason = "voice_pending"
+                                await session.commit()
+                        should_reply = False
+                    # for VOICE_REPLY_MODE_TEXT without whisper there's no
+                    # text to feed the LLM, so push to pending too
+                    else:
+                        async with SessionLocal() as session:
+                            sres = await session.execute(
+                                select(Message).where(Message.id == msg_id)
+                            )
+                            row_db = sres.scalar_one_or_none()
+                            if row_db:
+                                row_db.pending_reason = "voice_no_transcription"
+                                await session.commit()
+                        should_reply = False
 
             await message_bus.publish(
                 "incoming",
@@ -402,6 +597,9 @@ class TelegramService:
                     "auto_reply": auto_reply,
                     "will_reply": should_reply,
                     "pending_reason": row.pending_reason,
+                    "is_voice": is_voice,
+                    "voice_duration": voice_duration,
+                    "transcription": transcription_text,
                 },
             )
 
@@ -419,7 +617,7 @@ class TelegramService:
             if auto_reply:
                 try:
                     variants, reject_reason = await self._generate_variants(
-                        content_text, sender_name, chat_id
+                        reply_input_text, sender_name, chat_id, is_voice=is_voice
                     )
                     chosen = pick_auto_variant(variants)
                     if not chosen:
@@ -436,7 +634,7 @@ class TelegramService:
                     await self._record_reply(
                         msg_id, chosen, sender_name, chat_id, chat_name
                     )
-                    await notify_owner(chat_name, sender_name, content_text, chosen)
+                    await notify_owner(chat_name, sender_name, reply_input_text, chosen)
                 except asyncio.CancelledError:
                     log.info("Отменяю отложенный ответ в %s", chat_name)
                     return
@@ -518,7 +716,11 @@ class TelegramService:
         return owner_id
 
     async def _generate_variants(
-        self, text: str, sender_name: str, chat_id: int
+        self,
+        text: str,
+        sender_name: str,
+        chat_id: int,
+        is_voice: bool = False,
     ) -> tuple[list[str], str]:
         async with SessionLocal() as session:
             profile = await get_profile_for_chat(session, chat_id)
@@ -542,6 +744,7 @@ class TelegramService:
                 sender_name=sender_name,
                 style_profile=profile,
                 chat_history=history_dicts,
+                is_voice=is_voice,
             )
             accepted: list[str] = []
             async with SessionLocal() as session:

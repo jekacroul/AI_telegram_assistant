@@ -57,6 +57,19 @@ export default function Settings() {
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState("");
   const [notifyError, setNotifyError] = useState("");
+  const [whisper, setWhisper] = useState({
+    whisper_enabled: true,
+    whisper_model: "large-v3",
+    whisper_language: "ru",
+    voice_reply_mode: "text",
+    whisper_lazy_load: false,
+    device: "cpu",
+    model_loaded: false,
+    ffmpeg_available: true,
+  });
+  const [whisperSaving, setWhisperSaving] = useState(false);
+  const [whisperMsg, setWhisperMsg] = useState("");
+  const [whisperErr, setWhisperErr] = useState("");
 
   const modelOptions = useMemo(() => {
     const list = [...models];
@@ -112,7 +125,44 @@ export default function Settings() {
     } catch {
       // ignore
     }
+    try {
+      const w = await api.getWhisperSettings();
+      setWhisper((prev) => ({ ...prev, ...w }));
+    } catch {
+      // ignore
+    }
   };
+
+  async function saveWhisper() {
+    setWhisperSaving(true);
+    setWhisperErr("");
+    setWhisperMsg("");
+    try {
+      await api.saveWhisperSettings({
+        whisper_enabled: !!whisper.whisper_enabled,
+        whisper_model: whisper.whisper_model,
+        whisper_language: whisper.whisper_language,
+        voice_reply_mode: whisper.voice_reply_mode,
+        whisper_lazy_load: !!whisper.whisper_lazy_load,
+      });
+      setWhisperMsg("Сохранено");
+    } catch (e) {
+      setWhisperErr(e.message);
+    } finally {
+      setWhisperSaving(false);
+    }
+  }
+
+  async function unloadWhisper() {
+    setWhisperErr("");
+    try {
+      await api.whisperUnload();
+      const w = await api.getWhisperSettings();
+      setWhisper((prev) => ({ ...prev, ...w }));
+    } catch (e) {
+      setWhisperErr(e.message);
+    }
+  }
 
   useEffect(() => {
     refresh();
@@ -509,6 +559,171 @@ export default function Settings() {
           )}
           {notifyError && (
             <span className="text-bad text-sm">{notifyError}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between gap-3">
+          <div className="label">Голосовые сообщения</div>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs ${
+              whisper.device === "cuda"
+                ? "bg-good/15 text-good"
+                : "bg-bad/15 text-bad"
+            }`}
+          >
+            {whisper.device === "cuda"
+              ? "Whisper использует: CUDA ✅"
+              : "CPU ⚠️ (медленно)"}
+          </span>
+        </div>
+
+        {!whisper.ffmpeg_available && (
+          <div className="text-xs text-bad mt-2">
+            ⚠️ ffmpeg не установлен или не в PATH. Установи: <code>winget install ffmpeg</code> и перезапусти терминал.
+          </div>
+        )}
+
+        <label className="flex items-start gap-3 mt-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!whisper.whisper_enabled}
+            onChange={(e) =>
+              setWhisper((prev) => ({
+                ...prev,
+                whisper_enabled: e.target.checked,
+              }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">Транскрибировать голосовые</div>
+            <div className="text-xs text-muted">
+              Использует локальную модель Whisper для перевода речи в текст.
+            </div>
+          </div>
+        </label>
+
+        {whisper.whisper_enabled && (
+          <>
+            <div className="grid md:grid-cols-2 gap-3 mt-4">
+              <div>
+                <div className="label">Модель</div>
+                <select
+                  className="input mt-1"
+                  value={whisper.whisper_model}
+                  onChange={(e) =>
+                    setWhisper((prev) => ({
+                      ...prev,
+                      whisper_model: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="tiny">tiny (~1GB VRAM)</option>
+                  <option value="base">base (~1GB VRAM)</option>
+                  <option value="small">small (~1.5GB VRAM)</option>
+                  <option value="medium">medium (~3GB VRAM)</option>
+                  <option value="large-v3">large-v3 (~6GB VRAM)</option>
+                </select>
+              </div>
+              <div>
+                <div className="label">Язык</div>
+                <select
+                  className="input mt-1"
+                  value={whisper.whisper_language}
+                  onChange={(e) =>
+                    setWhisper((prev) => ({
+                      ...prev,
+                      whisper_language: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="ru">Русский</option>
+                  <option value="en">English</option>
+                  <option value="auto">Автоопределение</option>
+                </select>
+              </div>
+            </div>
+
+            <label className="flex items-start gap-3 mt-4">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={!!whisper.whisper_lazy_load}
+                onChange={(e) =>
+                  setWhisper((prev) => ({
+                    ...prev,
+                    whisper_lazy_load: e.target.checked,
+                  }))
+                }
+              />
+              <div>
+                <div className="text-sm font-medium">
+                  Освобождать VRAM после транскрипции (lazy_load)
+                </div>
+                <div className="text-xs text-muted">
+                  Whisper загружается перед обработкой и выгружается сразу
+                  после. Полезно если 12GB VRAM делит с крупной LLM.
+                </div>
+              </div>
+            </label>
+
+            <div className="mt-4">
+              <div className="label">Реакция на голосовые</div>
+              <div className="space-y-1 mt-2">
+                {[
+                  { v: "text", label: "Отвечать текстом автоматически" },
+                  {
+                    v: "pending",
+                    label: "Добавлять в очередь для ручного ответа",
+                  },
+                  { v: "skip", label: "Игнорировать голосовые" },
+                ].map((opt) => (
+                  <label
+                    key={opt.v}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <input
+                      type="radio"
+                      name="voice_reply_mode"
+                      checked={whisper.voice_reply_mode === opt.v}
+                      onChange={() =>
+                        setWhisper((prev) => ({
+                          ...prev,
+                          voice_reply_mode: opt.v,
+                        }))
+                      }
+                    />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="flex flex-wrap gap-2 mt-4 items-center">
+          <button
+            className="btn-primary"
+            onClick={saveWhisper}
+            disabled={whisperSaving}
+          >
+            Сохранить
+          </button>
+          {whisper.model_loaded && (
+            <button className="btn-secondary" onClick={unloadWhisper}>
+              Выгрузить Whisper из VRAM
+            </button>
+          )}
+          <span className="text-xs text-muted ml-2">
+            Модель загружена: {whisper.model_loaded ? "да" : "нет"}
+          </span>
+          {whisperMsg && (
+            <span className="text-good text-sm">{whisperMsg}</span>
+          )}
+          {whisperErr && (
+            <span className="text-bad text-sm">{whisperErr}</span>
           )}
         </div>
       </div>
