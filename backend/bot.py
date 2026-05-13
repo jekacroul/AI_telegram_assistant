@@ -215,19 +215,38 @@ class TelegramService:
             if not payload:
                 return ""
             files = {"file": ("voice.ogg", payload, "audio/ogg")}
-            data = {"model": settings.openai_model}
             headers = {"Authorization": f"Bearer {settings.openai_api_key}"}
+            models_to_try = [settings.openai_transcription_model, settings.openai_model]
+            tried: list[str] = []
             async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    f"{settings.openai_base_url.rstrip('/')}/audio/transcriptions",
-                    headers=headers,
-                    data=data,
-                    files=files,
-                )
-                response.raise_for_status()
-                body = response.json()
-            text = (body.get("text") or "").strip()
-            return text
+                for model in models_to_try:
+                    model_name = (model or "").strip()
+                    if not model_name or model_name in tried:
+                        continue
+                    tried.append(model_name)
+                    response = await client.post(
+                        f"{settings.openai_base_url.rstrip('/')}/audio/transcriptions",
+                        headers=headers,
+                        data={"model": model_name},
+                        files=files,
+                    )
+                    if response.status_code >= 400:
+                        log.warning(
+                            "voice transcription request failed for model=%s status=%s",
+                            model_name,
+                            response.status_code,
+                        )
+                        continue
+                    body = response.json()
+                    text = (
+                        body.get("text")
+                        or body.get("transcription")
+                        or ((body.get("result") or {}).get("text") if isinstance(body.get("result"), dict) else "")
+                        or ""
+                    ).strip()
+                    if text:
+                        return text
+            return ""
         except Exception:
             log.exception("voice transcription failed")
             return ""
