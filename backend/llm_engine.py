@@ -80,14 +80,25 @@ def build_system_prompt(
     style_profile: dict | None,
     sender_name: str,
     chat_history: Iterable[dict] | None,
+    is_voice: bool = False,
+    transcription: Optional[str] = None,
 ) -> str:
     style_str = json.dumps(style_profile or {}, ensure_ascii=False)
-    return SYSTEM_TEMPLATE.format(
+    base = SYSTEM_TEMPLATE.format(
         user_name=user_name,
         style_profile=style_str,
         sender_name=sender_name or "неизвестно",
         chat_history=_format_history(chat_history),
     )
+    if is_voice:
+        voice_note = (
+            "\nСобеседник отправил голосовое сообщение."
+            f" Транскрипция: {(transcription or '').strip()}\n"
+            "Отвечай как на обычное сообщение, не упоминай что это была"
+            " голосовая запись."
+        )
+        base = base + voice_note
+    return base
 
 
 _NAME_TEXT_FRAGMENT_RE = re.compile(
@@ -327,6 +338,7 @@ class LLMClient:
         style_profile: Optional[dict] = None,
         chat_history: Optional[list[dict]] = None,
         user_name: Optional[str] = None,
+        is_voice: bool = False,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
         system = build_system_prompt(
@@ -334,6 +346,8 @@ class LLMClient:
             style_profile,
             sender_name,
             chat_history,
+            is_voice=is_voice,
+            transcription=incoming_text if is_voice else None,
         )
         prompt = (
             f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"

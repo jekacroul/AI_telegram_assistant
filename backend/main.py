@@ -80,6 +80,11 @@ from .schedule import (
     schedule_to_dict,
     validate_schedule_payload,
 )
+from .whisper_engine import (
+    DEFAULT_MODEL as WHISPER_DEFAULT_MODEL,
+    DEFAULT_LANGUAGE as WHISPER_DEFAULT_LANGUAGE,
+    whisper_engine,
+)
 from .style_engine import (
     get_profile_for_chat,
     get_latest_profile,
@@ -469,6 +474,198 @@ async def save_notify_chat(
     return {"ok": True}
 
 
+VOICE_REPLY_MODES = {"text", "skip", "pending"}
+WHISPER_MODEL_CHOICES = {"tiny", "base", "small", "medium", "large-v3"}
+
+
+class WhisperSettingsIn(BaseModel):
+    whisper_enabled: Optional[bool] = None
+    whisper_model: Optional[str] = None
+    whisper_language: Optional[str] = None
+    voice_reply_mode: Optional[str] = None
+    whisper_lazy_load: Optional[bool] = None
+
+
+class WhisperTranscribeIn(BaseModel):
+    message_id: int
+
+
+@app.get("/api/whisper/status")
+async def whisper_status() -> dict:
+    return {
+        "model_loaded": whisper_engine.is_loaded,
+        "model_name": whisper_engine.model_name or None,
+        "device": whisper_engine.device,
+        "vram_used_mb": whisper_engine.vram_used_mb(),
+        "ffmpeg_available": whisper_engine.ffmpeg_available(),
+        "last_error": whisper_engine.last_error or None,
+    }
+
+
+@app.post("/api/whisper/unload")
+async def whisper_unload() -> dict:
+    whisper_engine.unload()
+    return {"ok": True}
+
+
+async def _transcribe_message(
+    session: AsyncSession, message_id: int
+) -> dict:
+    result = await session.execute(select(Message).where(Message.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(404, "message not found")
+    if not getattr(msg, "is_voice", False) or not msg.voice_file_id:
+        raise HTTPException(400, "not a voice message")
+    if not telegram_service.is_configured:
+        raise HTTPException(400, "bot not configured")
+    src = await telegram_service._download_voice(msg.voice_file_id, msg.id)
+    if not src:
+        raise HTTPException(500, "voice download failed")
+    tr = await telegram_service._transcribe_voice_file(src, msg.id)
+    msg.transcription = tr.text
+    msg.transcription_confidence = tr.confidence
+    msg.transcription_low_confidence = tr.low_confidence
+    msg.transcription_error = tr.error
+    if not tr.error and tr.text:
+        msg.text = tr.text
+    await session.commit()
+    await message_bus.publish(
+        "transcribed",
+        {
+            "id": msg.id,
+            "chat_id": msg.chat_id,
+            "transcription": tr.text,
+            "confidence": tr.confidence,
+            "low_confidence": tr.low_confidence,
+            "error": tr.error,
+        },
+    )
+    return {
+        "transcription": tr.text,
+        "confidence": tr.confidence,
+        "duration": tr.duration,
+        "low_confidence": tr.low_confidence,
+        "error": tr.error,
+    }
+
+
+@app.post("/api/whisper/transcribe")
+async def whisper_transcribe(
+    payload: WhisperTranscribeIn,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await _transcribe_message(session, payload.message_id)
+
+
+@app.post("/api/whisper/retranscribe")
+async def whisper_retranscribe(
+    payload: WhisperTranscribeIn,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await _transcribe_message(session, payload.message_id)
+
+
+@app.get("/api/settings/whisper")
+async def get_whisper_settings(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enabled = (
+        await get_setting(session, "whisper_enabled", "1")
+    ) in ("1", "true", "True")
+    model = await get_setting(session, "whisper_model", WHISPER_DEFAULT_MODEL)
+    language = await get_setting(
+        session, "whisper_language", WHISPER_DEFAULT_LANGUAGE
+    )
+    mode = await get_setting(session, "voice_reply_mode", "text")
+    if mode not in VOICE_REPLY_MODES:
+        mode = "text"
+    lazy = (
+        await get_setting(session, "whisper_lazy_load", "0")
+    ) in ("1", "true", "True")
+    return {
+        "whisper_enabled": enabled,
+        "whisper_model": model,
+        "whisper_language": language,
+        "voice_reply_mode": mode,
+        "whisper_lazy_load": lazy,
+        "device": whisper_engine.device,
+        "model_loaded": whisper_engine.is_loaded,
+        "ffmpeg_available": whisper_engine.ffmpeg_available(),
+    }
+
+
+@app.post("/api/settings/whisper")
+async def save_whisper_settings(
+    payload: WhisperSettingsIn,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    if payload.whisper_enabled is not None:
+        await set_setting(
+            session, "whisper_enabled", "1" if payload.whisper_enabled else "0"
+        )
+    if payload.whisper_model is not None:
+        if payload.whisper_model not in WHISPER_MODEL_CHOICES:
+            raise HTTPException(
+                400,
+                f"whisper_model must be one of {sorted(WHISPER_MODEL_CHOICES)}",
+            )
+        await set_setting(session, "whisper_model", payload.whisper_model)
+    if payload.whisper_language is not None:
+        await set_setting(session, "whisper_language", payload.whisper_language)
+    if payload.voice_reply_mode is not None:
+        if payload.voice_reply_mode not in VOICE_REPLY_MODES:
+            raise HTTPException(
+                400, "voice_reply_mode must be one of: text, skip, pending"
+            )
+        await set_setting(
+            session, "voice_reply_mode", payload.voice_reply_mode
+        )
+    if payload.whisper_lazy_load is not None:
+        await set_setting(
+            session,
+            "whisper_lazy_load",
+            "1" if payload.whisper_lazy_load else "0",
+        )
+    return {"ok": True}
+
+
+@app.get("/api/stats/voice")
+async def voice_stats(session: AsyncSession = Depends(get_session)) -> dict:
+    total_q = await session.execute(
+        select(func.count(Message.id)).where(Message.is_voice == True)  # noqa: E712
+    )
+    transcribed_q = await session.execute(
+        select(func.count(Message.id)).where(
+            Message.is_voice == True,  # noqa: E712
+            Message.transcription.is_not(None),
+            Message.transcription != "",
+        )
+    )
+    low_q = await session.execute(
+        select(func.count(Message.id)).where(
+            Message.is_voice == True,  # noqa: E712
+            Message.transcription_low_confidence == True,  # noqa: E712
+        )
+    )
+    avg_q = await session.execute(
+        select(func.avg(Message.transcription_confidence)).where(
+            Message.is_voice == True,  # noqa: E712
+            Message.transcription_confidence.is_not(None),
+        )
+    )
+    total = total_q.scalar() or 0
+    transcribed = transcribed_q.scalar() or 0
+    low = low_q.scalar() or 0
+    avg_conf = float(avg_q.scalar() or 0.0)
+    return {
+        "voice_received": total,
+        "voice_transcribed": transcribed,
+        "voice_low_confidence": low,
+        "avg_confidence": round(avg_conf, 3),
+    }
+
+
 @app.get("/api/settings/notify-chat/detect")
 async def detect_notify_chat(session: AsyncSession = Depends(get_session)) -> dict:
     chat_id = await get_setting(session, SETTING_LAST_PRIVATE_CHAT_ID, "")
@@ -522,11 +719,21 @@ def _message_to_dict(m: Message) -> dict:
         "media_type": m.media_type,
         "media_path": m.media_path,
         "media_private": m.media_private,
+        "is_voice": bool(getattr(m, "is_voice", False)),
+        "voice_duration": getattr(m, "voice_duration", None),
+        "voice_file_id": getattr(m, "voice_file_id", None),
+        "transcription": getattr(m, "transcription", None),
+        "transcription_confidence": getattr(m, "transcription_confidence", None),
+        "transcription_low_confidence": bool(
+            getattr(m, "transcription_low_confidence", False)
+        ),
+        "transcription_error": getattr(m, "transcription_error", None),
     }
 
 
 class GenerateIn(BaseModel):
     message_id: int
+    transcription_override: Optional[str] = None
 
 
 @app.post("/api/reply/generate")
@@ -551,12 +758,24 @@ async def generate_reply(
         {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text}
         for m in history
     ]
+    incoming_text = msg.text
+    is_voice = bool(getattr(msg, "is_voice", False))
+    if is_voice and getattr(msg, "transcription", None):
+        incoming_text = msg.transcription
+    if is_voice and payload.transcription_override is not None:
+        override = payload.transcription_override.strip()
+        if override:
+            incoming_text = override
+            msg.transcription = override
+            msg.text = override
+            await session.commit()
     try:
         variants, reason = await _generate_quality_variants(
-            incoming_text=msg.text,
+            incoming_text=incoming_text,
             sender_name=msg.sender_name,
             style_profile=profile,
             chat_history=history_dicts,
+            is_voice=is_voice,
         )
     except LLMUnavailableError as e:
         raise HTTPException(503, str(e))
@@ -576,6 +795,7 @@ async def _generate_quality_variants(
     sender_name: str,
     style_profile: dict | None,
     chat_history: list[dict],
+    is_voice: bool = False,
 ) -> tuple[list[str], str]:
     client = get_client()
     last_reason = "no_variants"
@@ -586,6 +806,7 @@ async def _generate_quality_variants(
             sender_name=sender_name,
             style_profile=style_profile,
             chat_history=chat_history,
+            is_voice=is_voice,
         )
         accepted: list[str] = []
         for variant in variants:

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { api } from "../lib/api.js";
 
 function initials(name) {
   if (!name) return "?";
@@ -11,12 +12,40 @@ function isMediaPlaceholder(text) {
   );
 }
 
+function formatDuration(seconds) {
+  if (!seconds || seconds < 0) return "0:00";
+  const total = Math.round(seconds);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function MessageCard({ msg, onReply, onFeedback }) {
   const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "";
   const isMine = msg.is_mine;
   const [openMedia, setOpenMedia] = useState(false);
+  const [openTranscription, setOpenTranscription] = useState(false);
+  const [transcription, setTranscription] = useState(msg.transcription || "");
+  const [retranscribing, setRetranscribing] = useState(false);
+  const [retErr, setRetErr] = useState("");
   const username = (msg.chat_username || "").trim();
   const usernameLabel = username ? ` @${username}` : "";
+
+  async function retranscribe() {
+    setRetranscribing(true);
+    setRetErr("");
+    try {
+      const res = await api.whisperRetranscribe(msg.id);
+      setTranscription(res.transcription || "");
+      setOpenTranscription(true);
+    } catch (e) {
+      setRetErr(e.message);
+    } finally {
+      setRetranscribing(false);
+    }
+  }
+
+  const isVoice = !!msg.is_voice;
 
   return (
     <div className="card flex gap-3 items-start">
@@ -36,9 +65,58 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
           </span>
           <span className="text-xs text-muted ml-auto">{ts}</span>
         </div>
-        {msg.text && !(msg.media_path && isMediaPlaceholder(msg.text)) && (
-          <div className="text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+
+        {isVoice && (
+          <div className="mt-1">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-lg" aria-label="voice">🎤</span>
+              <span className="text-muted">
+                Голосовое · {formatDuration(msg.voice_duration)}
+              </span>
+              {transcription && (
+                <button
+                  className="text-xs text-accent underline ml-2"
+                  onClick={() => setOpenTranscription((v) => !v)}
+                >
+                  {openTranscription ? "Скрыть текст" : "Показать текст"}
+                </button>
+              )}
+            </div>
+            {msg.transcription_low_confidence && (
+              <div className="mt-1 text-xs text-bad">
+                ⚠️ Низкая уверенность — проверь транскрипцию
+              </div>
+            )}
+            {msg.transcription_error && (
+              <div className="mt-1 text-xs text-bad">
+                Ошибка транскрипции: {msg.transcription_error}
+              </div>
+            )}
+            {openTranscription && (
+              <div className="mt-2 text-sm text-muted whitespace-pre-wrap">
+                {transcription || "(пусто)"}
+              </div>
+            )}
+            <div className="mt-2 flex gap-2">
+              <button
+                className="btn-secondary text-xs"
+                disabled={retranscribing}
+                onClick={retranscribe}
+              >
+                {retranscribing ? "Транскрибирую..." : "Перегенерировать транскрипцию"}
+              </button>
+              {retErr && (
+                <span className="text-bad text-xs self-center">{retErr}</span>
+              )}
+            </div>
+          </div>
         )}
+
+        {!isVoice &&
+          msg.text &&
+          !(msg.media_path && isMediaPlaceholder(msg.text)) && (
+            <div className="text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+          )}
         {msg.media_type === "photo" && msg.media_path && (
           <button className="mt-2 block" onClick={() => setOpenMedia(true)}>
             <img

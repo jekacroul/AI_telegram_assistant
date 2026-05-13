@@ -36,10 +36,15 @@ export const api = {
     request("/api/settings", { method: "POST", body: JSON.stringify(data) }),
   pending: () => request("/api/messages/pending"),
   recent: (limit = 100) => request(`/api/messages/recent?limit=${limit}`),
-  generateReply: (message_id) =>
+  generateReply: (message_id, transcription_override) =>
     request("/api/reply/generate", {
       method: "POST",
-      body: JSON.stringify({ message_id }),
+      body: JSON.stringify({
+        message_id,
+        ...(transcription_override !== undefined && transcription_override !== null
+          ? { transcription_override }
+          : {}),
+      }),
     }),
   approveReply: (message_id, text) =>
     request("/api/reply/approve", {
@@ -132,6 +137,25 @@ export const api = {
     request(`/api/quick-replies/${id}`, { method: "DELETE" }),
   useQuickReply: (id) =>
     request(`/api/quick-replies/${id}/use`, { method: "POST" }),
+  whisperStatus: () => request("/api/whisper/status"),
+  whisperUnload: () => request("/api/whisper/unload", { method: "POST" }),
+  whisperTranscribe: (message_id) =>
+    request("/api/whisper/transcribe", {
+      method: "POST",
+      body: JSON.stringify({ message_id }),
+    }),
+  whisperRetranscribe: (message_id) =>
+    request("/api/whisper/retranscribe", {
+      method: "POST",
+      body: JSON.stringify({ message_id }),
+    }),
+  getWhisperSettings: () => request("/api/settings/whisper"),
+  saveWhisperSettings: (data) =>
+    request("/api/settings/whisper", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  voiceStats: () => request("/api/stats/voice"),
 };
 
 export function streamEvents(path, onEvent) {
