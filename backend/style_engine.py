@@ -11,7 +11,7 @@ import emoji
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .database import Message, StyleProfile
+from .database import ChatPersona, Message, StyleProfile, get_setting
 
 
 GREETING_TOKENS = {
@@ -198,3 +198,85 @@ async def save_manual_profile(session: AsyncSession, profile: dict) -> None:
     )
     session.add(record)
     await session.commit()
+
+
+async def collect_my_messages_for_chat(session: AsyncSession, chat_id: int) -> tuple[list[str], list[float], str]:
+    result = await session.execute(
+        select(Message)
+        .where(Message.chat_id == chat_id, Message.is_mine == True)  # noqa: E712
+        .order_by(Message.timestamp)
+    )
+    mine = list(result.scalars().all())
+    texts = [m.text for m in mine if m.text]
+    chat_name = mine[-1].chat_name if mine else ""
+
+    result_all = await session.execute(
+        select(Message).where(Message.chat_id == chat_id).order_by(Message.timestamp)
+    )
+    all_msgs = list(result_all.scalars().all())
+    delays: list[float] = []
+    for i, m in enumerate(all_msgs):
+        if not m.is_mine:
+            continue
+        for j in range(i - 1, -1, -1):
+            prev = all_msgs[j]
+            if not prev.is_mine:
+                diff = (m.timestamp - prev.timestamp).total_seconds() / 60.0
+                if 0 < diff < 24 * 60:
+                    delays.append(diff)
+                break
+    return texts, delays, chat_name
+
+
+async def reanalyze_chat_persona(session: AsyncSession, chat_id: int) -> dict:
+    texts, delays, chat_name = await collect_my_messages_for_chat(session, chat_id)
+    profile = analyze_messages(texts, delays)
+    result = await session.execute(select(ChatPersona).where(ChatPersona.chat_id == chat_id))
+    row = result.scalar_one_or_none()
+    if row:
+        row.profile_json = json.dumps(profile, ensure_ascii=False)
+        row.messages_count = len(texts)
+        row.chat_name = chat_name or row.chat_name
+        row.updated_at = datetime.utcnow()
+    else:
+        session.add(
+            ChatPersona(
+                chat_id=chat_id,
+                chat_name=chat_name,
+                profile_json=json.dumps(profile, ensure_ascii=False),
+                updated_at=datetime.utcnow(),
+                messages_count=len(texts),
+            )
+        )
+    await session.commit()
+    return profile
+
+
+async def get_profile_for_chat(session: AsyncSession, chat_id: int) -> Optional[dict]:
+    mode = await get_setting(session, "persona_mode", "global")
+    if mode != "per_chat":
+        return await get_latest_profile(session)
+    result = await session.execute(select(ChatPersona).where(ChatPersona.chat_id == chat_id))
+    row = result.scalar_one_or_none()
+    if not row:
+        return await get_latest_profile(session)
+    try:
+        return json.loads(row.profile_json)
+    except json.JSONDecodeError:
+        return await get_latest_profile(session)
+
+
+async def list_chat_personas(session: AsyncSession) -> list[dict]:
+    result = await session.execute(select(ChatPersona).order_by(ChatPersona.updated_at.desc()))
+    rows = result.scalars().all()
+    items = []
+    for row in rows:
+        profile = json.loads(row.profile_json)
+        items.append({
+            "chat_id": row.chat_id,
+            "chat_name": row.chat_name,
+            "profile": profile,
+            "updated_at": row.updated_at,
+            "messages_count": row.messages_count,
+        })
+    return items

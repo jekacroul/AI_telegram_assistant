@@ -81,7 +81,10 @@ from .schedule import (
     validate_schedule_payload,
 )
 from .style_engine import (
+    get_profile_for_chat,
     get_latest_profile,
+    list_chat_personas,
+    reanalyze_chat_persona,
     reanalyze_and_store,
     save_manual_profile,
 )
@@ -258,6 +261,7 @@ class SettingsIn(BaseModel):
     auto_reply: Optional[bool] = None
     monitored_chats: Optional[list[int]] = None
     llm_model: Optional[str] = None
+    persona_mode: Optional[str] = None
 
 
 class QuickReplyIn(BaseModel):
@@ -361,6 +365,10 @@ async def save_settings(
     if payload.llm_model is not None:
         await set_setting(session, "llm_model", payload.llm_model)
         get_client().model = payload.llm_model
+    if payload.persona_mode is not None:
+        if payload.persona_mode not in ("global", "per_chat"):
+            raise HTTPException(400, "persona_mode must be global or per_chat")
+        await set_setting(session, "persona_mode", payload.persona_mode)
     return {"ok": True}
 
 
@@ -372,10 +380,12 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
     monitored_csv = await get_setting(session, "monitored_chats", "")
     monitored = [int(x) for x in monitored_csv.split(",") if x.strip()]
     llm_model = await get_setting(session, "llm_model", settings.openai_model)
+    persona_mode = await get_setting(session, "persona_mode", "global")
     return {
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
         "llm_model": llm_model,
+        "persona_mode": persona_mode,
     }
 
 
@@ -529,7 +539,7 @@ async def generate_reply(
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(404, "message not found")
-    profile = await get_latest_profile(session)
+    profile = await get_profile_for_chat(session, msg.chat_id)
     history_q = await session.execute(
         select(Message)
         .where(Message.chat_id == msg.chat_id)
@@ -866,6 +876,51 @@ async def put_style_profile(
 @app.post("/api/style/reanalyze")
 async def reanalyze_style(session: AsyncSession = Depends(get_session)) -> dict:
     return await reanalyze_and_store(session)
+
+
+@app.get("/api/personas")
+async def personas_list(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    rows = await list_chat_personas(session)
+    return [
+        {
+            **r,
+            "updated_at": _iso_utc(r["updated_at"]),
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/personas/{chat_id}")
+async def persona_get(chat_id: int, session: AsyncSession = Depends(get_session)) -> dict:
+    profile = await get_profile_for_chat(session, chat_id)
+    return profile or {}
+
+
+@app.put("/api/personas/{chat_id}")
+async def persona_put(chat_id: int, payload: dict = Body(...), session: AsyncSession = Depends(get_session)) -> dict:
+    from .database import ChatPersona
+    row = (await session.execute(select(ChatPersona).where(ChatPersona.chat_id == chat_id))).scalar_one_or_none()
+    if row:
+        row.profile_json = json.dumps(payload, ensure_ascii=False)
+        row.updated_at = datetime.utcnow()
+    else:
+        session.add(ChatPersona(chat_id=chat_id, chat_name="", profile_json=json.dumps(payload, ensure_ascii=False), updated_at=datetime.utcnow(), messages_count=int(payload.get("messages_count", 0))))
+    await session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/personas/{chat_id}/reanalyze")
+async def persona_reanalyze(chat_id: int, session: AsyncSession = Depends(get_session)) -> dict:
+    return await reanalyze_chat_persona(session, chat_id)
+
+
+@app.delete("/api/personas/{chat_id}", status_code=204)
+async def persona_delete(chat_id: int, session: AsyncSession = Depends(get_session)) -> None:
+    from .database import ChatPersona
+    row = (await session.execute(select(ChatPersona).where(ChatPersona.chat_id == chat_id))).scalar_one_or_none()
+    if row:
+        await session.delete(row)
+        await session.commit()
 
 
 @app.get("/api/stream/events")
