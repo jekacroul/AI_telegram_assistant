@@ -75,11 +75,11 @@ def _run_merge_subprocess(
             timeout=3600,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
-        log.warning("merge subprocess crashed: %s", e)
+        log.error("merge subprocess crashed: %s", e)
         return False
 
     if proc.returncode != 0:
-        log.warning(
+        log.error(
             "merge subprocess failed (exit %s):\nstdout: %s\nstderr: %s",
             proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:],
         )
@@ -87,7 +87,7 @@ def _run_merge_subprocess(
 
     config_file = merged_dir / "config.json"
     if not config_file.is_file():
-        log.warning("merge reported success but %s is missing.", config_file)
+        log.error("merge reported success but %s is missing.", config_file)
         return False
     return True
 
@@ -159,12 +159,12 @@ def merge_and_export_gguf(
             timeout=1800,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
-        log.warning("convert_hf_to_gguf crashed: %s", e)
+        log.error("convert_hf_to_gguf crashed: %s", e)
         shutil.rmtree(merged_dir, ignore_errors=True)
         return None
 
     if proc.returncode != 0 or not fp16_gguf.is_file():
-        log.warning(
+        log.error(
             "convert_hf_to_gguf failed (exit %s):\nstdout: %s\nstderr: %s",
             proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:],
         )
@@ -182,13 +182,13 @@ def merge_and_export_gguf(
             timeout=1800,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
-        log.warning("llama-quantize crashed: %s", e)
+        log.error("llama-quantize crashed: %s", e)
         shutil.rmtree(merged_dir, ignore_errors=True)
         fp16_gguf.unlink(missing_ok=True)
         return None
 
     if proc.returncode != 0 or not final_gguf.is_file():
-        log.warning(
+        log.error(
             "llama-quantize failed (exit %s):\nstdout: %s\nstderr: %s",
             proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:],
         )
@@ -213,7 +213,7 @@ def merge_and_export_gguf(
             shutil.copy2(final_gguf, target_file)
             log.info("copied merged model to LM Studio dir: %s", target_file)
         except OSError as e:
-            log.warning("failed to copy merged model into LM_STUDIO_MODELS_DIR: %s", e)
+            log.error("failed to copy merged model into LM_STUDIO_MODELS_DIR: %s", e)
 
     # 5. clean up build artifacts — the final GGUF is all we need
     shutil.rmtree(merged_dir, ignore_errors=True)

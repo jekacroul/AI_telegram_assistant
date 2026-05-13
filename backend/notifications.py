@@ -52,7 +52,7 @@ async def notify_owner(
     try:
         target = int(notify_chat_id)
     except (TypeError, ValueError):
-        log.warning("notify_owner: invalid NOTIFY_CHAT_ID=%r", notify_chat_id)
+        log.error("notify_owner: invalid NOTIFY_CHAT_ID=%r", notify_chat_id)
         return
 
     text = (
@@ -64,4 +64,4 @@ async def notify_owner(
     try:
         await telegram_service.bot.send_message(target, text)
     except Exception as e:  # noqa: BLE001
-        log.warning("notify_owner: failed to send notification: %s", e)
+        log.error("notify_owner: failed to send notification: %s", e)
