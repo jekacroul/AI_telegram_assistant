@@ -262,6 +262,12 @@ def run_training(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     log("step:training_args")
+    # paged_adamw_8bit relies on CUDA unified memory; on Windows consumer
+    # GPUs (WDDM driver mode) this regularly produces an access violation
+    # (exit code 3221225477) inside bitsandbytes. Plain adamw_8bit avoids
+    # the paged allocator and is the safe default on Windows.
+    optim = "adamw_8bit" if platform.system() == "Windows" else "paged_adamw_8bit"
+    log(f"  optim={optim}")
     # Defaults tuned for a 12 GB card (RTX 3060). 4-bit 12B base ~6 GB +
     # activations + optimizer state pushes close to the limit at batch=4,
     # so use batch=2 with accumulation=4 (same effective batch of 8) and
@@ -278,7 +284,7 @@ def run_training(
         save_strategy="no",
         report_to=[],
         bf16=True,
-        optim="paged_adamw_8bit",
+        optim=optim,
         dataset_text_field="text",
         max_length=1024,
     )

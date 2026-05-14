@@ -51,6 +51,19 @@ def _is_safe_adapter_path(path: Path) -> bool:
         return False
 
 
+def _last_step_from_worker_log(path: Path) -> str:
+    """Return the most recent `step:...` line from train_worker.log, if any."""
+    try:
+        text = _read_text_tail(path, max_bytes=64_000)
+    except OSError:
+        return ""
+    for line in reversed(text.splitlines()):
+        idx = line.find("step:")
+        if idx != -1:
+            return line[idx:].strip()
+    return ""
+
+
 def _read_text_tail(path: Path, max_bytes: int = 512_000) -> str:
     with path.open("rb") as f:
         f.seek(0, 2)
@@ -240,9 +253,11 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
                 if rc in (3221225477, -1073741819) else
                 "OOM or non-zero exit"
             )
+            last_step = _last_step_from_worker_log(log_path)
+            step_hint = f" Last step: {last_step}." if last_step else ""
             error_message = (
-                f"training process exited with code {rc} ({hint}). "
-                f"See per-step log: {log_path}"
+                f"training process exited with code {rc} ({hint})."
+                f"{step_hint} See per-step log: {log_path}"
             )
 
         if error_message:
