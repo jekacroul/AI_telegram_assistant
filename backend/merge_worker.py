@@ -173,6 +173,56 @@ def _precheck_memory(torch_module) -> Optional[str]:
     return None
 
 
+def _patch_peft_update_offload(peft_module) -> None:
+    """PEFT 0.10-0.13 builds a wrong module name in _update_offload when
+    the base model has accelerate hf_hooks (i.e. any GPU+CPU dispatch).
+    It tries dict(self.named_modules())[extended_prefix] with an extra
+    "model." in the prefix and KeyErrors on lm_head / embed_tokens /
+    non-LoRA-target modules.
+
+    Fixed upstream in PEFT 0.14+. For older installs, wrap the method
+    and swallow KeyError only for modules outside the LoRA target list —
+    those entries in offload_index are no-ops for our merge anyway,
+    because LoRA never touched them. Real target modules that hit the
+    bug will still surface (re-raise)."""
+    version = getattr(peft_module, "__version__", "0")
+    try:
+        parts = [int(p) for p in version.split(".")[:2]]
+        if parts >= [0, 14]:
+            log("  peft >=0.14 — патч не нужен")
+            return
+    except (ValueError, IndexError):
+        pass
+
+    try:
+        from peft.peft_model import PeftModel as _PeftModel
+        orig = _PeftModel._update_offload
+    except (ImportError, AttributeError) as e:
+        log(f"  не смог найти PeftModel._update_offload для патча: {e}")
+        return
+
+    def patched(self, offload_index, adapters_weights):
+        try:
+            return orig(self, offload_index, adapters_weights)
+        except KeyError as e:
+            missing = str(e).strip("'\"")
+            # Heuristic: real LoRA target modules contain ".lora_" or names
+            # from peft_config.target_modules. lm_head / embed_tokens never
+            # have LoRA applied with our config (target_modules=q_proj,v_proj).
+            non_target_hints = (
+                "lm_head", "embed_tokens", "input_layernorm",
+                "post_attention_layernorm", "norm",
+            )
+            if any(hint in missing for hint in non_target_hints):
+                log(f"  PEFT _update_offload KeyError на не-LoRA модуле "
+                    f"({missing}) — пропускаем (известный баг peft<0.14)")
+                return
+            raise
+
+    _PeftModel._update_offload = patched
+    log(f"  применён monkey-patch для PEFT {version} _update_offload")
+
+
 def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     log("step:import_torch")
     import torch
@@ -188,7 +238,10 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     log("step:import_transformers")
     from transformers import AutoModelForCausalLM, AutoTokenizer
     log("step:import_peft")
+    import peft
     from peft import PeftModel
+    log(f"  peft {getattr(peft, '__version__', '?')}")
+    _patch_peft_update_offload(peft)
 
     emit({"phase": "loading_base", "base_model": base_model})
     log(f"step:load_base_fp16 base_model={base_model}")

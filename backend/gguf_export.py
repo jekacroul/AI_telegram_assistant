@@ -310,6 +310,11 @@ def _run_merge_subprocess(
             proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:],
         )
         if worker_error:
+            if "_update_offload" in worker_error or "KeyError" in worker_error:
+                return False, (
+                    f"{worker_error}\n\nЭто баг PEFT < 0.14 при работе с "
+                    f"диспатченной моделью. Обнови пакет: pip install -U peft"
+                )
             return False, worker_error
         if proc.returncode in (3221225477, -1073741819):
             return False, (
