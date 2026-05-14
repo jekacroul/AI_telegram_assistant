@@ -269,6 +269,12 @@ export default function Training() {
                 )
               )
             : null;
+        const isRunningPhase =
+          progress.phase &&
+          progress.phase !== "done" &&
+          progress.phase !== "error" &&
+          progress.phase !== "cancelled";
+        const showIndeterminate = isRunningPhase && percent == null;
         return (
         <div className="card">
           <div className="flex flex-wrap gap-4 text-sm items-center">
@@ -316,6 +322,9 @@ export default function Training() {
                 style={{ width: `${percent}%` }}
               />
             </div>
+          )}
+          {showIndeterminate && (
+            <div className="mt-3 progress-indeterminate" />
           )}
           {lossHistory.length > 1 && (
             <div className="h-48 mt-3">

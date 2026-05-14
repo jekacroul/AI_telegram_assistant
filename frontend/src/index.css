@@ -28,3 +28,21 @@ body {
   @apply w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent;
 }
 .label { @apply text-xs text-muted uppercase tracking-wide; }
+
+@keyframes indeterminate-slide {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+.progress-indeterminate {
+  @apply h-2 bg-white/10 rounded relative overflow-hidden;
+}
+.progress-indeterminate::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 0.25rem;
+  background: linear-gradient(90deg, transparent, #5b8cff, transparent);
+  animation: indeterminate-slide 1.4s ease-in-out infinite;
+}

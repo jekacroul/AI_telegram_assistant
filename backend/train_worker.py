@@ -189,7 +189,31 @@ def run_training(
     log("step:import_torch")
     import torch
     log(f"  torch {torch.__version__} cuda={torch.version.cuda} avail={torch.cuda.is_available()}")
-    log(f"  device={torch.cuda.get_device_name(0)} free_mem={torch.cuda.mem_get_info()[0] // (1024*1024)}MiB")
+    free_bytes, total_bytes = torch.cuda.mem_get_info()
+    free_mib = free_bytes // (1024 * 1024)
+    total_mib = total_bytes // (1024 * 1024)
+    log(f"  device={torch.cuda.get_device_name(0)} free_mem={free_mib}MiB total_mem={total_mib}MiB")
+
+    # 12B base in 4-bit needs ~7 GB just for weights, plus activations and
+    # the optimizer state. If a previous model (LM Studio, browser model,
+    # leftover process) is still holding VRAM, bitsandbytes' first kernel
+    # call dies with access violation 3221225477 instead of a clean OOM.
+    # Catch this before we even start loading.
+    required_mib = 7500
+    if free_mib < required_mib:
+        used_mib = total_mib - free_mib
+        emit({
+            "phase": "error",
+            "error": (
+                f"Недостаточно свободной VRAM: свободно {free_mib} MiB из "
+                f"{total_mib} MiB (занято {used_mib} MiB), для загрузки "
+                f"4-битной 12B модели нужно ~{required_mib} MiB. "
+                f"Выгрузите модель из LM Studio / закройте другие GPU-приложения "
+                f"и запустите обучение снова."
+            ),
+        })
+        log(f"FATAL: insufficient VRAM ({free_mib}MiB < {required_mib}MiB required)")
+        sys.exit(2)
 
     log("step:import_peft")
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
