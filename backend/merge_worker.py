@@ -14,6 +14,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
+from typing import Optional
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 try:
@@ -50,6 +51,50 @@ def emit(event: dict) -> None:
     sys.stdout.flush()
 
 
+def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
+    """Decide how to split the fp16 base across GPU + CPU + disk offload.
+
+    Returns (max_memory_dict or None for CPU-only, human readable plan).
+    None means CUDA is not available — caller falls back to CPU-only.
+    """
+    if not torch_module.cuda.is_available():
+        return None, "CUDA недоступен → грузим целиком на CPU"
+
+    free_vram, total_vram = torch_module.cuda.mem_get_info()
+    free_vram_gib = free_vram / (1024 ** 3)
+    # Hold back ~2 GiB on the GPU for activations during merge_and_unload,
+    # then take 95% of what's left so accelerate has a tiny safety margin.
+    gpu_budget_gib = max(0.0, (free_vram_gib - 2.0) * 0.95)
+
+    try:
+        import psutil  # type: ignore
+        avail_ram_gib = psutil.virtual_memory().available / (1024 ** 3)
+        ram_source = "psutil"
+    except ImportError:
+        avail_ram_gib = 16.0
+        ram_source = "fallback (psutil не установлен)"
+
+    # Reserve ~6 GiB for the OS, python, transformers/peft internals.
+    cpu_budget_gib = max(2.0, avail_ram_gib - 6.0)
+
+    if gpu_budget_gib < 1.0:
+        return None, (
+            f"свободно {free_vram_gib:.1f} GiB VRAM — слишком мало для mixed"
+            f", грузим на CPU"
+        )
+
+    plan = {
+        0: f"{int(gpu_budget_gib)}GiB",
+        "cpu": f"{int(cpu_budget_gib)}GiB",
+    }
+    summary = (
+        f"GPU budget {int(gpu_budget_gib)} GiB (free {free_vram_gib:.1f}/"
+        f"{total_vram/(1024**3):.1f}), CPU budget {int(cpu_budget_gib)} GiB "
+        f"(available {avail_ram_gib:.1f}, {ram_source})"
+    )
+    return plan, summary
+
+
 def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     log("step:import_torch")
     import torch
@@ -62,22 +107,32 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
 
     emit({"phase": "loading_base", "base_model": base_model})
     log(f"step:load_base_fp16 base_model={base_model}")
-    # Merge is a one-shot weight op, no training-grade compute. Force the
-    # base model onto CPU even when CUDA is available: a 12B fp16 model
-    # is ~24 GB which does not fit in 12 GB VRAM, and accelerate's mixed
-    # GPU/CPU dispatch on Windows reliably triggers an access violation
-    # (exit 3221225477) somewhere around 50-60% of weight load. Disk
-    # offload covers machines without enough RAM either.
+
     offload_dir = output_dir.parent / ".offload"
     offload_dir.mkdir(parents=True, exist_ok=True)
-    log(f"  device_map=cpu offload_folder={offload_dir}")
-    base = AutoModelForCausalLM.from_pretrained(
-        base_model,
+
+    # Split the fp16 base across GPU + CPU based on what's actually free
+    # right now. A 12B fp16 model is ~24 GB. Pure CPU on a 32 GB box gets
+    # close to the page-file boundary and hits an access violation
+    # (exit 3221225477) somewhere in the middle of weight load. Letting
+    # the GPU eat ~10 GB of weights drops CPU pressure to ~14 GB, which
+    # leaves comfortable headroom. offload_folder is a final safety net
+    # for setups where the budget still does not fit.
+    max_memory, plan = _compute_max_memory(torch)
+    device_map: object = "auto" if max_memory is not None else {"": "cpu"}
+    log(f"  plan: {plan}")
+    log(f"  device_map={device_map} offload_folder={offload_dir}")
+
+    load_kwargs = dict(
         torch_dtype=torch.float16,
-        device_map={"": "cpu"},
+        device_map=device_map,
         low_cpu_mem_usage=True,
         offload_folder=str(offload_dir),
     )
+    if max_memory is not None:
+        load_kwargs["max_memory"] = max_memory
+
+    base = AutoModelForCausalLM.from_pretrained(base_model, **load_kwargs)
     log("step:base_loaded")
 
     emit({"phase": "loading_adapter", "adapter_dir": str(adapter_dir)})
