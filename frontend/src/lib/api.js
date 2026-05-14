@@ -156,6 +156,27 @@ export const api = {
       body: JSON.stringify(data),
     }),
   voiceStats: () => request("/api/stats/voice"),
+  replicationStatus: () => request("/api/replication/status"),
+  replicationSettings: () => request("/api/replication/settings"),
+  saveReplicationSettings: (data) =>
+    request("/api/replication/settings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  startReplication: () => request("/api/replication/start", { method: "POST" }),
+  cancelReplication: () =>
+    request("/api/replication/cancel", { method: "POST" }),
+  replicationRuns: () => request("/api/replication/runs"),
+  setReplicationProtected: (run_id, protected_) =>
+    request(`/api/replication/runs/${run_id}/protect`, {
+      method: "POST",
+      body: JSON.stringify({ protected: protected_ }),
+    }),
+  deleteReplicationRun: (run_id, confirm) =>
+    request(
+      `/api/replication/runs/${run_id}?confirm=${encodeURIComponent(confirm)}`,
+      { method: "DELETE" },
+    ),
 };
 
 export function streamEvents(path, onEvent) {

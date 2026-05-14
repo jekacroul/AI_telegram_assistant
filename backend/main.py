@@ -62,6 +62,19 @@ from .dialog_backup import (
     set_excluded_chats,
 )
 from .event_bus import message_bus, training_bus
+from .replication import (
+    DELETE_CONFIRM_TOKEN as REPLICATION_DELETE_TOKEN,
+    cancel_replication,
+    delete_run as delete_replication_run,
+    get_replication_settings,
+    list_runs as list_replication_runs,
+    replication_bus,
+    replication_state,
+    run_replication,
+    save_replication_settings,
+    scheduler as replication_scheduler,
+    set_run_protected as set_replication_run_protected,
+)
 from .llm_engine import LLMUnavailableError, get_client
 from .quality_filter import is_good_response
 from .notifications import (
@@ -190,7 +203,9 @@ async def lifespan(app: FastAPI):
     else:
         log.warning("TELEGRAM_BOT_TOKEN is not set; bot will be inactive")
     dialog_backup_scheduler.start()
+    replication_scheduler.start()
     yield
+    await replication_scheduler.stop()
     await dialog_backup_scheduler.stop()
     await telegram_service.shutdown()
 
@@ -1076,6 +1091,129 @@ async def training_progress(request: Request) -> EventSourceResponse:
                     yield {"event": "ping", "data": "{}"}
         finally:
             training_bus.unsubscribe(q)
+
+    return EventSourceResponse(gen())
+
+
+@app.get("/api/replication/settings")
+async def replication_get_settings(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    cfg = await get_replication_settings(session)
+    return {
+        "enabled": cfg.enabled,
+        "destination": cfg.destination,
+        "interval_minutes": cfg.interval_minutes,
+        "keep_last": cfg.keep_last,
+    }
+
+
+class ReplicationSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+    destination: Optional[str] = None
+    interval_minutes: Optional[int] = None
+    keep_last: Optional[int] = None
+
+
+@app.post("/api/replication/settings")
+async def replication_save_settings(
+    payload: ReplicationSettingsIn,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    cfg = await save_replication_settings(
+        session,
+        enabled=payload.enabled,
+        destination=payload.destination,
+        interval_minutes=payload.interval_minutes,
+        keep_last=payload.keep_last,
+    )
+    replication_scheduler.trigger()
+    return {
+        "enabled": cfg.enabled,
+        "destination": cfg.destination,
+        "interval_minutes": cfg.interval_minutes,
+        "keep_last": cfg.keep_last,
+    }
+
+
+@app.get("/api/replication/status")
+async def replication_status(session: AsyncSession = Depends(get_session)) -> dict:
+    cfg = await get_replication_settings(session)
+    runs = await list_replication_runs(limit=50)
+    last = runs[0] if runs else None
+    return {
+        "settings": {
+            "enabled": cfg.enabled,
+            "destination": cfg.destination,
+            "interval_minutes": cfg.interval_minutes,
+            "keep_last": cfg.keep_last,
+        },
+        "running": replication_state.running,
+        "current_run_id": replication_state.current_run_id,
+        "last_event": replication_state.last_event,
+        "last_run": last,
+        "delete_confirm_token": REPLICATION_DELETE_TOKEN,
+    }
+
+
+@app.post("/api/replication/start")
+async def replication_start() -> dict:
+    if replication_state.running:
+        raise HTTPException(status_code=409, detail="replication already running")
+    asyncio.create_task(run_replication(triggered_by="manual"))
+    return {"started": True}
+
+
+@app.post("/api/replication/cancel")
+async def replication_cancel() -> dict:
+    cancelled = await cancel_replication()
+    return {"cancelled": cancelled}
+
+
+@app.get("/api/replication/runs")
+async def replication_runs() -> list[dict]:
+    return await list_replication_runs(limit=100)
+
+
+class ReplicationProtectIn(BaseModel):
+    protected: bool
+
+
+@app.post("/api/replication/runs/{run_id}/protect")
+async def replication_set_protect(run_id: int, payload: ReplicationProtectIn) -> dict:
+    row = await set_replication_run_protected(run_id, payload.protected)
+    if row is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return row
+
+
+@app.delete("/api/replication/runs/{run_id}")
+async def replication_delete(run_id: int, confirm: str = "") -> dict:
+    ok, reason = await delete_replication_run(run_id, confirm)
+    if not ok:
+        status_code = 404 if reason == "not found" else 409
+        raise HTTPException(status_code=status_code, detail=reason)
+    return {"ok": True}
+
+
+@app.get("/api/replication/progress")
+async def replication_progress(request: Request) -> EventSourceResponse:
+    q = replication_bus.subscribe()
+
+    async def gen():
+        if replication_state.last_event:
+            yield {"data": json.dumps(replication_state.last_event, ensure_ascii=False)}
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield {"data": item}
+                except asyncio.TimeoutError:
+                    yield {"event": "ping", "data": "{}"}
+        finally:
+            replication_bus.unsubscribe(q)
 
     return EventSourceResponse(gen())
 

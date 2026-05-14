@@ -5,6 +5,7 @@ import "./index.css";
 import Dashboard from "./pages/Dashboard.jsx";
 import Dialogs from "./pages/Dialogs.jsx";
 import Training from "./pages/Training.jsx";
+import Replication from "./pages/Replication.jsx";
 import StyleProfile from "./pages/StyleProfile.jsx";
 import Settings from "./pages/Settings.jsx";
 import Stats from "./pages/Stats.jsx";
@@ -25,6 +26,7 @@ function Layout() {
               ["/", "Дашборд"],
               ["/dialogs", "Диалоги"],
               ["/training", "Обучение"],
+              ["/replication", "Репликация"],
               ["/style", "Стиль"],
               ["/stats", "Статистика"],
               ["/settings", "Настройки"],
@@ -49,6 +51,7 @@ function Layout() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/dialogs" element={<Dialogs />} />
           <Route path="/training" element={<Training />} />
+          <Route path="/replication" element={<Replication />} />
           <Route path="/style" element={<StyleProfile />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/settings" element={<Settings />} />

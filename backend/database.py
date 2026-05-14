@@ -164,6 +164,24 @@ class Setting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
 
 
+class ReplicationRun(Base):
+    __tablename__ = "replication_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    destination_path: Mapped[str] = mapped_column(String(1024), default="")
+    bytes_copied: Mapped[int] = mapped_column(Integer, default=0)
+    bytes_total: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    triggered_by: Mapped[str] = mapped_column(String(32), default="manual")
+    protected: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class QuickReply(Base):
     __tablename__ = "quick_replies"
 
@@ -274,6 +292,31 @@ def _apply_lightweight_migrations(sync_conn) -> None:
             )
             """
         )
+    if "replication_runs" not in tables:
+        sync_conn.exec_driver_sql(
+            """
+            CREATE TABLE replication_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at DATETIME,
+                finished_at DATETIME,
+                status VARCHAR(32) DEFAULT 'running' NOT NULL,
+                destination_path VARCHAR(1024) DEFAULT '' NOT NULL,
+                bytes_copied INTEGER DEFAULT 0 NOT NULL,
+                bytes_total INTEGER DEFAULT 0 NOT NULL,
+                duration_ms INTEGER DEFAULT 0 NOT NULL,
+                error_message TEXT,
+                triggered_by VARCHAR(32) DEFAULT 'manual' NOT NULL,
+                protected BOOLEAN DEFAULT 1 NOT NULL
+            )
+            """
+        )
+        sync_conn.exec_driver_sql(
+            "CREATE INDEX ix_replication_runs_started_at ON replication_runs (started_at)"
+        )
+        sync_conn.exec_driver_sql(
+            "CREATE INDEX ix_replication_runs_status ON replication_runs (status)"
+        )
+
     if "quick_replies" in tables:
         qr_count = sync_conn.exec_driver_sql(
             "SELECT COUNT(*) FROM quick_replies"
