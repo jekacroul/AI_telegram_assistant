@@ -224,24 +224,36 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             raw = await proc.stdout.readline()
             if not raw:
                 break
-            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-            if line.startswith(EVENT_PREFIX):
-                payload = line[len(EVENT_PREFIX):]
-                try:
-                    event = json.loads(payload)
-                except json.JSONDecodeError:
-                    log.error("malformed train event: %s", payload[:200])
+            # tqdm uses \r without \n for in-place progress updates inside
+            # trainer.train(). Our emit() prints get concatenated onto those
+            # bars, so the event prefix can appear mid-line. Split on \r and
+            # locate the marker anywhere in each segment.
+            decoded = raw.decode("utf-8", errors="replace").rstrip("\n")
+            for segment in decoded.split("\r"):
+                segment = segment.rstrip()
+                if not segment:
                     continue
-                phase = event.get("phase")
-                if phase == "result":
-                    final_result = {k: v for k, v in event.items() if k != "phase"}
-                    continue
-                if phase == "error":
-                    error_message = event.get("error") or "training error"
-                    continue
-                await _emit(event)
-            elif line:
-                log.info("[train_worker] %s", line)
+                idx = segment.find(EVENT_PREFIX)
+                if idx >= 0:
+                    prefix_text = segment[:idx].strip()
+                    if prefix_text:
+                        log.info("[train_worker] %s", prefix_text)
+                    payload = segment[idx + len(EVENT_PREFIX):]
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError:
+                        log.error("malformed train event: %s", payload[:200])
+                        continue
+                    phase = event.get("phase")
+                    if phase == "result":
+                        final_result = {k: v for k, v in event.items() if k != "phase"}
+                        continue
+                    if phase == "error":
+                        error_message = event.get("error") or "training error"
+                        continue
+                    await _emit(event)
+                else:
+                    log.info("[train_worker] %s", segment)
 
         rc = await proc.wait()
         training_state.process = None
