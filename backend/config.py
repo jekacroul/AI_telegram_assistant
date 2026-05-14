@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=2048, alias="LLM_MAX_TOKENS")
     llama_cpp_path: Optional[str] = Field(default=None, alias="LLAMA_CPP_PATH")
     gguf_quant: str = Field(default="Q8_0", alias="GGUF_QUANT")
+    llama_server_bin: Optional[str] = Field(default=None, alias="LLAMA_SERVER_BIN")
+    llama_base_model_gguf: Optional[str] = Field(
+        default=None, alias="LLAMA_BASE_MODEL_GGUF"
+    )
+    llama_server_port: int = Field(default=1234, alias="LLAMA_SERVER_PORT")
+    llama_server_ngl: int = Field(default=99, alias="LLAMA_SERVER_NGL")
+    llama_server_ctx: int = Field(default=4096, alias="LLAMA_SERVER_CTX")
+    llama_server_auto_start: bool = Field(
+        default=True, alias="LLAMA_SERVER_AUTO_START"
+    )
     notify_chat_id: str = Field(default="", alias="NOTIFY_CHAT_ID")
     media_path: str = Field(default="./media/", alias="MEDIA_PATH")
 

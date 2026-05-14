@@ -504,10 +504,9 @@ async def activate_adapter(run_id: int) -> bool:
         for r in all_runs:
             r.is_active = (r.id == run_id)
         await session.commit()
-    log.info(
-        "marked adapter v%s active at %s; load it manually in LM Studio",
-        target.version, target.adapter_path,
-    )
+    log.info("marked adapter v%s active at %s", target.version, target.adapter_path)
+    from . import llama_server
+    await llama_server.restart_in_background()
     return True
 
 
@@ -523,6 +522,8 @@ async def deactivate_adapter() -> bool:
             run.is_active = False
         await session.commit()
     log.info("deactivated active fine-tune adapter")
+    from . import llama_server
+    await llama_server.restart_in_background()
     return True
 
 

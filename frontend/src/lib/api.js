@@ -78,6 +78,11 @@ export const api = {
     request(`/api/training/runs/${run_id}/export-gguf`, { method: "POST" }),
   exportLoraGguf: (run_id) =>
     request(`/api/training/runs/${run_id}/export-lora-gguf`, { method: "POST" }),
+  llamaServerStatus: () => request("/api/llama-server/status"),
+  llamaServerStart: () => request("/api/llama-server/start", { method: "POST" }),
+  llamaServerStop: () => request("/api/llama-server/stop", { method: "POST" }),
+  llamaServerRestart: () =>
+    request("/api/llama-server/restart", { method: "POST" }),
   trainingRuns: () => request("/api/training/runs"),
   styleProfile: () => request("/api/style/profile"),
   saveStyle: (profile) =>

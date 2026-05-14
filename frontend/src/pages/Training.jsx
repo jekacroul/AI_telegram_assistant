@@ -40,6 +40,7 @@ export default function Training() {
   const [error, setError] = useState("");
   const [runLogs, setRunLogs] = useState({});
   const [loadingLogId, setLoadingLogId] = useState(null);
+  const [serverStatus, setServerStatus] = useState(null);
 
   const refresh = async () => {
     const [st, rs, qs] = await Promise.all([
@@ -53,6 +54,12 @@ export default function Training() {
     try {
       const vs = await api.voiceStats();
       setVoiceStats(vs);
+    } catch {
+      // ignore
+    }
+    try {
+      const srv = await api.llamaServerStatus();
+      setServerStatus(srv);
     } catch {
       // ignore
     }
@@ -71,8 +78,47 @@ export default function Training() {
         }
       } catch {}
     };
-    return () => ev.close();
+    const srvPoll = setInterval(async () => {
+      try {
+        const srv = await api.llamaServerStatus();
+        setServerStatus(srv);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+    return () => {
+      ev.close();
+      clearInterval(srvPoll);
+    };
   }, []);
+
+  async function serverStart() {
+    setError("");
+    try {
+      const res = await api.llamaServerStart();
+      if (!res.started) setError(res.reason || "не удалось запустить");
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function serverStop() {
+    setError("");
+    try {
+      await api.llamaServerStop();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function serverRestart() {
+    setError("");
+    try {
+      await api.llamaServerRestart();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
 
   async function build() {
     setError("");
@@ -228,6 +274,68 @@ export default function Training() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {serverStatus && (
+        <div className="card">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="label">Llama Server</div>
+            <span
+              className={
+                serverStatus.starting
+                  ? "text-accent text-sm"
+                  : serverStatus.stopping
+                  ? "text-muted text-sm"
+                  : serverStatus.running
+                  ? "text-good text-sm"
+                  : "text-muted text-sm"
+              }
+            >
+              {serverStatus.starting
+                ? "● запуск..."
+                : serverStatus.stopping
+                ? "● останавливается..."
+                : serverStatus.running
+                ? `● работает на :${serverStatus.port}`
+                : "○ остановлен"}
+            </span>
+            {serverStatus.running && serverStatus.lora_path && (
+              <span className="text-xs text-muted">
+                LoRA: <code>{serverStatus.lora_path.split(/[\\/]/).pop()}</code>
+              </span>
+            )}
+            {serverStatus.running && !serverStatus.lora_path && (
+              <span className="text-xs text-muted">без адаптера (чистая база)</span>
+            )}
+            <div className="ml-auto flex gap-2">
+              {!serverStatus.running && !serverStatus.starting && (
+                <button className="btn-secondary" onClick={serverStart}>
+                  Запустить
+                </button>
+              )}
+              {serverStatus.running && (
+                <button className="btn-secondary" onClick={serverRestart}>
+                  Перезапустить
+                </button>
+              )}
+              {serverStatus.running && (
+                <button className="btn-danger" onClick={serverStop}>
+                  Остановить
+                </button>
+              )}
+            </div>
+          </div>
+          {!serverStatus.configured && (
+            <div className="text-bad text-xs mt-2">
+              Не задан LLAMA_BASE_MODEL_GGUF в .env — сервер запустить нельзя.
+            </div>
+          )}
+          {serverStatus.last_error && !serverStatus.running && (
+            <div className="text-bad text-xs mt-2">
+              Ошибка: {serverStatus.last_error}
+            </div>
+          )}
         </div>
       )}
 
