@@ -359,6 +359,23 @@ def run_training(
     log("step:save_adapter")
     trainer.model.save_pretrained(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
+
+    # Free CUDA memory before the subprocess exits. Process death normally
+    # releases VRAM anyway, but with bitsandbytes + paged buffers the
+    # release can lag, and the next subprocess (merge_worker) may start
+    # before the driver fully reclaims those allocations.
+    log("step:free_vram")
+    try:
+        del trainer
+        del model
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        free_after, _ = torch.cuda.mem_get_info()
+        log(f"  free VRAM after cleanup: {free_after // (1024*1024)} MiB")
+    except Exception as e:
+        log(f"  VRAM cleanup warning: {e}")
     log("step:done")
 
     return {

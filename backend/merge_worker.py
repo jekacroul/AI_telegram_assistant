@@ -119,10 +119,47 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
     return plan, summary
 
 
+def _precheck_memory(torch_module) -> Optional[str]:
+    """Verify we have enough free VRAM/RAM to attempt the merge before any
+    weights are touched. Returns an error message on failure, None on OK.
+    Numbers tuned for a 12B fp16 base (~24 GB on disk)."""
+    if torch_module.cuda.is_available():
+        free_vram, total_vram = torch_module.cuda.mem_get_info()
+        free_vram_gib = free_vram / (1024 ** 3)
+        # Need at least ~4 GiB free on the GPU to be worth using; below
+        # that mixed mode is pointless and we'd want pure CPU anyway.
+        if free_vram_gib < 4.0:
+            log(f"  VRAM tight: free {free_vram_gib:.1f} GiB — будем грузить полностью на CPU")
+    try:
+        import psutil  # type: ignore
+        avail_ram_gib = psutil.virtual_memory().available / (1024 ** 3)
+        log(f"  free RAM available: {avail_ram_gib:.1f} GiB")
+        # 12B fp16 model is ~24 GB on disk. With mixed CPU+GPU split and
+        # offload_folder we can survive on much less, but we still need
+        # ~10 GiB free RAM to load shards plus python/transformers
+        # overhead. Below that the load gets unstable.
+        if avail_ram_gib < 10.0:
+            return (
+                f"Недостаточно свободной RAM: доступно {avail_ram_gib:.1f} GiB. "
+                f"Закрой LM Studio, браузер и другие тяжёлые приложения, чтобы "
+                f"освободить минимум 10 GiB, и попробуй снова."
+            )
+    except ImportError:
+        log("  psutil не установлен, пропускаем RAM-precheck")
+    return None
+
+
 def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     log("step:import_torch")
     import torch
     log(f"  torch {torch.__version__} cuda_avail={torch.cuda.is_available()}")
+
+    log("step:precheck_memory")
+    err = _precheck_memory(torch)
+    if err is not None:
+        emit({"phase": "error", "error": err})
+        log(f"FATAL: {err}")
+        sys.exit(2)
 
     log("step:import_transformers")
     from transformers import AutoModelForCausalLM, AutoTokenizer

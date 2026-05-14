@@ -251,7 +251,10 @@ def _run_merge_subprocess(
     base_model: str,
     merged_dir: Path,
     on_event: EventCallback,
-) -> bool:
+) -> tuple[bool, Optional[str]]:
+    """Run merge_worker as a subprocess. Returns (success, error_reason).
+    Streams phase events to on_event and captures any explicit error
+    message the worker emitted so callers can surface it to the user."""
     cmd = [
         sys.executable, "-u", "-m", "backend.merge_worker",
         "--adapter-dir", str(adapter_dir),
@@ -269,9 +272,10 @@ def _run_merge_subprocess(
         )
     except OSError as e:
         log.error("merge subprocess failed to start: %s", e)
-        return False
+        return False, f"merge subprocess не запустился: {e}"
 
     captured: list[str] = []
+    worker_error: Optional[str] = None
     assert proc.stdout is not None
     for raw_line in proc.stdout:
         line = raw_line.rstrip("\r\n")
@@ -284,7 +288,10 @@ def _run_merge_subprocess(
             except json.JSONDecodeError:
                 continue
             phase = event.get("phase")
-            if phase and phase != "result" and phase != "error":
+            if phase == "error":
+                worker_error = event.get("error") or worker_error
+                continue
+            if phase and phase != "result":
                 on_event(event)
     rc = proc.wait()
 
@@ -300,13 +307,21 @@ def _run_merge_subprocess(
             "merge subprocess failed (exit %s):\nstdout: %s\nstderr: %s",
             proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:],
         )
-        return False
+        if worker_error:
+            return False, worker_error
+        if proc.returncode in (3221225477, -1073741819):
+            return False, (
+                f"merge_worker завершился с access violation (код {proc.returncode}). "
+                f"Скорее всего не хватило RAM/VRAM. Закрой LM Studio и другие "
+                f"тяжёлые приложения, проверь свободную память и попробуй снова."
+            )
+        return False, f"merge_worker завершился с кодом {proc.returncode} (см. логи backend)"
 
     config_file = merged_dir / "config.json"
     if not config_file.is_file():
         log.error("merge reported success but %s is missing.", config_file)
-        return False
-    return True
+        return False, "merge сообщил об успехе, но config.json не появился"
+    return True, None
 
 
 def merge_and_export_gguf(
@@ -362,8 +377,11 @@ def merge_and_export_gguf(
     final_gguf = adapter_dir / f"merged.{quant.lower()}.gguf"
 
     # 1. merge weights via isolated subprocess
-    if not _run_merge_subprocess(adapter_dir, base_model, merged_dir, on_event):
-        return None, "не удалось слить LoRA с базовой моделью (см. логи backend)"
+    merge_ok, merge_err = _run_merge_subprocess(
+        adapter_dir, base_model, merged_dir, on_event
+    )
+    if not merge_ok:
+        return None, merge_err or "не удалось слить LoRA с базовой моделью (см. логи backend)"
 
     # 2. HF merged dir -> fp16 GGUF
     on_event({"phase": "converting_to_gguf"})
