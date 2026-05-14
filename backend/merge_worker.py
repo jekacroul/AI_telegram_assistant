@@ -218,6 +218,44 @@ def _patch_peft_update_offload(peft_module) -> None:
     log("  применён monkey-patch для PEFT _update_offload (broad)")
 
 
+def _fail_if_memory_error(e: Exception, stage: str) -> bool:
+    """Return True (after emitting + exiting) if the exception looks like
+    accelerate complaining the model does not fit. Caller should re-raise
+    otherwise. `stage` is a short label for the log."""
+    msg = str(e)
+    looks_like_oom = (
+        "offload_dir" in msg
+        or "offload_folder" in msg
+        or ("doesn" in msg and "fit" in msg.lower())
+        or "out of memory" in msg.lower()
+        or "OutOfMemoryError" in type(e).__name__
+    )
+    if not looks_like_oom:
+        return False
+
+    free_ram_now = 0.0
+    try:
+        import psutil  # type: ignore
+        free_ram_now = psutil.virtual_memory().available / (1024 ** 3)
+    except ImportError:
+        pass
+    emit({
+        "phase": "error",
+        "error": (
+            f"Модель ~28 GiB не помещается в GPU+CPU без disk-offload "
+            f"(не прошло на этапе: {stage}). Сейчас свободно RAM "
+            f"{free_ram_now:.1f} GiB. На 32 GB машине этого мало для "
+            f"merge: закрой LM Studio, браузер, IDE — свободной RAM "
+            f"нужно минимум 26-28 GiB.\n\n"
+            f"Проще и надёжнее: нажми «LoRA → GGUF» вместо «Merge → GGUF». "
+            f"Она вообще не загружает базовую модель, выдаёт файл ~100 MB, "
+            f"который LM Studio цепляет поверх базы."
+        ),
+    })
+    log(f"FATAL ({stage}): model doesn't fit: {e}")
+    sys.exit(2)
+
+
 def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     log("step:import_torch")
     import torch
@@ -263,37 +301,25 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     try:
         base = AutoModelForCausalLM.from_pretrained(base_model, **load_kwargs)
     except (RuntimeError, ValueError) as e:
-        msg = str(e)
-        if "offload_dir" in msg or ("doesn" in msg and "fit" in msg.lower()) or "memory" in msg.lower():
-            free_ram_now = 0.0
-            try:
-                import psutil  # type: ignore
-                free_ram_now = psutil.virtual_memory().available / (1024 ** 3)
-            except ImportError:
-                pass
-            emit({
-                "phase": "error",
-                "error": (
-                    f"Модель ~28 GiB не помещается в GPU+CPU без disk-offload. "
-                    f"Сейчас свободно RAM {free_ram_now:.1f} GiB. "
-                    f"Закрой LM Studio, браузер и другие приложения, чтобы "
-                    f"свободной RAM было хотя бы 26 GiB (а лучше 28). "
-                    f"Альтернатива — кнопка «LoRA → GGUF» вместо merge: "
-                    f"она вообще не загружает базовую модель."
-                ),
-            })
-            log(f"FATAL: model doesn't fit: {e}")
-            sys.exit(2)
+        _fail_if_memory_error(e, stage="load_base")
         raise
     log("step:base_loaded")
 
     emit({"phase": "loading_adapter", "adapter_dir": str(adapter_dir)})
     log(f"step:load_adapter {adapter_dir}")
-    model = PeftModel.from_pretrained(base, str(adapter_dir))
+    try:
+        model = PeftModel.from_pretrained(base, str(adapter_dir))
+    except (RuntimeError, ValueError) as e:
+        _fail_if_memory_error(e, stage="load_adapter")
+        raise
 
     emit({"phase": "merging"})
     log("step:merge_and_unload")
-    merged = model.merge_and_unload()
+    try:
+        merged = model.merge_and_unload()
+    except (RuntimeError, ValueError) as e:
+        _fail_if_memory_error(e, stage="merge_and_unload")
+        raise
 
     output_dir.mkdir(parents=True, exist_ok=True)
     emit({"phase": "saving_merged", "output_dir": str(output_dir)})
