@@ -174,17 +174,19 @@ def _precheck_memory(torch_module) -> Optional[str]:
 
 
 def _patch_peft_update_offload(peft_module) -> None:
-    """PEFT (at least up through 0.19) builds a wrong module name in
-    _update_offload when the base model has accelerate hf_hooks (i.e.
-    any GPU+CPU dispatch). It tries
-    dict(self.named_modules())[extended_prefix] with an extra "model."
-    in the prefix and KeyErrors on lm_head / embed_tokens / norm /
-    layernorm — modules that are not LoRA targets and don't need an
-    adapter applied anyway.
+    """PEFT (at least up through 0.19) has multiple bugs in _update_offload
+    when the base model is accelerate-dispatched across GPU+CPU. Seen so
+    far:
+      • KeyError 'base_model.model.model.lm_head' — wrong "model." depth
+      • KeyError '...q_proj.base_layer.weight' — looks up a parameter path
+        in a module dict (forgets to strip .weight)
 
-    Wrap the method and swallow KeyError only for modules outside the
-    LoRA target list. Real target modules that hit the bug will still
-    re-raise, so we never silently miss a merge."""
+    `_update_offload` is only meaningful when weights actually live on
+    disk. With our current load (GPU + CPU only, no offload_folder), the
+    adapter weights have already been applied to in-memory LoRA layers
+    by set_peft_model_state_dict — which runs BEFORE _update_offload.
+    Skip the buggy call and let merge_and_unload work with the in-memory
+    state."""
     try:
         from peft.peft_model import PeftModel as _PeftModel
         orig = _PeftModel._update_offload
@@ -198,24 +200,18 @@ def _patch_peft_update_offload(peft_module) -> None:
     def patched(self, offload_index, adapters_weights):
         try:
             return orig(self, offload_index, adapters_weights)
-        except KeyError as e:
-            missing = str(e).strip("'\"")
-            # Heuristic: real LoRA target modules contain ".q_proj" /
-            # ".v_proj" / etc. lm_head / embed_tokens / *norm* never
-            # have LoRA applied with our config.
-            non_target_hints = (
-                "lm_head", "embed_tokens", "input_layernorm",
-                "post_attention_layernorm", "norm",
+        except Exception as e:  # noqa: BLE001
+            log(
+                f"  PEFT _update_offload пропущен из-за {type(e).__name__}: "
+                f"{e}. Адаптерные веса уже применены через "
+                f"set_peft_model_state_dict до этой точки; "
+                f"merge_and_unload должен отработать корректно."
             )
-            if any(hint in missing for hint in non_target_hints):
-                log(f"  PEFT _update_offload KeyError на не-LoRA модуле "
-                    f"({missing}) — пропускаем (известный баг)")
-                return
-            raise
+            return
 
     patched._patched_by_us = True  # type: ignore[attr-defined]
     _PeftModel._update_offload = patched
-    log(f"  применён monkey-patch для PEFT _update_offload")
+    log("  применён monkey-patch для PEFT _update_offload (broad)")
 
 
 def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
