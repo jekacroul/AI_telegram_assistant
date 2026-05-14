@@ -225,6 +225,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
                     continue
                 if phase == "error":
                     error_message = event.get("error") or "training error"
+                    continue
                 await _emit(event)
             elif line:
                 log.info("[train_worker] %s", line)
@@ -297,8 +298,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             run.finished_at = datetime.utcnow()
             run.status = "failed"
             await session.commit()
-        if error_message is None:
-            await _emit({"phase": "error", "error": str(e)})
+        await _emit({"phase": "error", "error": error_message or str(e)})
     finally:
         with contextlib.suppress(FileNotFoundError):
             cancel_file.unlink()
