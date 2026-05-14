@@ -24,10 +24,16 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
 log = logging.getLogger(__name__)
+
+CONVERT_SCRIPT_URL = (
+    "https://raw.githubusercontent.com/ggml-org/llama.cpp/master/convert_hf_to_gguf.py"
+)
 
 
 def _find_convert_script(llama_cpp_path: Path) -> Optional[Path]:
@@ -44,6 +50,43 @@ def _find_convert_script(llama_cpp_path: Path) -> Optional[Path]:
         except OSError:
             continue
     return None
+
+
+def _ensure_convert_script(llama_cpp_path: Path) -> tuple[Optional[Path], Optional[str]]:
+    """Locate convert_hf_to_gguf.py, downloading it from llama.cpp upstream
+    when the user only has prebuilt binaries. The fetched copy is dropped
+    into llama_cpp_path so future runs reuse it without re-downloading."""
+    found = _find_convert_script(llama_cpp_path)
+    if found is not None:
+        return found, None
+
+    target = llama_cpp_path / "convert_hf_to_gguf.py"
+    try:
+        log.info("convert_hf_to_gguf.py not found, fetching from %s", CONVERT_SCRIPT_URL)
+        req = urllib.request.Request(
+            CONVERT_SCRIPT_URL, headers={"User-Agent": "ai-telegram-assistant"}
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = resp.read()
+        target.write_bytes(data)
+    except (urllib.error.URLError, OSError) as e:
+        return None, (
+            f"convert_hf_to_gguf.py не найден в {llama_cpp_path} и не получилось "
+            f"скачать его с github ({e}). Скачай вручную: {CONVERT_SCRIPT_URL} "
+            f"и положи в {llama_cpp_path}."
+        )
+
+    # The script needs the `gguf` python package. Check now so the user
+    # gets a precise message instead of a stack trace from the subprocess.
+    try:
+        import gguf  # noqa: F401
+    except ImportError:
+        return None, (
+            "convert_hf_to_gguf.py скачан, но в окружении python нет пакета `gguf`. "
+            "Установи его: pip install gguf"
+        )
+
+    return target, None
 
 
 def _find_quantize_binary(llama_cpp_path: Path) -> Optional[Path]:
@@ -141,14 +184,10 @@ def merge_and_export_gguf(
         log.warning(reason)
         return None, reason
 
-    convert_script = _find_convert_script(llama_root)
+    convert_script, convert_reason = _ensure_convert_script(llama_root)
     if convert_script is None:
-        reason = (
-            f"convert_hf_to_gguf.py не найден в {llama_root}. "
-            f"Обнови checkout llama.cpp."
-        )
-        log.warning(reason)
-        return None, reason
+        log.warning(convert_reason)
+        return None, convert_reason
 
     quantize_bin = _find_quantize_binary(llama_root)
     if quantize_bin is None:

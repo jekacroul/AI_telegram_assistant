@@ -17,6 +17,7 @@ trl>=0.8.0
 accelerate>=0.29.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0
+gguf>=0.10.0
 emoji>=2.10.0
 openai-whisper>=20231117
 pydub>=0.25.1
