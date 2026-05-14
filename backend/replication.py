@@ -579,20 +579,30 @@ class ReplicationScheduler:
             async with SessionLocal() as session:
                 cfg = await load_settings(session)
 
+            sleep_seconds = max(60, cfg.interval_minutes * 60)
+            woken = False
+            try:
+                await asyncio.wait_for(
+                    self._wake_event.wait(), timeout=sleep_seconds
+                )
+                woken = True
+            except asyncio.TimeoutError:
+                pass
+            self._wake_event.clear()
+
+            if self._stop_event.is_set():
+                break
+
+            if woken:
+                continue
+
+            async with SessionLocal() as session:
+                cfg = await load_settings(session)
             if cfg.enabled and not replication_state.running:
                 try:
                     await run_replication(trigger="schedule")
                 except Exception:  # noqa: BLE001
                     log.exception("scheduled replication failed to start")
-
-            sleep_seconds = max(60, cfg.interval_minutes * 60)
-            try:
-                await asyncio.wait_for(
-                    self._wake_event.wait(), timeout=sleep_seconds
-                )
-            except asyncio.TimeoutError:
-                pass
-            self._wake_event.clear()
         log.info("replication scheduler stopped")
 
 
