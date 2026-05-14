@@ -56,15 +56,20 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
 
     Returns (max_memory_dict or None for CPU-only, human readable plan).
     None means CUDA is not available — caller falls back to CPU-only.
+
+    Budgets can be overridden via env vars:
+      MERGE_GPU_BUDGET_GIB — VRAM reservation in GiB
+      MERGE_CPU_BUDGET_GIB — RAM reservation in GiB
     """
     if not torch_module.cuda.is_available():
         return None, "CUDA недоступен → грузим целиком на CPU"
 
     free_vram, total_vram = torch_module.cuda.mem_get_info()
     free_vram_gib = free_vram / (1024 ** 3)
-    # Hold back ~2 GiB on the GPU for activations during merge_and_unload,
-    # then take 95% of what's left so accelerate has a tiny safety margin.
-    gpu_budget_gib = max(0.0, (free_vram_gib - 2.0) * 0.95)
+    # Hold back ~3 GiB on the GPU for activations during merge_and_unload
+    # plus accelerate's own scratch space. Cap at 10 GiB so a 12 GB card
+    # still has ~2 GiB free for the python process itself.
+    gpu_budget_gib = min(10.0, max(0.0, free_vram_gib - 3.0))
 
     try:
         import psutil  # type: ignore
@@ -74,8 +79,25 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
         avail_ram_gib = 16.0
         ram_source = "fallback (psutil не установлен)"
 
-    # Reserve ~6 GiB for the OS, python, transformers/peft internals.
-    cpu_budget_gib = max(2.0, avail_ram_gib - 6.0)
+    # Reserve ~10 GiB for OS + python + transformers/peft + temporary
+    # buffers during weight load. Even on a 32 GB box that leaves only
+    # ~18 GiB for the model copy on CPU — anything beyond that should
+    # spill to disk via offload_folder, which is slow but does not
+    # crash the way mmap+swap does on Windows.
+    cpu_budget_gib = max(2.0, avail_ram_gib - 10.0)
+    cpu_budget_gib = min(cpu_budget_gib, 18.0)
+
+    # Env-var overrides for advanced tuning.
+    if os.environ.get("MERGE_GPU_BUDGET_GIB"):
+        try:
+            gpu_budget_gib = float(os.environ["MERGE_GPU_BUDGET_GIB"])
+        except ValueError:
+            pass
+    if os.environ.get("MERGE_CPU_BUDGET_GIB"):
+        try:
+            cpu_budget_gib = float(os.environ["MERGE_CPU_BUDGET_GIB"])
+        except ValueError:
+            pass
 
     if gpu_budget_gib < 1.0:
         return None, (
@@ -90,7 +112,9 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
     summary = (
         f"GPU budget {int(gpu_budget_gib)} GiB (free {free_vram_gib:.1f}/"
         f"{total_vram/(1024**3):.1f}), CPU budget {int(cpu_budget_gib)} GiB "
-        f"(available {avail_ram_gib:.1f}, {ram_source})"
+        f"(available {avail_ram_gib:.1f}, {ram_source}). "
+        f"Остаток ~{max(0, 24 - int(gpu_budget_gib) - int(cpu_budget_gib))} GiB "
+        f"уйдёт в disk-offload."
     )
     return plan, summary
 
