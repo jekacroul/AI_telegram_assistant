@@ -156,6 +156,12 @@ async def _resume_llama_server_if(was_running: bool) -> None:
     if not was_running:
         return
     from . import llama_server
+    if not await llama_server.get_auto_resume():
+        log.info(
+            "llama-server остаётся выключенным (отключён авто-подъём в UI); "
+            "запустить можно вручную из карточки на странице обучения"
+        )
+        return
     log.info("поднимаем llama-server обратно после тяжёлой операции")
     await llama_server.restart_in_background()
 

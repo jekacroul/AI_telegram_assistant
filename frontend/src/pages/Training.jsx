@@ -121,6 +121,16 @@ export default function Training() {
     }
   }
 
+  async function setServerAutoResume(enabled) {
+    setServerStatus((s) => (s ? { ...s, auto_resume: enabled } : s));
+    try {
+      await api.llamaServerSetAutoResume(enabled);
+    } catch (e) {
+      setError(e.message);
+      setServerStatus((s) => (s ? { ...s, auto_resume: !enabled } : s));
+    }
+  }
+
   async function build() {
     setError("");
     try {
@@ -327,6 +337,16 @@ export default function Training() {
               )}
             </div>
           </div>
+          <label className="flex items-center gap-2 text-xs text-muted mt-3 select-none">
+            <input
+              type="checkbox"
+              checked={!!serverStatus.auto_resume}
+              onChange={(e) => setServerAutoResume(e.target.checked)}
+            />
+            <span>
+              Авто-подъём после обучения и Merge → GGUF (если был запущен до)
+            </span>
+          </label>
           {!serverStatus.configured && (
             <div className="text-bad text-xs mt-2">
               Не задан LLAMA_BASE_MODEL_GGUF в .env — сервер запустить нельзя.

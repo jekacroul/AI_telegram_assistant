@@ -83,6 +83,11 @@ export const api = {
   llamaServerStop: () => request("/api/llama-server/stop", { method: "POST" }),
   llamaServerRestart: () =>
     request("/api/llama-server/restart", { method: "POST" }),
+  llamaServerSetAutoResume: (enabled) =>
+    request("/api/llama-server/auto-resume", {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
   trainingRuns: () => request("/api/training/runs"),
   styleProfile: () => request("/api/style/profile"),
   saveStyle: (profile) =>

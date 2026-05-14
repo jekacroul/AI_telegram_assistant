@@ -19,7 +19,9 @@ import httpx
 from sqlalchemy import select
 
 from .config import settings
-from .database import SessionLocal, TrainingRun
+from .database import SessionLocal, TrainingRun, get_setting, set_setting
+
+SETTING_AUTO_RESUME = "llama_server_auto_resume"
 
 log = logging.getLogger(__name__)
 
@@ -249,7 +251,20 @@ async def restart_in_background() -> None:
     asyncio.create_task(_go())
 
 
-def status() -> dict:
+async def get_auto_resume() -> bool:
+    """User-toggleable: after a training run or merge job finishes, should
+    we restart llama-server automatically (if it was running before)?"""
+    async with SessionLocal() as session:
+        raw = await get_setting(session, SETTING_AUTO_RESUME, "1")
+    return raw.strip() not in {"0", "false", "False", ""}
+
+
+async def set_auto_resume(enabled: bool) -> None:
+    async with SessionLocal() as session:
+        await set_setting(session, SETTING_AUTO_RESUME, "1" if enabled else "0")
+
+
+async def status_async() -> dict:
     return {
         "running": server_state.running,
         "starting": server_state.starting,
@@ -260,4 +275,5 @@ def status() -> dict:
         "last_error": server_state.last_error,
         "configured": bool(settings.llama_base_model_gguf),
         "auto_start": settings.llama_server_auto_start,
+        "auto_resume": await get_auto_resume(),
     }

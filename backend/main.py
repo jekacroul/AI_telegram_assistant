@@ -1094,7 +1094,14 @@ async def training_export_lora_gguf(run_id: int) -> dict:
 
 @app.get("/api/llama-server/status")
 async def llama_server_status() -> dict:
-    return llama_server.status()
+    return await llama_server.status_async()
+
+
+@app.post("/api/llama-server/auto-resume")
+async def llama_server_set_auto_resume(body: dict) -> dict:
+    enabled = bool(body.get("enabled", True))
+    await llama_server.set_auto_resume(enabled)
+    return {"ok": True, "auto_resume": enabled}
 
 
 @app.post("/api/llama-server/start")
