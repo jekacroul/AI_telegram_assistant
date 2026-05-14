@@ -17,6 +17,14 @@ from pathlib import Path
 from typing import Optional
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+# When stdout is piped, Windows defaults it to cp1252 and chews up our
+# Russian status messages. Force UTF-8 so the parent (text=True Popen
+# with encoding='utf-8') gets clean bytes.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+except (AttributeError, OSError):
+    pass
 try:
     import pyarrow  # noqa: F401
     import pyarrow.lib  # noqa: F401
@@ -66,8 +74,10 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
       MERGE_GPU_BUDGET_GIB — VRAM reservation in GiB
       MERGE_CPU_BUDGET_GIB — RAM reservation in GiB
     """
-    # Mistral-Nemo 12B in fp16 is ~25-27 GiB on disk. Round up for headroom.
-    model_size_gib = 27.0
+    # Mistral-Nemo 12B has 12.25B params; fp16 = ~23 GiB of weights on
+    # disk. Add ~1 GiB for embeddings/lm_head not always counted as a
+    # separate layer and keep it conservative.
+    model_size_gib = 24.0
 
     cuda_ok = torch_module.cuda.is_available()
     free_vram_gib = 0.0

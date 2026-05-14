@@ -269,6 +269,8 @@ def _run_merge_subprocess(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            encoding="utf-8",
+            errors="replace",
         )
     except OSError as e:
         log.error("merge subprocess failed to start: %s", e)
