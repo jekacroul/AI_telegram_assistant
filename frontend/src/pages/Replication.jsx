@@ -170,14 +170,12 @@ export default function Replication() {
 
   async function removeRun(run) {
     const isProtected = run.protected && form.delete_protection;
-    const confirmText = isProtected
-      ? `Включена защита от случайных удалений.\n\nУдалить реплику от ${
-          run.started_at ? new Date(run.started_at).toLocaleString() : "—"
-        }?\nФайл будет удалён безвозвратно.`
-      : `Удалить реплику от ${
-          run.started_at ? new Date(run.started_at).toLocaleString() : "—"
-        }?`;
-    if (!window.confirm(confirmText)) return;
+    if (isProtected) {
+      const confirmText = `Включена защита от случайных удалений.\n\nУдалить реплику от ${
+        run.started_at ? new Date(run.started_at).toLocaleString() : "—"
+      }?\nФайл будет удалён безвозвратно.`;
+      if (!window.confirm(confirmText)) return;
+    }
     setError("");
     try {
       await api.deleteReplicationRun(run.id, isProtected);
