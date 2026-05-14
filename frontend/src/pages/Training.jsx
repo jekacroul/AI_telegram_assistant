@@ -302,8 +302,8 @@ export default function Training() {
               </span>
             )}
             {progress.phase === "done" && progress.gguf_path === null && (
-              <span className="text-muted">
-                GGUF не сконвертирован (настрой LLAMA_CPP_PATH в .env)
+              <span className="text-bad">
+                GGUF не сконвертирован: {progress.gguf_skip_reason || "настрой LLAMA_CPP_PATH в .env"}
               </span>
             )}
             {progress.phase === "error" && (

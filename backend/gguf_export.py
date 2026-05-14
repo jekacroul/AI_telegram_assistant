@@ -98,42 +98,47 @@ def merge_and_export_gguf(
     llama_cpp_path: Optional[str],
     lm_studio_models_dir: Optional[str],
     quant: str = "Q8_0",
-) -> Optional[Path]:
+) -> tuple[Optional[Path], Optional[str]]:
     """Produce a single self-contained GGUF for LM Studio.
 
-    Returns the path to the final quantized .gguf on success, or None if
-    the step was skipped or failed (already logged).
+    Returns (path, reason). On success: (final_gguf_path, None). On skip or
+    failure: (None, human readable reason in Russian). The reason is also
+    written to logs so it stays inspectable from the server side.
     """
     if not llama_cpp_path:
-        log.info(
-            "LLAMA_CPP_PATH not set; skipping GGUF export. "
-            "Clone llama.cpp and set the path in .env to enable auto-export."
+        reason = (
+            "LLAMA_CPP_PATH не задан в .env. Склонируй llama.cpp и пропиши "
+            "путь, чтобы экспорт GGUF выполнялся автоматически."
         )
-        return None
+        log.info(reason)
+        return None, reason
 
     llama_root = Path(llama_cpp_path).expanduser()
     if not llama_root.is_dir():
-        log.warning("LLAMA_CPP_PATH=%s does not exist; skipping GGUF export.", llama_root)
-        return None
+        reason = (
+            f"путь LLAMA_CPP_PATH={llama_root} не существует. "
+            f"Проверь .env (часто бывает опечатка: пробел vs подчёркивание)."
+        )
+        log.warning(reason)
+        return None, reason
 
     convert_script = _find_convert_script(llama_root)
     if convert_script is None:
-        log.warning(
-            "convert_hf_to_gguf.py not found under %s; skipping GGUF export. "
-            "Make sure the llama.cpp checkout is up to date.",
-            llama_root,
+        reason = (
+            f"convert_hf_to_gguf.py не найден в {llama_root}. "
+            f"Обнови checkout llama.cpp."
         )
-        return None
+        log.warning(reason)
+        return None, reason
 
     quantize_bin = _find_quantize_binary(llama_root)
     if quantize_bin is None:
-        log.warning(
-            "llama-quantize binary not found under %s/build/bin. "
-            "Build llama.cpp (cmake -B build && cmake --build build --config Release) "
-            "to enable quantization. Skipping GGUF export.",
-            llama_root,
+        reason = (
+            f"llama-quantize не найден в {llama_root}/build/bin. "
+            f"Собери llama.cpp: cmake -B build && cmake --build build --config Release."
         )
-        return None
+        log.warning(reason)
+        return None, reason
 
     merged_dir = adapter_dir / "merged"
     fp16_gguf = adapter_dir / "merged.f16.gguf"
@@ -141,7 +146,7 @@ def merge_and_export_gguf(
 
     # 1. merge weights via isolated subprocess
     if not _run_merge_subprocess(adapter_dir, base_model, merged_dir):
-        return None
+        return None, "не удалось слить LoRA с базовой моделью (см. логи backend)"
 
     # 2. HF merged dir -> fp16 GGUF
     convert_cmd = [
@@ -161,7 +166,7 @@ def merge_and_export_gguf(
     except (OSError, subprocess.TimeoutExpired) as e:
         log.error("convert_hf_to_gguf crashed: %s", e)
         shutil.rmtree(merged_dir, ignore_errors=True)
-        return None
+        return None, f"convert_hf_to_gguf не запустился: {e}"
 
     if proc.returncode != 0 or not fp16_gguf.is_file():
         log.error(
@@ -169,7 +174,7 @@ def merge_and_export_gguf(
             proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:],
         )
         shutil.rmtree(merged_dir, ignore_errors=True)
-        return None
+        return None, f"convert_hf_to_gguf завершился с кодом {proc.returncode} (см. логи backend)"
 
     # 3. quantize fp16 -> target quant
     quant_cmd = [str(quantize_bin), str(fp16_gguf), str(final_gguf), quant]
@@ -185,7 +190,7 @@ def merge_and_export_gguf(
         log.error("llama-quantize crashed: %s", e)
         shutil.rmtree(merged_dir, ignore_errors=True)
         fp16_gguf.unlink(missing_ok=True)
-        return None
+        return None, f"llama-quantize не запустился: {e}"
 
     if proc.returncode != 0 or not final_gguf.is_file():
         log.error(
@@ -194,7 +199,7 @@ def merge_and_export_gguf(
         )
         shutil.rmtree(merged_dir, ignore_errors=True)
         fp16_gguf.unlink(missing_ok=True)
-        return None
+        return None, f"llama-quantize завершился с кодом {proc.returncode} (см. логи backend)"
 
     log.info(
         "merged model exported to %s (%.1f MB)",
@@ -219,4 +224,4 @@ def merge_and_export_gguf(
     shutil.rmtree(merged_dir, ignore_errors=True)
     fp16_gguf.unlink(missing_ok=True)
 
-    return final_gguf
+    return final_gguf, None

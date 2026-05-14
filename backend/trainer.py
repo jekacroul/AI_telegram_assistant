@@ -279,10 +279,11 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
         was_cancelled = bool(final_result.get("cancelled")) or training_state.cancelled
 
         gguf_path: Optional[Path] = None
+        gguf_skip_reason: Optional[str] = None
         if not was_cancelled:
             from .gguf_export import merge_and_export_gguf
             await _emit({"phase": "merging_and_exporting_gguf", "version": version})
-            gguf_path = await asyncio.to_thread(
+            gguf_path, gguf_skip_reason = await asyncio.to_thread(
                 merge_and_export_gguf,
                 Path(adapter_path),
                 settings.hf_base_model,
@@ -312,6 +313,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             "phase": "cancelled" if was_cancelled else "done",
             "adapter_path": adapter_path,
             "gguf_path": str(gguf_path) if gguf_path else None,
+            "gguf_skip_reason": gguf_skip_reason,
             "final_loss": final_result.get("final_loss"),
             "version": version,
         })
