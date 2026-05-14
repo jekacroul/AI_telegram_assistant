@@ -52,24 +52,33 @@ def emit(event: dict) -> None:
 
 
 def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
-    """Decide how to split the fp16 base across GPU + CPU + disk offload.
+    """Decide how to split the fp16 base across GPU + CPU (NO disk).
+
+    Disk offload triggers a PEFT bug (KeyError in _update_offload because
+    of an extra "model." prefix when the base has offloaded layers), so
+    we deliberately do not pass offload_folder. The model must fit in
+    GPU+CPU budgets — if it doesn't, we'd rather fail fast and tell the
+    user to free RAM than start a multi-minute load that crashes.
 
     Returns (max_memory_dict or None for CPU-only, human readable plan).
-    None means CUDA is not available — caller falls back to CPU-only.
 
     Budgets can be overridden via env vars:
       MERGE_GPU_BUDGET_GIB — VRAM reservation in GiB
       MERGE_CPU_BUDGET_GIB — RAM reservation in GiB
     """
-    if not torch_module.cuda.is_available():
-        return None, "CUDA недоступен → грузим целиком на CPU"
+    # Mistral-Nemo 12B in fp16 is ~25-27 GiB on disk. Round up for headroom.
+    model_size_gib = 27.0
 
-    free_vram, total_vram = torch_module.cuda.mem_get_info()
-    free_vram_gib = free_vram / (1024 ** 3)
-    # Hold back ~3 GiB on the GPU for activations during merge_and_unload
-    # plus accelerate's own scratch space. Cap at 10 GiB so a 12 GB card
-    # still has ~2 GiB free for the python process itself.
-    gpu_budget_gib = min(10.0, max(0.0, free_vram_gib - 3.0))
+    cuda_ok = torch_module.cuda.is_available()
+    free_vram_gib = 0.0
+    total_vram_gib = 0.0
+    if cuda_ok:
+        free_vram, total_vram = torch_module.cuda.mem_get_info()
+        free_vram_gib = free_vram / (1024 ** 3)
+        total_vram_gib = total_vram / (1024 ** 3)
+
+    # Take all free VRAM minus 2 GiB for activations during merge_and_unload.
+    gpu_budget_gib = max(0.0, free_vram_gib - 2.0) if cuda_ok else 0.0
 
     try:
         import psutil  # type: ignore
@@ -79,13 +88,8 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
         avail_ram_gib = 16.0
         ram_source = "fallback (psutil не установлен)"
 
-    # Reserve ~10 GiB for OS + python + transformers/peft + temporary
-    # buffers during weight load. Even on a 32 GB box that leaves only
-    # ~18 GiB for the model copy on CPU — anything beyond that should
-    # spill to disk via offload_folder, which is slow but does not
-    # crash the way mmap+swap does on Windows.
-    cpu_budget_gib = max(2.0, avail_ram_gib - 10.0)
-    cpu_budget_gib = min(cpu_budget_gib, 18.0)
+    # Reserve ~8 GiB for OS + python + transformers/peft + temp buffers.
+    cpu_budget_gib = max(2.0, avail_ram_gib - 8.0)
 
     # Env-var overrides for advanced tuning.
     if os.environ.get("MERGE_GPU_BUDGET_GIB"):
@@ -99,10 +103,20 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
         except ValueError:
             pass
 
-    if gpu_budget_gib < 1.0:
+    total_budget = gpu_budget_gib + cpu_budget_gib
+    if total_budget < model_size_gib:
         return None, (
-            f"свободно {free_vram_gib:.1f} GiB VRAM — слишком мало для mixed"
-            f", грузим на CPU"
+            f"FAIL: суммарный бюджет {total_budget:.1f} GiB меньше, чем размер "
+            f"модели ~{model_size_gib:.0f} GiB. Свободно: GPU {free_vram_gib:.1f}/{total_vram_gib:.1f} GiB, "
+            f"RAM {avail_ram_gib:.1f} GiB. Закрой LM Studio, браузер и другие "
+            f"тяжёлые приложения и попробуй снова."
+        )
+
+    if not cuda_ok or gpu_budget_gib < 1.0:
+        # Pure-CPU path. Need full model + buffers on RAM.
+        return None, (
+            f"CPU-only режим. RAM available {avail_ram_gib:.1f} GiB "
+            f"(потребуется ~{model_size_gib:.0f} GiB на модель)."
         )
 
     plan = {
@@ -111,10 +125,10 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
     }
     summary = (
         f"GPU budget {int(gpu_budget_gib)} GiB (free {free_vram_gib:.1f}/"
-        f"{total_vram/(1024**3):.1f}), CPU budget {int(cpu_budget_gib)} GiB "
+        f"{total_vram_gib:.1f}), CPU budget {int(cpu_budget_gib)} GiB "
         f"(available {avail_ram_gib:.1f}, {ram_source}). "
-        f"Остаток ~{max(0, 24 - int(gpu_budget_gib) - int(cpu_budget_gib))} GiB "
-        f"уйдёт в disk-offload."
+        f"Сумма {int(total_budget)} GiB ≥ модель {int(model_size_gib)} GiB — "
+        f"disk-offload не понадобится."
     )
     return plan, summary
 
@@ -169,31 +183,41 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     emit({"phase": "loading_base", "base_model": base_model})
     log(f"step:load_base_fp16 base_model={base_model}")
 
-    offload_dir = output_dir.parent / ".offload"
-    offload_dir.mkdir(parents=True, exist_ok=True)
-
-    # Split the fp16 base across GPU + CPU based on what's actually free
-    # right now. A 12B fp16 model is ~24 GB. Pure CPU on a 32 GB box gets
-    # close to the page-file boundary and hits an access violation
-    # (exit 3221225477) somewhere in the middle of weight load. Letting
-    # the GPU eat ~10 GB of weights drops CPU pressure to ~14 GB, which
-    # leaves comfortable headroom. offload_folder is a final safety net
-    # for setups where the budget still does not fit.
     max_memory, plan = _compute_max_memory(torch)
-    device_map: object = "auto" if max_memory is not None else {"": "cpu"}
     log(f"  plan: {plan}")
-    log(f"  device_map={device_map} offload_folder={offload_dir}")
+
+    if plan.startswith("FAIL"):
+        emit({"phase": "error", "error": plan[5:].strip()})
+        log("FATAL: insufficient memory for merge")
+        sys.exit(2)
+
+    device_map: object = "auto" if max_memory is not None else {"": "cpu"}
+    log(f"  device_map={device_map} (disk-offload отключён, PEFT с ним падает)")
 
     load_kwargs = dict(
         torch_dtype=torch.float16,
         device_map=device_map,
         low_cpu_mem_usage=True,
-        offload_folder=str(offload_dir),
     )
     if max_memory is not None:
         load_kwargs["max_memory"] = max_memory
 
-    base = AutoModelForCausalLM.from_pretrained(base_model, **load_kwargs)
+    try:
+        base = AutoModelForCausalLM.from_pretrained(base_model, **load_kwargs)
+    except (RuntimeError, ValueError) as e:
+        msg = str(e)
+        if "doesn" in msg and "fit" in msg.lower() or "memory" in msg.lower():
+            emit({
+                "phase": "error",
+                "error": (
+                    "Модель не помещается в GPU+CPU без disk-offload. "
+                    "Закрой другие приложения, чтобы освободить RAM, "
+                    "или используй кнопку «LoRA → GGUF» вместо merge."
+                ),
+            })
+            log(f"FATAL: model doesn't fit: {e}")
+            sys.exit(2)
+        raise
     log("step:base_loaded")
 
     emit({"phase": "loading_adapter", "adapter_dir": str(adapter_dir)})
@@ -212,11 +236,6 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     log("step:save_tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
     tokenizer.save_pretrained(str(output_dir))
-
-    # Drop the offload scratch dir — it can be tens of GB and is only
-    # useful while the model object is alive.
-    import shutil
-    shutil.rmtree(offload_dir, ignore_errors=True)
     log("step:done")
 
     return {"merged_dir": str(output_dir)}
