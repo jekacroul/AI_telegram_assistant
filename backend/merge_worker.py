@@ -74,10 +74,10 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
       MERGE_GPU_BUDGET_GIB — VRAM reservation in GiB
       MERGE_CPU_BUDGET_GIB — RAM reservation in GiB
     """
-    # Mistral-Nemo 12B has 12.25B params; fp16 = ~23 GiB of weights on
-    # disk. Add ~1 GiB for embeddings/lm_head not always counted as a
-    # separate layer and keep it conservative.
-    model_size_gib = 24.0
+    # Mistral-Nemo 12B in fp16: ~24.5 GiB of param weights + ~1.3 GiB
+    # embed_tokens (vocab 131k × hidden 5120) + ~1.3 GiB lm_head +
+    # accelerate's per-layer overhead ≈ 28 GiB.
+    model_size_gib = 28.0
 
     cuda_ok = torch_module.cuda.is_available()
     free_vram_gib = 0.0
@@ -87,8 +87,10 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
         free_vram_gib = free_vram / (1024 ** 3)
         total_vram_gib = total_vram / (1024 ** 3)
 
-    # Take all free VRAM minus 2 GiB for activations during merge_and_unload.
-    gpu_budget_gib = max(0.0, free_vram_gib - 2.0) if cuda_ok else 0.0
+    # No forward pass happens during from_pretrained, so 1 GiB on the GPU
+    # is plenty for accelerate's scratch space and the per-layer matmuls
+    # in merge_and_unload (which work on small r×N×N tiles).
+    gpu_budget_gib = max(0.0, free_vram_gib - 1.0) if cuda_ok else 0.0
 
     try:
         import psutil  # type: ignore
@@ -98,8 +100,10 @@ def _compute_max_memory(torch_module) -> tuple[Optional[dict], str]:
         avail_ram_gib = 16.0
         ram_source = "fallback (psutil не установлен)"
 
-    # Reserve ~8 GiB for OS + python + transformers/peft + temp buffers.
-    cpu_budget_gib = max(2.0, avail_ram_gib - 8.0)
+    # Reserve ~6 GiB for OS + python + transformers/peft + temp buffers.
+    # Tight but workable on a 32 GB box if the user closed LM Studio and
+    # other heavy apps. Most peak temporary load is during weight copy.
+    cpu_budget_gib = max(2.0, avail_ram_gib - 6.0)
 
     # Env-var overrides for advanced tuning.
     if os.environ.get("MERGE_GPU_BUDGET_GIB"):
@@ -260,13 +264,22 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
         base = AutoModelForCausalLM.from_pretrained(base_model, **load_kwargs)
     except (RuntimeError, ValueError) as e:
         msg = str(e)
-        if "doesn" in msg and "fit" in msg.lower() or "memory" in msg.lower():
+        if "offload_dir" in msg or ("doesn" in msg and "fit" in msg.lower()) or "memory" in msg.lower():
+            free_ram_now = 0.0
+            try:
+                import psutil  # type: ignore
+                free_ram_now = psutil.virtual_memory().available / (1024 ** 3)
+            except ImportError:
+                pass
             emit({
                 "phase": "error",
                 "error": (
-                    "Модель не помещается в GPU+CPU без disk-offload. "
-                    "Закрой другие приложения, чтобы освободить RAM, "
-                    "или используй кнопку «LoRA → GGUF» вместо merge."
+                    f"Модель ~28 GiB не помещается в GPU+CPU без disk-offload. "
+                    f"Сейчас свободно RAM {free_ram_now:.1f} GiB. "
+                    f"Закрой LM Studio, браузер и другие приложения, чтобы "
+                    f"свободной RAM было хотя бы 26 GiB (а лучше 28). "
+                    f"Альтернатива — кнопка «LoRA → GGUF» вместо merge: "
+                    f"она вообще не загружает базовую модель."
                 ),
             })
             log(f"FATAL: model doesn't fit: {e}")
