@@ -326,6 +326,12 @@ export default function Training() {
             {progress.phase === "done" && progress.gguf_path && (
               <span className="text-good">
                 GGUF: <code className="text-xs">{progress.gguf_path}</code>
+                {progress.gguf_path.toLowerCase().includes(".lora.") && (
+                  <span className="text-muted ml-2">
+                    (LoRA-адаптер — в LM Studio подключай поверх базы через
+                    Advanced → LoRA Adapters, не загружай как отдельную модель)
+                  </span>
+                )}
               </span>
             )}
             {progress.phase === "done" && progress.gguf_path === null && (
@@ -417,7 +423,7 @@ export default function Training() {
                           title={
                             status?.running
                               ? "Дождись окончания текущего процесса"
-                              : "Сконвертировать LoRA в отдельный GGUF (~50-200 МБ, без слияния с базой). В LM Studio загружается поверх базовой модели."
+                              : "Сконвертировать LoRA в отдельный GGUF (~50-200 МБ). В LM Studio открой базовую модель → Load → Advanced → LoRA Adapters → добавь этот файл. Как самостоятельная модель НЕ загружается."
                           }
                         >
                           LoRA → GGUF
