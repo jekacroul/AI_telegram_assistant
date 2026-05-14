@@ -62,15 +62,21 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
 
     emit({"phase": "loading_base", "base_model": base_model})
     log(f"step:load_base_fp16 base_model={base_model}")
-    # fp16 on whichever device is available. CPU works too — merge is a
-    # one-shot weight op, no training-grade VRAM pressure.
-    dtype = torch.float16
-    device_map = "auto" if torch.cuda.is_available() else None
+    # Merge is a one-shot weight op, no training-grade compute. Force the
+    # base model onto CPU even when CUDA is available: a 12B fp16 model
+    # is ~24 GB which does not fit in 12 GB VRAM, and accelerate's mixed
+    # GPU/CPU dispatch on Windows reliably triggers an access violation
+    # (exit 3221225477) somewhere around 50-60% of weight load. Disk
+    # offload covers machines without enough RAM either.
+    offload_dir = output_dir.parent / ".offload"
+    offload_dir.mkdir(parents=True, exist_ok=True)
+    log(f"  device_map=cpu offload_folder={offload_dir}")
     base = AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=dtype,
-        device_map=device_map,
+        torch_dtype=torch.float16,
+        device_map={"": "cpu"},
         low_cpu_mem_usage=True,
+        offload_folder=str(offload_dir),
     )
     log("step:base_loaded")
 
@@ -90,6 +96,11 @@ def run_merge(adapter_dir: Path, base_model: str, output_dir: Path) -> dict:
     log("step:save_tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
     tokenizer.save_pretrained(str(output_dir))
+
+    # Drop the offload scratch dir — it can be tens of GB and is only
+    # useful while the model object is alive.
+    import shutil
+    shutil.rmtree(offload_dir, ignore_errors=True)
     log("step:done")
 
     return {"merged_dir": str(output_dir)}
