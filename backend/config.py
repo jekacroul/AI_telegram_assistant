@@ -33,7 +33,6 @@ class Settings(BaseSettings):
     hf_base_model: str = Field(default="mistralai/Mistral-7B-Instruct-v0.2", alias="HF_BASE_MODEL")
     llm_max_tokens: int = Field(default=2048, alias="LLM_MAX_TOKENS")
     llama_cpp_path: Optional[str] = Field(default=None, alias="LLAMA_CPP_PATH")
-    lm_studio_models_dir: Optional[str] = Field(default=None, alias="LM_STUDIO_MODELS_DIR")
     gguf_quant: str = Field(default="Q8_0", alias="GGUF_QUANT")
     notify_chat_id: str = Field(default="", alias="NOTIFY_CHAT_ID")
     media_path: str = Field(default="./media/", alias="MEDIA_PATH")

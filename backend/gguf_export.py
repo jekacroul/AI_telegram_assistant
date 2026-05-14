@@ -142,7 +142,6 @@ def export_lora_only_gguf(
     adapter_dir: Path,
     base_model: str,
     llama_cpp_path: Optional[str],
-    lm_studio_models_dir: Optional[str],
     on_event: EventCallback = _noop_event,
 ) -> tuple[Optional[Path], Optional[str]]:
     """Convert a PEFT LoRA adapter into a standalone .gguf LoRA file.
@@ -197,19 +196,6 @@ def export_lora_only_gguf(
         "LoRA exported to %s (%.1f MB)",
         out_gguf, out_gguf.stat().st_size / (1024 * 1024),
     )
-
-    if lm_studio_models_dir:
-        on_event({"phase": "copying_to_lm_studio"})
-        target_root = Path(lm_studio_models_dir).expanduser()
-        target_dir = target_root / "local-finetune" / adapter_dir.name
-        try:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_file = target_dir / out_gguf.name
-            shutil.copy2(out_gguf, target_file)
-            log.info("copied LoRA GGUF to LM Studio dir: %s", target_file)
-        except OSError as e:
-            log.error("failed to copy LoRA GGUF into LM_STUDIO_MODELS_DIR: %s", e)
-
     return out_gguf, None
 
 
@@ -337,7 +323,6 @@ def merge_and_export_gguf(
     adapter_dir: Path,
     base_model: str,
     llama_cpp_path: Optional[str],
-    lm_studio_models_dir: Optional[str],
     quant: str = "Q8_0",
     on_event: EventCallback = _noop_event,
 ) -> tuple[Optional[Path], Optional[str]]:
@@ -452,20 +437,7 @@ def merge_and_export_gguf(
         final_gguf, final_gguf.stat().st_size / (1024 * 1024),
     )
 
-    # 4. optionally drop into LM Studio's models dir.
-    if lm_studio_models_dir:
-        on_event({"phase": "copying_to_lm_studio"})
-        target_root = Path(lm_studio_models_dir).expanduser()
-        target_dir = target_root / "local-finetune" / adapter_dir.name
-        try:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_file = target_dir / f"{adapter_dir.name}.{quant.lower()}.gguf"
-            shutil.copy2(final_gguf, target_file)
-            log.info("copied merged model to LM Studio dir: %s", target_file)
-        except OSError as e:
-            log.error("failed to copy merged model into LM_STUDIO_MODELS_DIR: %s", e)
-
-    # 5. clean up build artifacts — the final GGUF is all we need
+    # Clean up build artifacts — the final GGUF is all we need.
     shutil.rmtree(merged_dir, ignore_errors=True)
     fp16_gguf.unlink(missing_ok=True)
 

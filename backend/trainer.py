@@ -306,7 +306,6 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
                 Path(adapter_path),
                 settings.hf_base_model,
                 settings.llama_cpp_path,
-                settings.lm_studio_models_dir,
                 settings.gguf_quant,
                 forward,
             )
@@ -410,7 +409,6 @@ async def _run_lora_gguf_export(run_id: int, version: int, adapter_path: str) ->
             Path(adapter_path),
             settings.hf_base_model,
             settings.llama_cpp_path,
-            settings.lm_studio_models_dir,
             forward,
         )
         if gguf_path is None:
@@ -472,7 +470,6 @@ async def _run_gguf_export(run_id: int, version: int, adapter_path: str) -> None
             Path(adapter_path),
             settings.hf_base_model,
             settings.llama_cpp_path,
-            settings.lm_studio_models_dir,
             settings.gguf_quant,
             forward,
         )
