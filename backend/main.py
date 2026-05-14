@@ -110,6 +110,7 @@ from .trainer import (
     cancel_training,
     deactivate_adapter,
     delete_training_run,
+    export_gguf_for_run,
     get_training_run_error_log,
     list_runs,
     start_training,
@@ -1065,6 +1066,11 @@ async def training_run_error_log(run_id: int) -> dict:
     if log_info.get("error") == "run not found":
         raise HTTPException(status_code=404, detail="run not found")
     return log_info
+
+
+@app.post("/api/training/runs/{run_id}/export-gguf")
+async def training_export_gguf(run_id: int) -> dict:
+    return await export_gguf_for_run(run_id)
 
 
 @app.get("/api/training/runs")

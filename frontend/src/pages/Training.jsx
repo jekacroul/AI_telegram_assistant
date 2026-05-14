@@ -114,6 +114,20 @@ export default function Training() {
     refresh();
   }
 
+  async function exportGguf(run) {
+    setError("");
+    try {
+      const res = await api.exportGguf(run.id);
+      if (!res.started) {
+        setError(res.reason || "не удалось запустить конвертацию");
+        return;
+      }
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function removeRun(run) {
     const confirmed = window.confirm(`Удалить v${run.version} из истории?`);
     if (!confirmed) return;
@@ -400,6 +414,20 @@ export default function Training() {
                       {r.is_active && (
                         <button className="btn-secondary" onClick={deactivate}>
                           Деактивировать
+                        </button>
+                      )}
+                      {r.status === "done" && (
+                        <button
+                          className="btn-secondary"
+                          disabled={status?.running}
+                          onClick={() => exportGguf(r)}
+                          title={
+                            status?.running
+                              ? "Дождись окончания текущего процесса"
+                              : "Слить адаптер с базой и сконвертировать в GGUF"
+                          }
+                        >
+                          Сконвертировать в GGUF
                         </button>
                       )}
                       {r.status !== "running" && (

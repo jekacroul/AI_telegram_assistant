@@ -74,6 +74,8 @@ export const api = {
     request(`/api/training/runs/${run_id}`, { method: "DELETE" }),
   trainingRunErrorLog: (run_id) =>
     request(`/api/training/runs/${run_id}/error-log`),
+  exportGguf: (run_id) =>
+    request(`/api/training/runs/${run_id}/export-gguf`, { method: "POST" }),
   trainingRuns: () => request("/api/training/runs"),
   styleProfile: () => request("/api/style/profile"),
   saveStyle: (profile) =>

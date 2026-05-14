@@ -348,6 +348,67 @@ async def cancel_training() -> bool:
     return True
 
 
+async def export_gguf_for_run(run_id: int) -> dict:
+    """Re-run merge + GGUF quantization for an already trained adapter."""
+    if training_state.running:
+        return {"started": False, "reason": "обучение или конвертация уже идёт"}
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(TrainingRun).where(TrainingRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            return {"started": False, "reason": "запуск не найден"}
+        if run.status != "done":
+            return {"started": False, "reason": "конвертировать можно только успешные запуски"}
+        if not run.adapter_path or not Path(run.adapter_path).is_dir():
+            return {
+                "started": False,
+                "reason": f"папка адаптера отсутствует: {run.adapter_path or '—'}",
+            }
+        adapter_path = run.adapter_path
+        version = run.version
+
+    training_state.running = True
+    training_state.current_run_id = run_id
+    asyncio.create_task(_run_gguf_export(run_id, version, adapter_path))
+    return {"started": True, "run_id": run_id, "version": version}
+
+
+async def _run_gguf_export(run_id: int, version: int, adapter_path: str) -> None:
+    try:
+        from .gguf_export import merge_and_export_gguf
+        await _emit({"phase": "merging_and_exporting_gguf", "version": version})
+        gguf_path, gguf_skip_reason = await asyncio.to_thread(
+            merge_and_export_gguf,
+            Path(adapter_path),
+            settings.hf_base_model,
+            settings.llama_cpp_path,
+            settings.lm_studio_models_dir,
+            settings.gguf_quant,
+        )
+        if gguf_path is None:
+            await _emit({
+                "phase": "error",
+                "error": gguf_skip_reason or "не удалось сконвертировать GGUF",
+                "version": version,
+            })
+            return
+        await _emit({
+            "phase": "done",
+            "adapter_path": adapter_path,
+            "gguf_path": str(gguf_path),
+            "gguf_skip_reason": None,
+            "version": version,
+        })
+    except Exception as e:
+        log.exception("gguf export failed")
+        await _emit({"phase": "error", "error": str(e), "version": version})
+    finally:
+        training_state.reset()
+
+
 async def activate_adapter(run_id: int) -> bool:
     async with SessionLocal() as session:
         result = await session.execute(select(TrainingRun))
