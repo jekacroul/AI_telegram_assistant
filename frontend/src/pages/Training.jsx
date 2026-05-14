@@ -9,6 +9,19 @@ function formatEta(seconds) {
   return `${m}m ${s}s`;
 }
 
+const PHASE_LABELS = {
+  starting: "запуск...",
+  loading_tokenizer: "загрузка токенизатора",
+  loading_model: "загрузка модели",
+  model_loaded: "модель загружена",
+  preparing_trainer: "подготовка тренера",
+  training: "обучение",
+  merging_and_exporting_gguf: "экспорт GGUF",
+  done: "успех",
+  error: "ошибка",
+  cancelled: "отменено",
+};
+
 export default function Training() {
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
@@ -245,20 +258,37 @@ export default function Training() {
         {error && <span className="text-bad text-sm ml-2">{error}</span>}
       </div>
 
-      {progress && (
+      {progress && (() => {
+        const percent =
+          progress.phase === "training" && progress.max_steps > 0
+            ? Math.min(
+                100,
+                Math.max(
+                  0,
+                  ((progress.step || 0) / progress.max_steps) * 100
+                )
+              )
+            : null;
+        return (
         <div className="card">
-          <div className="flex flex-wrap gap-4 text-sm">
-            <span>Phase: <b>{progress.phase}</b></span>
+          <div className="flex flex-wrap gap-4 text-sm items-center">
+            <span>
+              Этап:{" "}
+              <b>{PHASE_LABELS[progress.phase] || progress.phase}</b>
+            </span>
             {progress.phase === "training" && (
               <>
-                <span>Epoch: {progress.epoch?.toFixed?.(2) ?? "—"}</span>
-                <span>Step: {progress.step ?? "—"} / {progress.max_steps ?? "—"}</span>
+                <span>Эпоха: {progress.epoch?.toFixed?.(2) ?? "—"}</span>
+                <span>
+                  Шаг: {progress.step ?? "—"} / {progress.max_steps ?? "—"}
+                </span>
                 <span>Loss: {progress.loss?.toFixed?.(4) ?? "—"}</span>
                 <span>ETA: {formatEta(progress.eta_seconds)}</span>
+                {percent != null && <span>{percent.toFixed(1)}%</span>}
               </>
             )}
             {progress.phase === "done" && progress.final_loss != null && (
-              <span>Final loss: <b>{progress.final_loss.toFixed(4)}</b></span>
+              <span>Итоговый loss: <b>{progress.final_loss.toFixed(4)}</b></span>
             )}
             {progress.phase === "done" && progress.gguf_path && (
               <span className="text-good">
@@ -270,17 +300,20 @@ export default function Training() {
                 GGUF не сконвертирован (настрой LLAMA_CPP_PATH в .env)
               </span>
             )}
+            {progress.phase === "error" && (
+              <span className="text-bad">
+                Ошибка: {progress.error || "неизвестная ошибка"}
+              </span>
+            )}
+            {progress.phase === "cancelled" && (
+              <span className="text-muted">Отменено пользователем</span>
+            )}
           </div>
-          {progress.phase === "training" && progress.max_steps > 0 && (
-            <div className="mt-2 h-2 bg-white/10 rounded">
+          {percent != null && (
+            <div className="mt-3 h-2 bg-white/10 rounded">
               <div
-                className="h-2 bg-accent rounded"
-                style={{
-                  width: `${Math.min(
-                    100,
-                    ((progress.step || 0) / progress.max_steps) * 100
-                  )}%`,
-                }}
+                className="h-2 bg-accent rounded transition-all"
+                style={{ width: `${percent}%` }}
               />
             </div>
           )}
@@ -305,7 +338,8 @@ export default function Training() {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       <div className="card">
         <div className="text-sm text-muted mb-2">История адаптеров</div>
