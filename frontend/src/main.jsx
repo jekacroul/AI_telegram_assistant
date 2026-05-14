@@ -9,6 +9,7 @@ import StyleProfile from "./pages/StyleProfile.jsx";
 import Settings from "./pages/Settings.jsx";
 import Stats from "./pages/Stats.jsx";
 import QuickReplies from "./pages/QuickReplies.jsx";
+import Replication from "./pages/Replication.jsx";
 
 function Layout() {
   const linkBase = "px-4 py-2 rounded-md text-sm transition-colors";
@@ -29,6 +30,7 @@ function Layout() {
               ["/stats", "Статистика"],
               ["/settings", "Настройки"],
               ["/quick-replies", "Быстрые ответы"],
+              ["/replication", "Репликация"],
             ].map(([to, label]) => (
               <NavLink
                 key={to}
@@ -53,6 +55,7 @@ function Layout() {
           <Route path="/stats" element={<Stats />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/quick-replies" element={<QuickReplies />} />
+          <Route path="/replication" element={<Replication />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>

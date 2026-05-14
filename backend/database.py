@@ -176,6 +176,24 @@ class QuickReply(Base):
     )
 
 
+class ReplicationRun(Base):
+    __tablename__ = "replication_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    trigger: Mapped[str] = mapped_column(String(32), default="manual")
+    target_path: Mapped[str] = mapped_column(String(1024), default="")
+    source_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    copied_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    protected: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 engine = create_async_engine(settings.db_url, echo=False, future=True)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -261,6 +279,24 @@ def _apply_lightweight_migrations(sync_conn) -> None:
         )
 
     tables = set(inspector.get_table_names())
+    if "replication_runs" not in tables:
+        sync_conn.exec_driver_sql(
+            """
+            CREATE TABLE replication_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at DATETIME,
+                finished_at DATETIME,
+                status VARCHAR(32) DEFAULT 'running' NOT NULL,
+                trigger VARCHAR(32) DEFAULT 'manual' NOT NULL,
+                target_path VARCHAR(1024) DEFAULT '' NOT NULL,
+                source_bytes INTEGER DEFAULT 0 NOT NULL,
+                copied_bytes INTEGER DEFAULT 0 NOT NULL,
+                duration_ms INTEGER DEFAULT 0 NOT NULL,
+                error TEXT,
+                protected BOOLEAN DEFAULT 1 NOT NULL
+            )
+            """
+        )
     if "chat_personas" not in tables:
         sync_conn.exec_driver_sql(
             """
