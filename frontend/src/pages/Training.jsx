@@ -10,6 +10,7 @@ function formatEta(seconds) {
 
 const PHASE_LABELS = {
   starting: "запуск...",
+  stopping_llama_server: "выгрузка llama-server",
   loading_tokenizer: "загрузка токенизатора",
   loading_model: "загрузка модели",
   model_loaded: "модель загружена",

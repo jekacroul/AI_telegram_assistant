@@ -139,6 +139,27 @@ async def _emit(event: dict) -> None:
     await training_bus.publish("training", event)
 
 
+async def _suspend_llama_server() -> bool:
+    """Stop the managed llama-server so its VRAM/RAM is available for the
+    upcoming training or merge job. Returns True if it was running, so the
+    caller can decide whether to restart it once the heavy job finishes."""
+    from . import llama_server
+    if not llama_server.server_state.running:
+        return False
+    log.info("останавливаем llama-server перед тяжёлой операцией")
+    await _emit({"phase": "stopping_llama_server"})
+    await llama_server.stop()
+    return True
+
+
+async def _resume_llama_server_if(was_running: bool) -> None:
+    if not was_running:
+        return
+    from . import llama_server
+    log.info("поднимаем llama-server обратно после тяжёлой операции")
+    await llama_server.restart_in_background()
+
+
 def _make_sync_emit(version: int):
     """Bridge for sync code running in asyncio.to_thread to publish to the
     training SSE bus. Each event the worker thread emits is scheduled
@@ -215,6 +236,8 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
     if cancel_file.exists():
         cancel_file.unlink()
     training_state.cancel_file = cancel_file
+
+    llama_was_running = await _suspend_llama_server()
 
     await _emit({"phase": "starting", "version": version, "pairs": len(pairs)})
 
@@ -351,6 +374,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             cancel_file.unlink()
         with contextlib.suppress(FileNotFoundError):
             pairs_file.unlink()
+        await _resume_llama_server_if(llama_was_running)
         training_state.reset()
 
 
@@ -461,6 +485,7 @@ async def export_gguf_for_run(run_id: int) -> dict:
 
 
 async def _run_gguf_export(run_id: int, version: int, adapter_path: str) -> None:
+    llama_was_running = await _suspend_llama_server()
     try:
         from .gguf_export import merge_and_export_gguf
         await _emit({"phase": "merging_and_exporting_gguf", "version": version})
@@ -491,6 +516,7 @@ async def _run_gguf_export(run_id: int, version: int, adapter_path: str) -> None
         log.exception("gguf export failed")
         await _emit({"phase": "error", "error": str(e), "version": version})
     finally:
+        await _resume_llama_server_if(llama_was_running)
         training_state.reset()
 
 
