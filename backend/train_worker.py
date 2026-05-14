@@ -189,7 +189,31 @@ def run_training(
     log("step:import_torch")
     import torch
     log(f"  torch {torch.__version__} cuda={torch.version.cuda} avail={torch.cuda.is_available()}")
-    log(f"  device={torch.cuda.get_device_name(0)} free_mem={torch.cuda.mem_get_info()[0] // (1024*1024)}MiB")
+    free_bytes, total_bytes = torch.cuda.mem_get_info()
+    free_mib = free_bytes // (1024 * 1024)
+    total_mib = total_bytes // (1024 * 1024)
+    log(f"  device={torch.cuda.get_device_name(0)} free_mem={free_mib}MiB total_mem={total_mib}MiB")
+
+    # 12B base in 4-bit needs ~7 GB just for weights, plus activations and
+    # the optimizer state. If a previous model (LM Studio, browser model,
+    # leftover process) is still holding VRAM, bitsandbytes' first kernel
+    # call dies with access violation 3221225477 instead of a clean OOM.
+    # Catch this before we even start loading.
+    required_mib = 7500
+    if free_mib < required_mib:
+        used_mib = total_mib - free_mib
+        emit({
+            "phase": "error",
+            "error": (
+                f"Недостаточно свободной VRAM: свободно {free_mib} MiB из "
+                f"{total_mib} MiB (занято {used_mib} MiB), для загрузки "
+                f"4-битной 12B модели нужно ~{required_mib} MiB. "
+                f"Выгрузите модель из LM Studio / закройте другие GPU-приложения "
+                f"и запустите обучение снова."
+            ),
+        })
+        log(f"FATAL: insufficient VRAM ({free_mib}MiB < {required_mib}MiB required)")
+        sys.exit(2)
 
     log("step:import_peft")
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -262,6 +286,12 @@ def run_training(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     log("step:training_args")
+    # paged_adamw_8bit relies on CUDA unified memory; on Windows consumer
+    # GPUs (WDDM driver mode) this regularly produces an access violation
+    # (exit code 3221225477) inside bitsandbytes. Plain adamw_8bit avoids
+    # the paged allocator and is the safe default on Windows.
+    optim = "adamw_8bit" if platform.system() == "Windows" else "paged_adamw_8bit"
+    log(f"  optim={optim}")
     # Defaults tuned for a 12 GB card (RTX 3060). 4-bit 12B base ~6 GB +
     # activations + optimizer state pushes close to the limit at batch=4,
     # so use batch=2 with accumulation=4 (same effective batch of 8) and
@@ -278,7 +308,7 @@ def run_training(
         save_strategy="no",
         report_to=[],
         bf16=True,
-        optim="paged_adamw_8bit",
+        optim=optim,
         dataset_text_field="text",
         max_length=1024,
     )
@@ -329,6 +359,23 @@ def run_training(
     log("step:save_adapter")
     trainer.model.save_pretrained(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
+
+    # Free CUDA memory before the subprocess exits. Process death normally
+    # releases VRAM anyway, but with bitsandbytes + paged buffers the
+    # release can lag, and the next subprocess (merge_worker) may start
+    # before the driver fully reclaims those allocations.
+    log("step:free_vram")
+    try:
+        del trainer
+        del model
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        free_after, _ = torch.cuda.mem_get_info()
+        log(f"  free VRAM after cleanup: {free_after // (1024*1024)} MiB")
+    except Exception as e:
+        log(f"  VRAM cleanup warning: {e}")
     log("step:done")
 
     return {

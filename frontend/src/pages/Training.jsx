@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../lib/api.js";
 
 function formatEta(seconds) {
@@ -11,12 +10,21 @@ function formatEta(seconds) {
 
 const PHASE_LABELS = {
   starting: "запуск...",
+  stopping_llama_server: "выгрузка llama-server",
   loading_tokenizer: "загрузка токенизатора",
   loading_model: "загрузка модели",
   model_loaded: "модель загружена",
   preparing_trainer: "подготовка тренера",
   training: "обучение",
   merging_and_exporting_gguf: "экспорт GGUF",
+  loading_base: "загрузка fp16 базы",
+  loading_adapter: "загрузка адаптера",
+  merging: "слияние весов",
+  saving_merged: "сохранение модели",
+  converting_to_gguf: "конвертация в GGUF",
+  quantizing: "квантизация",
+  converting_lora_to_gguf: "конвертация LoRA в GGUF",
+  copying_to_lm_studio: "копирование в LM Studio",
   done: "успех",
   error: "ошибка",
   cancelled: "отменено",
@@ -26,7 +34,6 @@ export default function Training() {
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [progress, setProgress] = useState(null);
-  const [lossHistory, setLossHistory] = useState([]);
   const [datasetInfo, setDatasetInfo] = useState(null);
   const [qualityStats, setQualityStats] = useState(null);
   const [voiceStats, setVoiceStats] = useState(null);
@@ -34,6 +41,7 @@ export default function Training() {
   const [error, setError] = useState("");
   const [runLogs, setRunLogs] = useState({});
   const [loadingLogId, setLoadingLogId] = useState(null);
+  const [serverStatus, setServerStatus] = useState(null);
 
   const refresh = async () => {
     const [st, rs, qs] = await Promise.all([
@@ -50,6 +58,12 @@ export default function Training() {
     } catch {
       // ignore
     }
+    try {
+      const srv = await api.llamaServerStatus();
+      setServerStatus(srv);
+    } catch {
+      // ignore
+    }
   };
 
   useEffect(() => {
@@ -60,19 +74,62 @@ export default function Training() {
         const payload = JSON.parse(e.data);
         const data = payload.data || payload;
         setProgress(data);
-        if (data.loss != null && data.step != null) {
-          setLossHistory((prev) => {
-            const next = [...prev, { step: data.step, loss: data.loss }];
-            return next.slice(-200);
-          });
-        }
         if (data.phase === "done" || data.phase === "error" || data.phase === "cancelled") {
           refresh();
         }
       } catch {}
     };
-    return () => ev.close();
+    const srvPoll = setInterval(async () => {
+      try {
+        const srv = await api.llamaServerStatus();
+        setServerStatus(srv);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+    return () => {
+      ev.close();
+      clearInterval(srvPoll);
+    };
   }, []);
+
+  async function serverStart() {
+    setError("");
+    try {
+      const res = await api.llamaServerStart();
+      if (!res.started) setError(res.reason || "не удалось запустить");
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function serverStop() {
+    setError("");
+    try {
+      await api.llamaServerStop();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function serverRestart() {
+    setError("");
+    try {
+      await api.llamaServerRestart();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function setServerAutoResume(enabled) {
+    setServerStatus((s) => (s ? { ...s, auto_resume: enabled } : s));
+    try {
+      await api.llamaServerSetAutoResume(enabled);
+    } catch (e) {
+      setError(e.message);
+      setServerStatus((s) => (s ? { ...s, auto_resume: !enabled } : s));
+    }
+  }
 
   async function build() {
     setError("");
@@ -88,7 +145,6 @@ export default function Training() {
   async function start() {
     setBusy(true);
     setError("");
-    setLossHistory([]);
     try {
       const res = await api.startTraining();
       if (!res.started) setError(res.reason || "не удалось запустить");
@@ -112,6 +168,34 @@ export default function Training() {
   async function deactivate() {
     await api.deactivateAdapter();
     refresh();
+  }
+
+  async function exportGguf(run) {
+    setError("");
+    try {
+      const res = await api.exportGguf(run.id);
+      if (!res.started) {
+        setError(res.reason || "не удалось запустить конвертацию");
+        return;
+      }
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function exportLoraGguf(run) {
+    setError("");
+    try {
+      const res = await api.exportLoraGguf(run.id);
+      if (!res.started) {
+        setError(res.reason || "не удалось запустить конвертацию");
+        return;
+      }
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function removeRun(run) {
@@ -204,6 +288,78 @@ export default function Training() {
         </div>
       )}
 
+      {serverStatus && (
+        <div className="card">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="label">Llama Server</div>
+            <span
+              className={
+                serverStatus.starting
+                  ? "text-accent text-sm"
+                  : serverStatus.stopping
+                  ? "text-muted text-sm"
+                  : serverStatus.running
+                  ? "text-good text-sm"
+                  : "text-muted text-sm"
+              }
+            >
+              {serverStatus.starting
+                ? "● запуск..."
+                : serverStatus.stopping
+                ? "● останавливается..."
+                : serverStatus.running
+                ? `● работает на :${serverStatus.port}`
+                : "○ остановлен"}
+            </span>
+            {serverStatus.running && serverStatus.lora_path && (
+              <span className="text-xs text-muted">
+                LoRA: <code>{serverStatus.lora_path.split(/[\\/]/).pop()}</code>
+              </span>
+            )}
+            {serverStatus.running && !serverStatus.lora_path && (
+              <span className="text-xs text-muted">без адаптера (чистая база)</span>
+            )}
+            <div className="ml-auto flex gap-2">
+              {!serverStatus.running && !serverStatus.starting && (
+                <button className="btn-secondary" onClick={serverStart}>
+                  Запустить
+                </button>
+              )}
+              {serverStatus.running && (
+                <button className="btn-secondary" onClick={serverRestart}>
+                  Перезапустить
+                </button>
+              )}
+              {serverStatus.running && (
+                <button className="btn-danger" onClick={serverStop}>
+                  Остановить
+                </button>
+              )}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-muted mt-3 select-none">
+            <input
+              type="checkbox"
+              checked={!!serverStatus.auto_resume}
+              onChange={(e) => setServerAutoResume(e.target.checked)}
+            />
+            <span>
+              Авто-подъём после обучения и Merge → GGUF (если был запущен до)
+            </span>
+          </label>
+          {!serverStatus.configured && (
+            <div className="text-bad text-xs mt-2">
+              Не задан LLAMA_BASE_MODEL_GGUF в .env — сервер запустить нельзя.
+            </div>
+          )}
+          {serverStatus.last_error && !serverStatus.running && (
+            <div className="text-bad text-xs mt-2">
+              Ошибка: {serverStatus.last_error}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="card">
         <div className="label">Отклонено фильтром качества</div>
         <div className="text-xl font-semibold mt-1">
@@ -269,6 +425,12 @@ export default function Training() {
                 )
               )
             : null;
+        const isRunningPhase =
+          progress.phase &&
+          progress.phase !== "done" &&
+          progress.phase !== "error" &&
+          progress.phase !== "cancelled";
+        const showIndeterminate = isRunningPhase && percent == null;
         return (
         <div className="card">
           <div className="flex flex-wrap gap-4 text-sm items-center">
@@ -293,11 +455,17 @@ export default function Training() {
             {progress.phase === "done" && progress.gguf_path && (
               <span className="text-good">
                 GGUF: <code className="text-xs">{progress.gguf_path}</code>
+                {progress.gguf_path.toLowerCase().includes(".lora.") && (
+                  <span className="text-muted ml-2">
+                    (LoRA-адаптер — в LM Studio подключай поверх базы через
+                    Advanced → LoRA Adapters, не загружай как отдельную модель)
+                  </span>
+                )}
               </span>
             )}
             {progress.phase === "done" && progress.gguf_path === null && (
-              <span className="text-muted">
-                GGUF не сконвертирован (настрой LLAMA_CPP_PATH в .env)
+              <span className="text-bad">
+                GGUF не сконвертирован: {progress.gguf_skip_reason || "настрой LLAMA_CPP_PATH в .env"}
               </span>
             )}
             {progress.phase === "error" && (
@@ -317,25 +485,8 @@ export default function Training() {
               />
             </div>
           )}
-          {lossHistory.length > 1 && (
-            <div className="h-48 mt-3">
-              <ResponsiveContainer>
-                <LineChart data={lossHistory}>
-                  <XAxis dataKey="step" stroke="#9aa3b2" />
-                  <YAxis stroke="#9aa3b2" />
-                  <Tooltip
-                    contentStyle={{ background: "#12151c", border: "1px solid #2a2f3a" }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="loss"
-                    stroke="#5b8cff"
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+          {showIndeterminate && (
+            <div className="mt-3 progress-indeterminate" />
           )}
         </div>
         );
@@ -391,6 +542,34 @@ export default function Training() {
                       {r.is_active && (
                         <button className="btn-secondary" onClick={deactivate}>
                           Деактивировать
+                        </button>
+                      )}
+                      {r.status === "done" && (
+                        <button
+                          className="btn-secondary"
+                          disabled={status?.running}
+                          onClick={() => exportLoraGguf(r)}
+                          title={
+                            status?.running
+                              ? "Дождись окончания текущего процесса"
+                              : "Сконвертировать LoRA в отдельный GGUF (~50-200 МБ). В LM Studio открой базовую модель → Load → Advanced → LoRA Adapters → добавь этот файл. Как самостоятельная модель НЕ загружается."
+                          }
+                        >
+                          LoRA → GGUF
+                        </button>
+                      )}
+                      {r.status === "done" && (
+                        <button
+                          className="btn-secondary"
+                          disabled={status?.running}
+                          onClick={() => exportGguf(r)}
+                          title={
+                            status?.running
+                              ? "Дождись окончания текущего процесса"
+                              : "Слить адаптер с базой fp16 и собрать единый GGUF (~12 ГБ, требует ~26 ГБ свободной RAM)"
+                          }
+                        >
+                          Merge → GGUF
                         </button>
                       )}
                       {r.status !== "running" && (

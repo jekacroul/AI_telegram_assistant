@@ -51,6 +51,19 @@ def _is_safe_adapter_path(path: Path) -> bool:
         return False
 
 
+def _last_step_from_worker_log(path: Path) -> str:
+    """Return the most recent `step:...` line from train_worker.log, if any."""
+    try:
+        text = _read_text_tail(path, max_bytes=64_000)
+    except OSError:
+        return ""
+    for line in reversed(text.splitlines()):
+        idx = line.find("step:")
+        if idx != -1:
+            return line[idx:].strip()
+    return ""
+
+
 def _read_text_tail(path: Path, max_bytes: int = 512_000) -> str:
     with path.open("rb") as f:
         f.seek(0, 2)
@@ -126,6 +139,50 @@ async def _emit(event: dict) -> None:
     await training_bus.publish("training", event)
 
 
+async def _suspend_llama_server() -> bool:
+    """Stop the managed llama-server so its VRAM/RAM is available for the
+    upcoming training or merge job. Returns True if it was running, so the
+    caller can decide whether to restart it once the heavy job finishes."""
+    from . import llama_server
+    if not llama_server.server_state.running:
+        return False
+    log.info("останавливаем llama-server перед тяжёлой операцией")
+    await _emit({"phase": "stopping_llama_server"})
+    await llama_server.stop()
+    return True
+
+
+async def _resume_llama_server_if(was_running: bool) -> None:
+    if not was_running:
+        return
+    from . import llama_server
+    if not await llama_server.get_auto_resume():
+        log.info(
+            "llama-server остаётся выключенным (отключён авто-подъём в UI); "
+            "запустить можно вручную из карточки на странице обучения"
+        )
+        return
+    log.info("поднимаем llama-server обратно после тяжёлой операции")
+    await llama_server.restart_in_background()
+
+
+def _make_sync_emit(version: int):
+    """Bridge for sync code running in asyncio.to_thread to publish to the
+    training SSE bus. Each event the worker thread emits is scheduled
+    back on the main loop. `version` is mixed in so the UI shows context."""
+    loop = asyncio.get_running_loop()
+
+    def _forward(event: dict) -> None:
+        payload = dict(event)
+        payload.setdefault("version", version)
+        try:
+            asyncio.run_coroutine_threadsafe(_emit(payload), loop)
+        except RuntimeError:
+            pass
+
+    return _forward
+
+
 async def _load_pairs(session: AsyncSession) -> list[dict]:
     result = await session.execute(select(TrainingPair))
     pairs = list(result.scalars().all())
@@ -186,6 +243,8 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
         cancel_file.unlink()
     training_state.cancel_file = cancel_file
 
+    llama_was_running = await _suspend_llama_server()
+
     await _emit({"phase": "starting", "version": version, "pairs": len(pairs)})
 
     final_result: dict = {}
@@ -211,24 +270,36 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             raw = await proc.stdout.readline()
             if not raw:
                 break
-            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-            if line.startswith(EVENT_PREFIX):
-                payload = line[len(EVENT_PREFIX):]
-                try:
-                    event = json.loads(payload)
-                except json.JSONDecodeError:
-                    log.error("malformed train event: %s", payload[:200])
+            # tqdm uses \r without \n for in-place progress updates inside
+            # trainer.train(). Our emit() prints get concatenated onto those
+            # bars, so the event prefix can appear mid-line. Split on \r and
+            # locate the marker anywhere in each segment.
+            decoded = raw.decode("utf-8", errors="replace").rstrip("\n")
+            for segment in decoded.split("\r"):
+                segment = segment.rstrip()
+                if not segment:
                     continue
-                phase = event.get("phase")
-                if phase == "result":
-                    final_result = {k: v for k, v in event.items() if k != "phase"}
-                    continue
-                if phase == "error":
-                    error_message = event.get("error") or "training error"
-                    continue
-                await _emit(event)
-            elif line:
-                log.info("[train_worker] %s", line)
+                idx = segment.find(EVENT_PREFIX)
+                if idx >= 0:
+                    prefix_text = segment[:idx].strip()
+                    if prefix_text:
+                        log.info("[train_worker] %s", prefix_text)
+                    payload = segment[idx + len(EVENT_PREFIX):]
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError:
+                        log.error("malformed train event: %s", payload[:200])
+                        continue
+                    phase = event.get("phase")
+                    if phase == "result":
+                        final_result = {k: v for k, v in event.items() if k != "phase"}
+                        continue
+                    if phase == "error":
+                        error_message = event.get("error") or "training error"
+                        continue
+                    await _emit(event)
+                else:
+                    log.info("[train_worker] %s", segment)
 
         rc = await proc.wait()
         training_state.process = None
@@ -240,9 +311,11 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
                 if rc in (3221225477, -1073741819) else
                 "OOM or non-zero exit"
             )
+            last_step = _last_step_from_worker_log(log_path)
+            step_hint = f" Last step: {last_step}." if last_step else ""
             error_message = (
-                f"training process exited with code {rc} ({hint}). "
-                f"See per-step log: {log_path}"
+                f"training process exited with code {rc} ({hint})."
+                f"{step_hint} See per-step log: {log_path}"
             )
 
         if error_message:
@@ -252,16 +325,18 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
         was_cancelled = bool(final_result.get("cancelled")) or training_state.cancelled
 
         gguf_path: Optional[Path] = None
+        gguf_skip_reason: Optional[str] = None
         if not was_cancelled:
             from .gguf_export import merge_and_export_gguf
             await _emit({"phase": "merging_and_exporting_gguf", "version": version})
-            gguf_path = await asyncio.to_thread(
+            forward = _make_sync_emit(version)
+            gguf_path, gguf_skip_reason = await asyncio.to_thread(
                 merge_and_export_gguf,
                 Path(adapter_path),
                 settings.hf_base_model,
                 settings.llama_cpp_path,
-                settings.lm_studio_models_dir,
                 settings.gguf_quant,
+                forward,
             )
 
         async with SessionLocal() as session:
@@ -285,6 +360,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             "phase": "cancelled" if was_cancelled else "done",
             "adapter_path": adapter_path,
             "gguf_path": str(gguf_path) if gguf_path else None,
+            "gguf_skip_reason": gguf_skip_reason,
             "final_loss": final_result.get("final_loss"),
             "version": version,
         })
@@ -304,6 +380,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
             cancel_file.unlink()
         with contextlib.suppress(FileNotFoundError):
             pairs_file.unlink()
+        await _resume_llama_server_if(llama_was_running)
         training_state.reset()
 
 
@@ -319,6 +396,136 @@ async def cancel_training() -> bool:
     return True
 
 
+async def export_lora_gguf_for_run(run_id: int) -> dict:
+    """Convert just the LoRA adapter into a standalone GGUF file.
+
+    Skips the heavy fp16 base merge — produces a small (~50-200 MB) GGUF
+    that LM Studio loads on top of the base model.
+    """
+    if training_state.running:
+        return {"started": False, "reason": "обучение или конвертация уже идёт"}
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(TrainingRun).where(TrainingRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            return {"started": False, "reason": "запуск не найден"}
+        if run.status != "done":
+            return {"started": False, "reason": "конвертировать можно только успешные запуски"}
+        if not run.adapter_path or not Path(run.adapter_path).is_dir():
+            return {
+                "started": False,
+                "reason": f"папка адаптера отсутствует: {run.adapter_path or '—'}",
+            }
+        adapter_path = run.adapter_path
+        version = run.version
+
+    training_state.running = True
+    training_state.current_run_id = run_id
+    asyncio.create_task(_run_lora_gguf_export(run_id, version, adapter_path))
+    return {"started": True, "run_id": run_id, "version": version}
+
+
+async def _run_lora_gguf_export(run_id: int, version: int, adapter_path: str) -> None:
+    try:
+        from .gguf_export import export_lora_only_gguf
+        await _emit({"phase": "merging_and_exporting_gguf", "version": version,
+                     "note": "LoRA-only (без merge)"})
+        forward = _make_sync_emit(version)
+        gguf_path, reason = await asyncio.to_thread(
+            export_lora_only_gguf,
+            Path(adapter_path),
+            settings.hf_base_model,
+            settings.llama_cpp_path,
+            forward,
+        )
+        if gguf_path is None:
+            await _emit({
+                "phase": "error",
+                "error": reason or "не удалось сконвертировать LoRA в GGUF",
+                "version": version,
+            })
+            return
+        await _emit({
+            "phase": "done",
+            "adapter_path": adapter_path,
+            "gguf_path": str(gguf_path),
+            "gguf_skip_reason": None,
+            "version": version,
+        })
+    except Exception as e:
+        log.exception("lora gguf export failed")
+        await _emit({"phase": "error", "error": str(e), "version": version})
+    finally:
+        training_state.reset()
+
+
+async def export_gguf_for_run(run_id: int) -> dict:
+    """Re-run merge + GGUF quantization for an already trained adapter."""
+    if training_state.running:
+        return {"started": False, "reason": "обучение или конвертация уже идёт"}
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(TrainingRun).where(TrainingRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            return {"started": False, "reason": "запуск не найден"}
+        if run.status != "done":
+            return {"started": False, "reason": "конвертировать можно только успешные запуски"}
+        if not run.adapter_path or not Path(run.adapter_path).is_dir():
+            return {
+                "started": False,
+                "reason": f"папка адаптера отсутствует: {run.adapter_path or '—'}",
+            }
+        adapter_path = run.adapter_path
+        version = run.version
+
+    training_state.running = True
+    training_state.current_run_id = run_id
+    asyncio.create_task(_run_gguf_export(run_id, version, adapter_path))
+    return {"started": True, "run_id": run_id, "version": version}
+
+
+async def _run_gguf_export(run_id: int, version: int, adapter_path: str) -> None:
+    llama_was_running = await _suspend_llama_server()
+    try:
+        from .gguf_export import merge_and_export_gguf
+        await _emit({"phase": "merging_and_exporting_gguf", "version": version})
+        forward = _make_sync_emit(version)
+        gguf_path, gguf_skip_reason = await asyncio.to_thread(
+            merge_and_export_gguf,
+            Path(adapter_path),
+            settings.hf_base_model,
+            settings.llama_cpp_path,
+            settings.gguf_quant,
+            forward,
+        )
+        if gguf_path is None:
+            await _emit({
+                "phase": "error",
+                "error": gguf_skip_reason or "не удалось сконвертировать GGUF",
+                "version": version,
+            })
+            return
+        await _emit({
+            "phase": "done",
+            "adapter_path": adapter_path,
+            "gguf_path": str(gguf_path),
+            "gguf_skip_reason": None,
+            "version": version,
+        })
+    except Exception as e:
+        log.exception("gguf export failed")
+        await _emit({"phase": "error", "error": str(e), "version": version})
+    finally:
+        await _resume_llama_server_if(llama_was_running)
+        training_state.reset()
+
+
 async def activate_adapter(run_id: int) -> bool:
     async with SessionLocal() as session:
         result = await session.execute(select(TrainingRun))
@@ -329,10 +536,9 @@ async def activate_adapter(run_id: int) -> bool:
         for r in all_runs:
             r.is_active = (r.id == run_id)
         await session.commit()
-    log.info(
-        "marked adapter v%s active at %s; load it manually in LM Studio",
-        target.version, target.adapter_path,
-    )
+    log.info("marked adapter v%s active at %s", target.version, target.adapter_path)
+    from . import llama_server
+    await llama_server.restart_in_background()
     return True
 
 
@@ -348,6 +554,8 @@ async def deactivate_adapter() -> bool:
             run.is_active = False
         await session.commit()
     log.info("deactivated active fine-tune adapter")
+    from . import llama_server
+    await llama_server.restart_in_background()
     return True
 
 

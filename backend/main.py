@@ -110,11 +110,14 @@ from .trainer import (
     cancel_training,
     deactivate_adapter,
     delete_training_run,
+    export_gguf_for_run,
+    export_lora_gguf_for_run,
     get_training_run_error_log,
     list_runs,
     start_training,
     training_state,
 )
+from . import llama_server
 
 setup_logging(settings.logs_dir, level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -203,10 +206,22 @@ async def lifespan(app: FastAPI):
         log.warning("TELEGRAM_BOT_TOKEN is not set; bot will be inactive")
     dialog_backup_scheduler.start()
     replication_scheduler.start()
+    if settings.llama_server_auto_start and settings.llama_base_model_gguf:
+        asyncio.create_task(_auto_start_llama_server())
     yield
     await replication_scheduler.stop()
     await dialog_backup_scheduler.stop()
     await telegram_service.shutdown()
+    await llama_server.stop()
+
+
+async def _auto_start_llama_server() -> None:
+    try:
+        result = await llama_server.start()
+        if not result.get("started"):
+            log.warning("auto-start llama-server failed: %s", result.get("reason"))
+    except Exception:
+        log.exception("auto-start llama-server crashed")
 
 
 app = FastAPI(title="Telegram Local AI Assistant", lifespan=lifespan)
@@ -1065,6 +1080,44 @@ async def training_run_error_log(run_id: int) -> dict:
     if log_info.get("error") == "run not found":
         raise HTTPException(status_code=404, detail="run not found")
     return log_info
+
+
+@app.post("/api/training/runs/{run_id}/export-gguf")
+async def training_export_gguf(run_id: int) -> dict:
+    return await export_gguf_for_run(run_id)
+
+
+@app.post("/api/training/runs/{run_id}/export-lora-gguf")
+async def training_export_lora_gguf(run_id: int) -> dict:
+    return await export_lora_gguf_for_run(run_id)
+
+
+@app.get("/api/llama-server/status")
+async def llama_server_status() -> dict:
+    return await llama_server.status_async()
+
+
+@app.post("/api/llama-server/auto-resume")
+async def llama_server_set_auto_resume(body: dict) -> dict:
+    enabled = bool(body.get("enabled", True))
+    await llama_server.set_auto_resume(enabled)
+    return {"ok": True, "auto_resume": enabled}
+
+
+@app.post("/api/llama-server/start")
+async def llama_server_start() -> dict:
+    return await llama_server.start()
+
+
+@app.post("/api/llama-server/stop")
+async def llama_server_stop() -> dict:
+    return await llama_server.stop()
+
+
+@app.post("/api/llama-server/restart")
+async def llama_server_restart() -> dict:
+    asyncio.create_task(llama_server.restart())
+    return {"ok": True, "note": "рестарт запущен в фоне; следи через /status"}
 
 
 @app.get("/api/training/runs")
