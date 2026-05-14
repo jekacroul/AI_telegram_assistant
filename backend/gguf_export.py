@@ -31,29 +31,48 @@ log = logging.getLogger(__name__)
 
 
 def _find_convert_script(llama_cpp_path: Path) -> Optional[Path]:
-    candidates = [
-        llama_cpp_path / "convert_hf_to_gguf.py",
-        llama_cpp_path / "convert-hf-to-gguf.py",  # older name
-    ]
-    for p in candidates:
-        if p.is_file():
-            return p
+    names = ("convert_hf_to_gguf.py", "convert-hf-to-gguf.py")
+    for name in names:
+        direct = llama_cpp_path / name
+        if direct.is_file():
+            return direct
+    for name in names:
+        try:
+            for found in llama_cpp_path.rglob(name):
+                if found.is_file():
+                    return found
+        except OSError:
+            continue
     return None
 
 
 def _find_quantize_binary(llama_cpp_path: Path) -> Optional[Path]:
     exe = ".exe" if os.name == "nt" else ""
-    candidates = [
-        llama_cpp_path / "build" / "bin" / f"llama-quantize{exe}",
-        llama_cpp_path / "build" / "bin" / "Release" / f"llama-quantize{exe}",
-        llama_cpp_path / f"llama-quantize{exe}",
-        # legacy name pre-rename
-        llama_cpp_path / "build" / "bin" / f"quantize{exe}",
-        llama_cpp_path / f"quantize{exe}",
-    ]
+    names = (f"llama-quantize{exe}", f"quantize{exe}")
+    # Common cmake/MSBuild output layouts — keep them as fast direct hits.
+    candidates: list[Path] = []
+    for name in names:
+        candidates += [
+            llama_cpp_path / name,
+            llama_cpp_path / "build" / name,
+            llama_cpp_path / "build" / "bin" / name,
+            llama_cpp_path / "build" / "bin" / "Release" / name,
+            llama_cpp_path / "build" / "Release" / name,
+            llama_cpp_path / "bin" / name,
+            llama_cpp_path / "bin" / "Release" / name,
+        ]
     for p in candidates:
         if p.is_file():
             return p
+    # Fall back to a recursive scan: covers custom build dirs, prebuilt
+    # archives extracted into nested folders, etc.
+    for name in names:
+        try:
+            for found in llama_cpp_path.rglob(name):
+                if found.is_file():
+                    return found
+        except OSError:
+            continue
     return None
 
 
@@ -133,9 +152,12 @@ def merge_and_export_gguf(
 
     quantize_bin = _find_quantize_binary(llama_root)
     if quantize_bin is None:
+        exe = ".exe" if os.name == "nt" else ""
         reason = (
-            f"llama-quantize не найден в {llama_root}/build/bin. "
-            f"Собери llama.cpp: cmake -B build && cmake --build build --config Release."
+            f"llama-quantize{exe} не найден нигде внутри {llama_root}. "
+            f"Собери llama.cpp (cmake -B build && cmake --build build --config Release) "
+            f"или скачай готовые бинарники с github.com/ggerganov/llama.cpp/releases "
+            f"и распакуй их в эту папку."
         )
         log.warning(reason)
         return None, reason
