@@ -128,6 +128,20 @@ export default function Training() {
     }
   }
 
+  async function exportLoraGguf(run) {
+    setError("");
+    try {
+      const res = await api.exportLoraGguf(run.id);
+      if (!res.started) {
+        setError(res.reason || "не удалось запустить конвертацию");
+        return;
+      }
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function removeRun(run) {
     const confirmed = window.confirm(`Удалить v${run.version} из истории?`);
     if (!confirmed) return;
@@ -420,14 +434,28 @@ export default function Training() {
                         <button
                           className="btn-secondary"
                           disabled={status?.running}
+                          onClick={() => exportLoraGguf(r)}
+                          title={
+                            status?.running
+                              ? "Дождись окончания текущего процесса"
+                              : "Сконвертировать LoRA в отдельный GGUF (~50-200 МБ, без слияния с базой). В LM Studio загружается поверх базовой модели."
+                          }
+                        >
+                          LoRA → GGUF
+                        </button>
+                      )}
+                      {r.status === "done" && (
+                        <button
+                          className="btn-secondary"
+                          disabled={status?.running}
                           onClick={() => exportGguf(r)}
                           title={
                             status?.running
                               ? "Дождись окончания текущего процесса"
-                              : "Слить адаптер с базой и сконвертировать в GGUF"
+                              : "Слить адаптер с базой fp16 и собрать единый GGUF (~12 ГБ, требует ~26 ГБ свободной RAM)"
                           }
                         >
-                          Сконвертировать в GGUF
+                          Merge → GGUF
                         </button>
                       )}
                       {r.status !== "running" && (

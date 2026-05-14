@@ -34,6 +34,9 @@ log = logging.getLogger(__name__)
 CONVERT_SCRIPT_URL = (
     "https://raw.githubusercontent.com/ggml-org/llama.cpp/master/convert_hf_to_gguf.py"
 )
+LORA_CONVERT_SCRIPT_URL = (
+    "https://raw.githubusercontent.com/ggml-org/llama.cpp/master/convert_lora_to_gguf.py"
+)
 
 
 def _find_convert_script(llama_cpp_path: Path) -> Optional[Path]:
@@ -87,6 +90,116 @@ def _ensure_convert_script(llama_cpp_path: Path) -> tuple[Optional[Path], Option
         )
 
     return target, None
+
+
+def _ensure_lora_convert_script(llama_cpp_path: Path) -> tuple[Optional[Path], Optional[str]]:
+    """Locate convert_lora_to_gguf.py, downloading it from upstream if missing."""
+    direct = llama_cpp_path / "convert_lora_to_gguf.py"
+    if direct.is_file():
+        return direct, None
+    try:
+        for found in llama_cpp_path.rglob("convert_lora_to_gguf.py"):
+            if found.is_file():
+                return found, None
+    except OSError:
+        pass
+
+    target = llama_cpp_path / "convert_lora_to_gguf.py"
+    try:
+        log.info("convert_lora_to_gguf.py not found, fetching from %s", LORA_CONVERT_SCRIPT_URL)
+        req = urllib.request.Request(
+            LORA_CONVERT_SCRIPT_URL, headers={"User-Agent": "ai-telegram-assistant"}
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = resp.read()
+        target.write_bytes(data)
+    except (urllib.error.URLError, OSError) as e:
+        return None, (
+            f"convert_lora_to_gguf.py не найден в {llama_cpp_path} и не получилось "
+            f"скачать его с github ({e}). Скачай вручную: {LORA_CONVERT_SCRIPT_URL} "
+            f"и положи в {llama_cpp_path}."
+        )
+
+    try:
+        import gguf  # noqa: F401
+    except ImportError:
+        return None, (
+            "convert_lora_to_gguf.py скачан, но в окружении python нет пакета `gguf`. "
+            "Установи его: pip install gguf"
+        )
+    return target, None
+
+
+def export_lora_only_gguf(
+    adapter_dir: Path,
+    base_model: str,
+    llama_cpp_path: Optional[str],
+    lm_studio_models_dir: Optional[str],
+) -> tuple[Optional[Path], Optional[str]]:
+    """Convert a PEFT LoRA adapter into a standalone .gguf LoRA file.
+
+    Unlike merge_and_export_gguf, this never loads the fp16 base — it just
+    repacks the LoRA deltas (tens of MB) into GGUF format. Loaded on top
+    of a base GGUF in LM Studio.
+    """
+    if not llama_cpp_path:
+        reason = "LLAMA_CPP_PATH не задан в .env."
+        log.info(reason)
+        return None, reason
+
+    llama_root = Path(llama_cpp_path).expanduser()
+    if not llama_root.is_dir():
+        reason = f"путь LLAMA_CPP_PATH={llama_root} не существует."
+        log.warning(reason)
+        return None, reason
+
+    script, script_reason = _ensure_lora_convert_script(llama_root)
+    if script is None:
+        return None, script_reason
+
+    out_gguf = adapter_dir / f"{adapter_dir.name}.lora.f16.gguf"
+    cmd = [
+        sys.executable, str(script), str(adapter_dir),
+        "--outfile", str(out_gguf),
+        "--outtype", "f16",
+        "--base-model-id", base_model,
+    ]
+    log.info("converting LoRA adapter to GGUF: %s", " ".join(cmd))
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            cwd=str(llama_root), timeout=1800,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"convert_lora_to_gguf не запустился: {e}"
+
+    if proc.returncode != 0 or not out_gguf.is_file():
+        log.error(
+            "convert_lora_to_gguf failed (exit %s):\nstdout: %s\nstderr: %s",
+            proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:],
+        )
+        return None, (
+            f"convert_lora_to_gguf завершился с кодом {proc.returncode} "
+            f"(см. логи backend)"
+        )
+
+    log.info(
+        "LoRA exported to %s (%.1f MB)",
+        out_gguf, out_gguf.stat().st_size / (1024 * 1024),
+    )
+
+    if lm_studio_models_dir:
+        target_root = Path(lm_studio_models_dir).expanduser()
+        target_dir = target_root / "local-finetune" / adapter_dir.name
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_file = target_dir / out_gguf.name
+            shutil.copy2(out_gguf, target_file)
+            log.info("copied LoRA GGUF to LM Studio dir: %s", target_file)
+        except OSError as e:
+            log.error("failed to copy LoRA GGUF into LM_STUDIO_MODELS_DIR: %s", e)
+
+    return out_gguf, None
 
 
 def _find_quantize_binary(llama_cpp_path: Path) -> Optional[Path]:

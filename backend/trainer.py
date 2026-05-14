@@ -348,6 +348,71 @@ async def cancel_training() -> bool:
     return True
 
 
+async def export_lora_gguf_for_run(run_id: int) -> dict:
+    """Convert just the LoRA adapter into a standalone GGUF file.
+
+    Skips the heavy fp16 base merge — produces a small (~50-200 MB) GGUF
+    that LM Studio loads on top of the base model.
+    """
+    if training_state.running:
+        return {"started": False, "reason": "обучение или конвертация уже идёт"}
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(TrainingRun).where(TrainingRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            return {"started": False, "reason": "запуск не найден"}
+        if run.status != "done":
+            return {"started": False, "reason": "конвертировать можно только успешные запуски"}
+        if not run.adapter_path or not Path(run.adapter_path).is_dir():
+            return {
+                "started": False,
+                "reason": f"папка адаптера отсутствует: {run.adapter_path or '—'}",
+            }
+        adapter_path = run.adapter_path
+        version = run.version
+
+    training_state.running = True
+    training_state.current_run_id = run_id
+    asyncio.create_task(_run_lora_gguf_export(run_id, version, adapter_path))
+    return {"started": True, "run_id": run_id, "version": version}
+
+
+async def _run_lora_gguf_export(run_id: int, version: int, adapter_path: str) -> None:
+    try:
+        from .gguf_export import export_lora_only_gguf
+        await _emit({"phase": "merging_and_exporting_gguf", "version": version,
+                     "note": "LoRA-only (без merge)"})
+        gguf_path, reason = await asyncio.to_thread(
+            export_lora_only_gguf,
+            Path(adapter_path),
+            settings.hf_base_model,
+            settings.llama_cpp_path,
+            settings.lm_studio_models_dir,
+        )
+        if gguf_path is None:
+            await _emit({
+                "phase": "error",
+                "error": reason or "не удалось сконвертировать LoRA в GGUF",
+                "version": version,
+            })
+            return
+        await _emit({
+            "phase": "done",
+            "adapter_path": adapter_path,
+            "gguf_path": str(gguf_path),
+            "gguf_skip_reason": None,
+            "version": version,
+        })
+    except Exception as e:
+        log.exception("lora gguf export failed")
+        await _emit({"phase": "error", "error": str(e), "version": version})
+    finally:
+        training_state.reset()
+
+
 async def export_gguf_for_run(run_id: int) -> dict:
     """Re-run merge + GGUF quantization for an already trained adapter."""
     if training_state.running:

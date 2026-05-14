@@ -111,6 +111,7 @@ from .trainer import (
     deactivate_adapter,
     delete_training_run,
     export_gguf_for_run,
+    export_lora_gguf_for_run,
     get_training_run_error_log,
     list_runs,
     start_training,
@@ -1071,6 +1072,11 @@ async def training_run_error_log(run_id: int) -> dict:
 @app.post("/api/training/runs/{run_id}/export-gguf")
 async def training_export_gguf(run_id: int) -> dict:
     return await export_gguf_for_run(run_id)
+
+
+@app.post("/api/training/runs/{run_id}/export-lora-gguf")
+async def training_export_lora_gguf(run_id: int) -> dict:
+    return await export_lora_gguf_for_run(run_id)
 
 
 @app.get("/api/training/runs")
