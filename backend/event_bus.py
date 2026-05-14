@@ -36,3 +36,4 @@ class EventBus:
 
 message_bus = EventBus()
 training_bus = EventBus()
+replication_bus = EventBus()

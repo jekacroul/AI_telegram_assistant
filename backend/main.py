@@ -61,7 +61,18 @@ from .dialog_backup import (
     scheduler as dialog_backup_scheduler,
     set_excluded_chats,
 )
-from .event_bus import message_bus, training_bus
+from .event_bus import message_bus, replication_bus, training_bus
+from .replication import (
+    cancel_replication as cancel_replication_run,
+    delete_run as delete_replication_run,
+    list_runs as list_replication_runs,
+    load_settings as load_replication_settings,
+    replication_state,
+    run_replication,
+    save_settings as save_replication_settings,
+    scheduler as replication_scheduler,
+    status as replication_status,
+)
 from .llm_engine import LLMUnavailableError, get_client
 from .quality_filter import is_good_response
 from .notifications import (
@@ -190,7 +201,9 @@ async def lifespan(app: FastAPI):
     else:
         log.warning("TELEGRAM_BOT_TOKEN is not set; bot will be inactive")
     dialog_backup_scheduler.start()
+    replication_scheduler.start()
     yield
+    await replication_scheduler.stop()
     await dialog_backup_scheduler.stop()
     await telegram_service.shutdown()
 
@@ -1496,6 +1509,97 @@ async def dialogs_run_backup() -> dict:
         "skipped": result.skipped,
         "excluded": result.excluded,
     }
+
+
+class ReplicationSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+    interval_minutes: Optional[int] = Field(default=None, ge=1, le=10080)
+    target_dir: Optional[str] = Field(default=None, max_length=1024)
+    retention: Optional[int] = Field(default=None, ge=1, le=1000)
+    delete_protection: Optional[bool] = None
+
+
+@app.get("/api/replication/status")
+async def replication_status_endpoint() -> dict:
+    return await replication_status()
+
+
+@app.post("/api/replication/settings")
+async def replication_save_settings(
+    payload: ReplicationSettingsIn,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    cfg = await save_replication_settings(
+        session,
+        enabled=payload.enabled,
+        interval_minutes=payload.interval_minutes,
+        target_dir=payload.target_dir,
+        retention=payload.retention,
+        delete_protection=payload.delete_protection,
+    )
+    replication_scheduler.trigger()
+    return {
+        "enabled": cfg.enabled,
+        "interval_minutes": cfg.interval_minutes,
+        "target_dir": cfg.target_dir,
+        "retention": cfg.retention,
+        "delete_protection": cfg.delete_protection,
+    }
+
+
+@app.post("/api/replication/run")
+async def replication_run_now() -> dict:
+    return await run_replication(trigger="manual")
+
+
+@app.post("/api/replication/cancel")
+async def replication_cancel_endpoint() -> dict:
+    cancelled = await cancel_replication_run()
+    return {"cancelled": cancelled}
+
+
+@app.get("/api/replication/runs")
+async def replication_runs_endpoint() -> list[dict]:
+    return await list_replication_runs()
+
+
+@app.delete("/api/replication/runs/{run_id}")
+async def replication_delete_run_endpoint(
+    run_id: int, confirm: bool = False
+) -> dict:
+    if replication_state.running and replication_state.current_run_id == run_id:
+        raise HTTPException(status_code=409, detail="идёт репликация")
+    ok, reason = await delete_replication_run(run_id, confirm=confirm)
+    if not ok:
+        status_code = 404 if reason == "запись не найдена" else 409
+        raise HTTPException(status_code=status_code, detail=reason)
+    return {"ok": True}
+
+
+@app.get("/api/replication/progress")
+async def replication_progress(request: Request) -> EventSourceResponse:
+    q = replication_bus.subscribe()
+
+    async def gen():
+        if replication_state.last_event:
+            yield {
+                "data": json.dumps(
+                    replication_state.last_event, ensure_ascii=False
+                )
+            }
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield {"data": item}
+                except asyncio.TimeoutError:
+                    yield {"event": "ping", "data": "{}"}
+        finally:
+            replication_bus.unsubscribe(q)
+
+    return EventSourceResponse(gen())
 
 
 @app.get("/api/stats/overview")
