@@ -374,6 +374,112 @@ async def cancel_replication() -> bool:
     return True
 
 
+def _is_safe_replica_path(path: Path, target_dir: Path) -> bool:
+    try:
+        path.resolve().relative_to(target_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _read_text_tail(path: Path, max_bytes: int = 256_000) -> str:
+    with path.open("rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - max_bytes))
+        data = f.read()
+    return data.decode("utf-8", errors="replace")
+
+
+def _candidate_app_logs(around: Optional[datetime]) -> list[Path]:
+    logs_dir = settings.logs_dir
+    files = [p for p in logs_dir.rglob("*.log") if p.is_file()]
+    if around is not None:
+        ts = around.timestamp()
+        files.sort(key=lambda p: (abs(p.stat().st_mtime - ts), -p.stat().st_mtime))
+        return files[:20]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[:20]
+
+
+def _filter_replication_lines(
+    text: str,
+    started: Optional[datetime],
+    finished: Optional[datetime],
+    max_lines: int = 200,
+) -> list[str]:
+    keywords = ("replication", "replica", "backend.replication", "репликац")
+    selected: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            continue
+        lower = line.lower()
+        if not any(k in lower for k in keywords):
+            continue
+        selected.append(line)
+    return selected[-max_lines:]
+
+
+async def get_run_log(run_id: int) -> dict:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ReplicationRun).where(ReplicationRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            return {"found": False, "error": "запись не найдена", "excerpt": "", "log_path": None}
+
+    summary_lines: list[str] = []
+    summary_lines.append(
+        f"Запуск #{run.id} — {run.status} ({run.trigger})"
+    )
+    summary_lines.append(
+        f"Начало: {_iso_utc(run.started_at) or '—'}    "
+        f"Конец:  {_iso_utc(run.finished_at) or '—'}    "
+        f"Длительность: {run.duration_ms} мс"
+    )
+    summary_lines.append(
+        f"Файл-реплика: {run.target_path or '—'}"
+    )
+    summary_lines.append(
+        f"Размер источника: {run.source_bytes} Б    "
+        f"Скопировано: {run.copied_bytes} Б"
+    )
+    if run.error:
+        summary_lines.append(f"Ошибка: {run.error}")
+    summary_lines.append("")
+
+    log_path: Optional[Path] = None
+    excerpt_lines: list[str] = []
+    for path in _candidate_app_logs(run.started_at):
+        try:
+            text = _read_text_tail(path)
+        except OSError:
+            continue
+        lines = _filter_replication_lines(text, run.started_at, run.finished_at)
+        if lines:
+            log_path = path
+            excerpt_lines = lines
+            break
+
+    summary = run.error or (
+        "репликация выполнена успешно" if run.status == "done" else run.status
+    )
+    body = "\n".join(summary_lines)
+    if excerpt_lines:
+        body += "--- app log ---\n" + "\n".join(excerpt_lines)
+    else:
+        body += "(подробные записи в app-логе не найдены)"
+
+    return {
+        "found": True,
+        "error": summary,
+        "excerpt": body,
+        "log_path": str(log_path) if log_path else None,
+    }
+
+
 async def list_runs(limit: int = 50) -> list[dict]:
     async with SessionLocal() as session:
         result = await session.execute(
@@ -407,14 +513,6 @@ def _replica_exists(target: str) -> bool:
     try:
         return Path(target).is_file()
     except OSError:
-        return False
-
-
-def _is_safe_replica_path(path: Path, target_dir: Path) -> bool:
-    try:
-        path.resolve().relative_to(target_dir.resolve())
-        return True
-    except ValueError:
         return False
 
 

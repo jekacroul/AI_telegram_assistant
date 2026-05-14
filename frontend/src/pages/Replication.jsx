@@ -53,6 +53,8 @@ export default function Replication() {
   const [busy, setBusy] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [error, setError] = useState("");
+  const [runLogs, setRunLogs] = useState({});
+  const [loadingLogId, setLoadingLogId] = useState(null);
 
   const refresh = async () => {
     try {
@@ -139,6 +141,30 @@ export default function Replication() {
       await api.cancelReplication();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function toggleLog(run) {
+    if (runLogs[run.id]?.open) {
+      setRunLogs((prev) => ({
+        ...prev,
+        [run.id]: { ...prev[run.id], open: false },
+      }));
+      return;
+    }
+    setLoadingLogId(run.id);
+    setError("");
+    try {
+      const data =
+        runLogs[run.id]?.data || (await api.replicationRunLog(run.id));
+      setRunLogs((prev) => ({
+        ...prev,
+        [run.id]: { open: true, data },
+      }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoadingLogId(null);
     }
   }
 
@@ -396,48 +422,104 @@ export default function Replication() {
                 text: r.status,
                 cls: "text-muted",
               };
+              const logState = runLogs[r.id];
               return (
-                <tr key={r.id} className="border-t border-white/5 align-top">
-                  <td className="py-2">
-                    {r.started_at
-                      ? new Date(r.started_at).toLocaleString()
-                      : "—"}
-                  </td>
-                  <td>{formatDuration(r.duration_ms)}</td>
-                  <td>{formatBytes(r.copied_bytes || 0)}</td>
-                  <td className="text-muted">
-                    {r.trigger === "schedule" ? "по расписанию" : "вручную"}
-                  </td>
-                  <td>
-                    <span className={st.cls}>{st.text}</span>
-                    {r.error && (
-                      <div className="text-bad text-xs mt-1 break-all">
-                        {r.error}
+                <React.Fragment key={r.id}>
+                  <tr className="border-t border-white/5 align-top">
+                    <td className="py-2">
+                      {r.started_at
+                        ? new Date(r.started_at).toLocaleString()
+                        : "—"}
+                    </td>
+                    <td>{formatDuration(r.duration_ms)}</td>
+                    <td>{formatBytes(r.copied_bytes || 0)}</td>
+                    <td className="text-muted">
+                      {r.trigger === "schedule" ? "по расписанию" : "вручную"}
+                    </td>
+                    <td>
+                      <span className={st.cls}>{st.text}</span>
+                      {r.error && (
+                        <div className="text-bad text-xs mt-1 break-all">
+                          {r.error}
+                        </div>
+                      )}
+                    </td>
+                    <td className="text-xs">
+                      <code className="break-all">{r.target_path}</code>
+                      {!r.exists && r.status === "done" && (
+                        <div className="text-muted text-xs mt-1">
+                          файл отсутствует
+                        </div>
+                      )}
+                      {r.protected && (
+                        <div className="text-muted text-xs mt-1">защищена</div>
+                      )}
+                    </td>
+                    <td className="text-right">
+                      <div className="flex justify-end gap-2 flex-wrap">
+                        {r.status !== "running" && (
+                          <button
+                            className="btn-secondary"
+                            onClick={() => toggleLog(r)}
+                          >
+                            {loadingLogId === r.id
+                              ? "Загрузка..."
+                              : logState?.open
+                                ? "Скрыть лог"
+                                : "Лог"}
+                          </button>
+                        )}
+                        {r.status !== "running" && (
+                          <button
+                            className="btn-danger"
+                            onClick={() => removeRun(r)}
+                          >
+                            Удалить
+                          </button>
+                        )}
                       </div>
-                    )}
-                  </td>
-                  <td className="text-xs">
-                    <code className="break-all">{r.target_path}</code>
-                    {!r.exists && r.status === "done" && (
-                      <div className="text-muted text-xs mt-1">
-                        файл отсутствует
-                      </div>
-                    )}
-                    {r.protected && (
-                      <div className="text-muted text-xs mt-1">защищена</div>
-                    )}
-                  </td>
-                  <td className="text-right">
-                    {r.status !== "running" && (
-                      <button
-                        className="btn-danger"
-                        onClick={() => removeRun(r)}
-                      >
-                        Удалить
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                    </td>
+                  </tr>
+                  {logState?.open && (
+                    <tr className="border-t border-white/5">
+                      <td colSpan="7" className="pb-3">
+                        <div className="mt-2 rounded-lg border border-white/10 bg-black/30 p-3">
+                          <div className="flex flex-wrap gap-2 items-center text-xs text-muted mb-2">
+                            <span>Лог репликации #{r.id}</span>
+                            {logState.data?.log_path && (
+                              <code className="break-all">
+                                {logState.data.log_path}
+                              </code>
+                            )}
+                          </div>
+                          {logState.data?.error && (
+                            <div
+                              className={`text-sm mb-2 ${
+                                r.status === "error"
+                                  ? "text-bad"
+                                  : "text-muted"
+                              }`}
+                            >
+                              {r.status === "error"
+                                ? "Ошибка: "
+                                : "Резюме: "}
+                              {logState.data.error}
+                            </div>
+                          )}
+                          {logState.data?.excerpt ? (
+                            <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-white/90">
+                              {logState.data.excerpt}
+                            </pre>
+                          ) : (
+                            <div className="text-muted text-sm">
+                              Записи в логе не найдены.
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>

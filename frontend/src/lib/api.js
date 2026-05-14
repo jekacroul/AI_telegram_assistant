@@ -172,6 +172,8 @@ export const api = {
       `/api/replication/runs/${run_id}${confirm ? "?confirm=true" : ""}`,
       { method: "DELETE" },
     ),
+  replicationRunLog: (run_id) =>
+    request(`/api/replication/runs/${run_id}/log`),
 };
 
 export function streamEvents(path, onEvent) {

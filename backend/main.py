@@ -65,6 +65,7 @@ from .event_bus import message_bus, replication_bus, training_bus
 from .replication import (
     cancel_replication as cancel_replication_run,
     delete_run as delete_replication_run,
+    get_run_log as get_replication_run_log,
     list_runs as list_replication_runs,
     load_settings as load_replication_settings,
     replication_state,
@@ -1574,6 +1575,14 @@ async def replication_delete_run_endpoint(
         status_code = 404 if reason == "запись не найдена" else 409
         raise HTTPException(status_code=status_code, detail=reason)
     return {"ok": True}
+
+
+@app.get("/api/replication/runs/{run_id}/log")
+async def replication_run_log_endpoint(run_id: int) -> dict:
+    log_info = await get_replication_run_log(run_id)
+    if log_info.get("error") == "запись не найдена":
+        raise HTTPException(status_code=404, detail="запись не найдена")
+    return log_info
 
 
 @app.get("/api/replication/progress")
