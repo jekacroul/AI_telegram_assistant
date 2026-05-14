@@ -19,6 +19,7 @@ message; training itself is unaffected.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -27,7 +28,14 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+
+EventCallback = Callable[[dict], None]
+
+
+def _noop_event(_event: dict) -> None:
+    return None
 
 log = logging.getLogger(__name__)
 
@@ -135,6 +143,7 @@ def export_lora_only_gguf(
     base_model: str,
     llama_cpp_path: Optional[str],
     lm_studio_models_dir: Optional[str],
+    on_event: EventCallback = _noop_event,
 ) -> tuple[Optional[Path], Optional[str]]:
     """Convert a PEFT LoRA adapter into a standalone .gguf LoRA file.
 
@@ -157,6 +166,7 @@ def export_lora_only_gguf(
     if script is None:
         return None, script_reason
 
+    on_event({"phase": "converting_lora_to_gguf"})
     out_gguf = adapter_dir / f"{adapter_dir.name}.lora.f16.gguf"
     cmd = [
         sys.executable, str(script), str(adapter_dir),
@@ -189,6 +199,7 @@ def export_lora_only_gguf(
     )
 
     if lm_studio_models_dir:
+        on_event({"phase": "copying_to_lm_studio"})
         target_root = Path(lm_studio_models_dir).expanduser()
         target_dir = target_root / "local-finetune" / adapter_dir.name
         try:
@@ -232,8 +243,14 @@ def _find_quantize_binary(llama_cpp_path: Path) -> Optional[Path]:
     return None
 
 
+MERGE_EVENT_PREFIX = "__MERGE_EVENT__ "
+
+
 def _run_merge_subprocess(
-    adapter_dir: Path, base_model: str, merged_dir: Path
+    adapter_dir: Path,
+    base_model: str,
+    merged_dir: Path,
+    on_event: EventCallback,
 ) -> bool:
     cmd = [
         sys.executable, "-u", "-m", "backend.merge_worker",
@@ -243,15 +260,40 @@ def _run_merge_subprocess(
     ]
     log.info("merging LoRA into base: %s", " ".join(cmd))
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=3600,
+            bufsize=1,
         )
-    except (OSError, subprocess.TimeoutExpired) as e:
-        log.error("merge subprocess crashed: %s", e)
+    except OSError as e:
+        log.error("merge subprocess failed to start: %s", e)
         return False
+
+    captured: list[str] = []
+    assert proc.stdout is not None
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip("\r\n")
+        captured.append(line)
+        idx = line.find(MERGE_EVENT_PREFIX)
+        if idx >= 0:
+            payload = line[idx + len(MERGE_EVENT_PREFIX):]
+            try:
+                event = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            phase = event.get("phase")
+            if phase and phase != "result" and phase != "error":
+                on_event(event)
+    rc = proc.wait()
+
+    class _Result:
+        returncode = rc
+        stdout = "\n".join(captured)
+        stderr = ""
+
+    proc = _Result  # type: ignore[assignment]
 
     if proc.returncode != 0:
         log.error(
@@ -273,6 +315,7 @@ def merge_and_export_gguf(
     llama_cpp_path: Optional[str],
     lm_studio_models_dir: Optional[str],
     quant: str = "Q8_0",
+    on_event: EventCallback = _noop_event,
 ) -> tuple[Optional[Path], Optional[str]]:
     """Produce a single self-contained GGUF for LM Studio.
 
@@ -319,10 +362,11 @@ def merge_and_export_gguf(
     final_gguf = adapter_dir / f"merged.{quant.lower()}.gguf"
 
     # 1. merge weights via isolated subprocess
-    if not _run_merge_subprocess(adapter_dir, base_model, merged_dir):
+    if not _run_merge_subprocess(adapter_dir, base_model, merged_dir, on_event):
         return None, "не удалось слить LoRA с базовой моделью (см. логи backend)"
 
     # 2. HF merged dir -> fp16 GGUF
+    on_event({"phase": "converting_to_gguf"})
     convert_cmd = [
         sys.executable, str(convert_script), str(merged_dir),
         "--outfile", str(fp16_gguf),
@@ -351,6 +395,7 @@ def merge_and_export_gguf(
         return None, f"convert_hf_to_gguf завершился с кодом {proc.returncode} (см. логи backend)"
 
     # 3. quantize fp16 -> target quant
+    on_event({"phase": "quantizing", "quant": quant})
     quant_cmd = [str(quantize_bin), str(fp16_gguf), str(final_gguf), quant]
     log.info("quantizing GGUF: %s", " ".join(quant_cmd))
     try:
@@ -380,10 +425,9 @@ def merge_and_export_gguf(
         final_gguf, final_gguf.stat().st_size / (1024 * 1024),
     )
 
-    # 4. optionally drop into LM Studio's models dir. LM Studio's layout is
-    # <models_dir>/<publisher>/<repo>/<file>.gguf — putting it in a
-    # per-adapter subdir keeps the picker tidy and avoids name collisions.
+    # 4. optionally drop into LM Studio's models dir.
     if lm_studio_models_dir:
+        on_event({"phase": "copying_to_lm_studio"})
         target_root = Path(lm_studio_models_dir).expanduser()
         target_dir = target_root / "local-finetune" / adapter_dir.name
         try:

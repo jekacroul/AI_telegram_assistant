@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../lib/api.js";
 
 function formatEta(seconds) {
@@ -17,6 +16,14 @@ const PHASE_LABELS = {
   preparing_trainer: "подготовка тренера",
   training: "обучение",
   merging_and_exporting_gguf: "экспорт GGUF",
+  loading_base: "загрузка fp16 базы",
+  loading_adapter: "загрузка адаптера",
+  merging: "слияние весов",
+  saving_merged: "сохранение модели",
+  converting_to_gguf: "конвертация в GGUF",
+  quantizing: "квантизация",
+  converting_lora_to_gguf: "конвертация LoRA в GGUF",
+  copying_to_lm_studio: "копирование в LM Studio",
   done: "успех",
   error: "ошибка",
   cancelled: "отменено",
@@ -26,7 +33,6 @@ export default function Training() {
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [progress, setProgress] = useState(null);
-  const [lossHistory, setLossHistory] = useState([]);
   const [datasetInfo, setDatasetInfo] = useState(null);
   const [qualityStats, setQualityStats] = useState(null);
   const [voiceStats, setVoiceStats] = useState(null);
@@ -60,12 +66,6 @@ export default function Training() {
         const payload = JSON.parse(e.data);
         const data = payload.data || payload;
         setProgress(data);
-        if (data.loss != null && data.step != null) {
-          setLossHistory((prev) => {
-            const next = [...prev, { step: data.step, loss: data.loss }];
-            return next.slice(-200);
-          });
-        }
         if (data.phase === "done" || data.phase === "error" || data.phase === "cancelled") {
           refresh();
         }
@@ -88,7 +88,6 @@ export default function Training() {
   async function start() {
     setBusy(true);
     setError("");
-    setLossHistory([]);
     try {
       const res = await api.startTraining();
       if (!res.started) setError(res.reason || "не удалось запустить");
@@ -353,26 +352,6 @@ export default function Training() {
           )}
           {showIndeterminate && (
             <div className="mt-3 progress-indeterminate" />
-          )}
-          {lossHistory.length > 1 && (
-            <div className="h-48 mt-3">
-              <ResponsiveContainer>
-                <LineChart data={lossHistory}>
-                  <XAxis dataKey="step" stroke="#9aa3b2" />
-                  <YAxis stroke="#9aa3b2" />
-                  <Tooltip
-                    contentStyle={{ background: "#12151c", border: "1px solid #2a2f3a" }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="loss"
-                    stroke="#5b8cff"
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
           )}
         </div>
         );

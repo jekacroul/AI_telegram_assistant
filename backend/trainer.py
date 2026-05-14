@@ -139,6 +139,23 @@ async def _emit(event: dict) -> None:
     await training_bus.publish("training", event)
 
 
+def _make_sync_emit(version: int):
+    """Bridge for sync code running in asyncio.to_thread to publish to the
+    training SSE bus. Each event the worker thread emits is scheduled
+    back on the main loop. `version` is mixed in so the UI shows context."""
+    loop = asyncio.get_running_loop()
+
+    def _forward(event: dict) -> None:
+        payload = dict(event)
+        payload.setdefault("version", version)
+        try:
+            asyncio.run_coroutine_threadsafe(_emit(payload), loop)
+        except RuntimeError:
+            pass
+
+    return _forward
+
+
 async def _load_pairs(session: AsyncSession) -> list[dict]:
     result = await session.execute(select(TrainingPair))
     pairs = list(result.scalars().all())
@@ -283,6 +300,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
         if not was_cancelled:
             from .gguf_export import merge_and_export_gguf
             await _emit({"phase": "merging_and_exporting_gguf", "version": version})
+            forward = _make_sync_emit(version)
             gguf_path, gguf_skip_reason = await asyncio.to_thread(
                 merge_and_export_gguf,
                 Path(adapter_path),
@@ -290,6 +308,7 @@ async def _run_training(run_id: int, pairs: list[dict], version: int) -> None:
                 settings.llama_cpp_path,
                 settings.lm_studio_models_dir,
                 settings.gguf_quant,
+                forward,
             )
 
         async with SessionLocal() as session:
@@ -385,12 +404,14 @@ async def _run_lora_gguf_export(run_id: int, version: int, adapter_path: str) ->
         from .gguf_export import export_lora_only_gguf
         await _emit({"phase": "merging_and_exporting_gguf", "version": version,
                      "note": "LoRA-only (без merge)"})
+        forward = _make_sync_emit(version)
         gguf_path, reason = await asyncio.to_thread(
             export_lora_only_gguf,
             Path(adapter_path),
             settings.hf_base_model,
             settings.llama_cpp_path,
             settings.lm_studio_models_dir,
+            forward,
         )
         if gguf_path is None:
             await _emit({
@@ -445,6 +466,7 @@ async def _run_gguf_export(run_id: int, version: int, adapter_path: str) -> None
     try:
         from .gguf_export import merge_and_export_gguf
         await _emit({"phase": "merging_and_exporting_gguf", "version": version})
+        forward = _make_sync_emit(version)
         gguf_path, gguf_skip_reason = await asyncio.to_thread(
             merge_and_export_gguf,
             Path(adapter_path),
@@ -452,6 +474,7 @@ async def _run_gguf_export(run_id: int, version: int, adapter_path: str) -> None
             settings.llama_cpp_path,
             settings.lm_studio_models_dir,
             settings.gguf_quant,
+            forward,
         )
         if gguf_path is None:
             await _emit({
