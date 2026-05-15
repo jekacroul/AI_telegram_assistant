@@ -418,6 +418,14 @@ class TelegramService:
                 ):
                     mentioned = True
                 should_reply = mentioned
+                log.info(
+                    "handle_incoming: group message chat_id=%s mentioned=%s "
+                    "bot_username=%s text=%r",
+                    chat_id,
+                    mentioned,
+                    me.username if me else None,
+                    (content_text or "")[:80],
+                )
 
             tg_ts = _naive_utc(getattr(tg_msg, "date", None))
             async with SessionLocal() as session:
@@ -688,6 +696,13 @@ class TelegramService:
                     )
                     chosen = pick_auto_variant(variants)
                     if not chosen:
+                        log.info(
+                            "handle_incoming: no reply, no usable variant "
+                            "(msg_id=%s variants=%s reject_reason=%s)",
+                            msg_id,
+                            len(variants),
+                            reject_reason,
+                        )
                         await self._mark_pending_quality(msg_id, reject_reason)
                         await self._maybe_reanalyze(chat_id=chat_id)
                         return
