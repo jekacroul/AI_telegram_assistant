@@ -395,17 +395,18 @@ class TelegramService:
             self._cancel_delayed_reply(chat_id)
 
             should_reply = not is_mine
-            if not is_business and tg_msg.chat.type in (
+            is_group_chat = not is_business and tg_msg.chat.type in (
                 ChatType.GROUP,
                 ChatType.SUPERGROUP,
-            ):
+            )
+            mentioned = False
+            if is_group_chat:
                 me = None
                 if self.bot:
                     try:
                         me = await self.bot.me()
                     except Exception:  # noqa: BLE001
                         me = None
-                mentioned = False
                 handle = f"@{me.username}".lower() if me and me.username else ""
                 if handle and tg_msg.text and handle in tg_msg.text.lower():
                     mentioned = True
@@ -420,9 +421,10 @@ class TelegramService:
                     mentioned = True
                 should_reply = mentioned
                 log.info(
-                    "handle_incoming: group message chat_id=%s mentioned=%s "
-                    "bot_username=%s text=%r",
+                    "handle_incoming: group message chat_id=%s sender_id=%s "
+                    "mentioned=%s bot_username=%s text=%r",
                     chat_id,
+                    sender_id,
                     mentioned,
                     me.username if me else None,
                     (content_text or "")[:80],
@@ -459,6 +461,14 @@ class TelegramService:
                 await session.commit()
                 await session.refresh(row)
                 msg_id = row.id
+
+                if is_group_chat:
+                    group_reply_mode = await get_setting(
+                        session, "group_reply_mode", "mention"
+                    )
+                    should_reply = (
+                        True if group_reply_mode == "all" else mentioned
+                    )
 
                 monitored = await get_setting(session, "monitored_chats", "")
                 allowed: list[int] = []
