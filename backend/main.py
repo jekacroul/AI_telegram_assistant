@@ -43,6 +43,7 @@ from .database import (
     Message,
     QualityLog,
     QuickReply,
+    RagIndexLog,
     SessionLocal,
     TrainingPair,
     TrainingRun,
@@ -76,6 +77,7 @@ from .replication import (
 )
 from .llm_engine import LLMUnavailableError, get_client
 from .quality_filter import is_good_response
+from .rag_engine import EMBED_MODEL_NAME, get_rag_context, rag_engine
 from .notifications import (
     SETTING_LAST_PRIVATE_CHAT_ID,
     SETTING_NOTIFY_CHAT_ID,
@@ -215,6 +217,7 @@ async def lifespan(app: FastAPI):
     replication_scheduler.start()
     if settings.llama_server_auto_start and settings.llama_base_model_gguf:
         asyncio.create_task(_auto_start_llama_server())
+    asyncio.create_task(_startup_rag_index())
     yield
     await replication_scheduler.stop()
     await dialog_backup_scheduler.stop()
@@ -229,6 +232,50 @@ async def _auto_start_llama_server() -> None:
             log.warning("auto-start llama-server failed: %s", result.get("reason"))
     except Exception:
         log.exception("auto-start llama-server crashed")
+
+
+async def _startup_rag_index() -> None:
+    """Initialize RAG and index any messages not yet in the vector store."""
+    try:
+        async with SessionLocal() as session:
+            enabled = (
+                await get_setting(session, "rag_enabled", "1")
+            ) in ("1", "true", "True")
+        if not enabled:
+            log.info("RAG: выключен в настройках, пропускаю индексацию")
+            return
+        if not await rag_engine.initialize():
+            log.warning(
+                "RAG: модель эмбеддингов недоступна (%s); RAG отключён",
+                rag_engine.last_error,
+            )
+            return
+        async with SessionLocal() as session:
+            unindexed = (
+                await session.execute(
+                    select(func.count(Message.id)).where(
+                        Message.rag_indexed == False,  # noqa: E712
+                        Message.deleted == False,  # noqa: E712
+                    )
+                )
+            ).scalar_one()
+        if unindexed <= 0:
+            log.info("RAG: все сообщения уже проиндексированы")
+            return
+        log.info(
+            "RAG: найдено %s неиндексированных сообщений, запускаю индексацию...",
+            unindexed,
+        )
+        async with SessionLocal() as session:
+            result = await rag_engine.index_all_messages(session)
+        log.info(
+            "RAG: индексация завершена — %s/%s за %.1fс",
+            result.indexed,
+            result.total,
+            result.duration_seconds,
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("RAG startup indexing failed")
 
 
 app = FastAPI(title="Telegram Local AI Assistant", lifespan=lifespan)
@@ -896,15 +943,24 @@ async def generate_reply(
             msg.text = override
             await session.commit()
     try:
+        rag_context, rag_messages = await get_rag_context(
+            session, incoming_text, msg.chat_id
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("RAG context retrieval failed in generate endpoint")
+        rag_context, rag_messages = "", []
+    try:
         variants, reason = await _generate_quality_variants(
             incoming_text=incoming_text,
             sender_name=msg.sender_name,
             style_profile=profile,
             chat_history=history_dicts,
             is_voice=is_voice,
+            rag_context=rag_context,
         )
     except LLMUnavailableError as e:
         raise HTTPException(503, str(e))
+    rag_payload = [m.to_dict() for m in rag_messages]
     if not variants:
         msg.pending_reason = "quality_filter"
         await session.commit()
@@ -912,8 +968,13 @@ async def generate_reply(
             "pending",
             {"id": msg.id, "reason": "quality_filter", "quality_reason": reason},
         )
-        return {"variants": [], "pending": True, "reason": reason}
-    return {"variants": variants}
+        return {
+            "variants": [],
+            "pending": True,
+            "reason": reason,
+            "rag_context": rag_payload,
+        }
+    return {"variants": variants, "rag_context": rag_payload}
 
 
 async def _generate_quality_variants(
@@ -922,6 +983,7 @@ async def _generate_quality_variants(
     style_profile: dict | None,
     chat_history: list[dict],
     is_voice: bool = False,
+    rag_context: Optional[str] = None,
 ) -> tuple[list[str], str]:
     client = get_client()
     last_reason = "no_variants"
@@ -933,6 +995,7 @@ async def _generate_quality_variants(
             style_profile=style_profile,
             chat_history=chat_history,
             is_voice=is_voice,
+            rag_context=rag_context,
         )
         accepted: list[str] = []
         for variant in variants:
@@ -1242,6 +1305,181 @@ async def training_progress(request: Request) -> EventSourceResponse:
             training_bus.unsubscribe(q)
 
     return EventSourceResponse(gen())
+
+
+class RagSettingsIn(BaseModel):
+    rag_enabled: Optional[bool] = None
+    min_similarity: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    max_results: Optional[int] = Field(default=None, ge=1, le=10)
+    search_cross_chat: Optional[bool] = None
+    cross_chat_min_similarity: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0
+    )
+
+
+class RagSearchIn(BaseModel):
+    query: str = Field(min_length=1)
+    chat_id: Optional[int] = None
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+async def _rag_settings_dict(session: AsyncSession) -> dict:
+    return {
+        "rag_enabled": (await get_setting(session, "rag_enabled", "1"))
+        in ("1", "true", "True"),
+        "min_similarity": float(
+            await get_setting(session, "rag_min_similarity", "0.6")
+        ),
+        "max_results": int(
+            float(await get_setting(session, "rag_max_results", "5"))
+        ),
+        "search_cross_chat": (
+            await get_setting(session, "rag_search_cross_chat", "1")
+        )
+        in ("1", "true", "True"),
+        "cross_chat_min_similarity": float(
+            await get_setting(session, "rag_cross_chat_min_similarity", "0.7")
+        ),
+    }
+
+
+@app.get("/api/rag/status")
+async def rag_status(session: AsyncSession = Depends(get_session)) -> dict:
+    enabled = (
+        await get_setting(session, "rag_enabled", "1")
+    ) in ("1", "true", "True")
+    stats = await rag_engine.get_stats()
+    return {
+        "enabled": enabled and rag_engine.available,
+        "total_indexed": stats.total_indexed,
+        "collection_size_mb": stats.collection_size_mb,
+        "last_indexed_at": stats.last_indexed_at,
+        "model": EMBED_MODEL_NAME,
+        "device": rag_engine.device,
+        "available": rag_engine.available,
+        "last_error": rag_engine.last_error,
+        "indexing": rag_engine.progress,
+    }
+
+
+@app.post("/api/rag/index-all")
+async def rag_index_all() -> dict:
+    if rag_engine.progress.get("running"):
+        return {"started": False, "reason": "индексация уже идёт"}
+    if not await rag_engine.initialize():
+        raise HTTPException(503, rag_engine.last_error or "RAG недоступен")
+
+    async def _run() -> None:
+        try:
+            async with SessionLocal() as session:
+                await rag_engine.index_all_messages(session)
+        except Exception:  # noqa: BLE001
+            log.exception("RAG index-all background task failed")
+
+    asyncio.create_task(_run())
+    return {"started": True}
+
+
+@app.get("/api/rag/index-progress")
+async def rag_index_progress(request: Request) -> EventSourceResponse:
+    async def gen():
+        while True:
+            if await request.is_disconnected():
+                break
+            progress = rag_engine.progress
+            yield {"data": json.dumps(progress, ensure_ascii=False)}
+            if not progress.get("running"):
+                break
+            await asyncio.sleep(1.0)
+
+    return EventSourceResponse(gen())
+
+
+@app.post("/api/rag/search")
+async def rag_search(payload: RagSearchIn) -> dict:
+    if not await rag_engine.initialize():
+        raise HTTPException(503, rag_engine.last_error or "RAG недоступен")
+    if payload.chat_id is not None:
+        results = await rag_engine.search_relevant(
+            payload.query,
+            payload.chat_id,
+            limit=payload.limit,
+            min_similarity=0.0,
+        )
+    else:
+        results = await rag_engine.search_cross_chat(
+            payload.query, limit=payload.limit, min_similarity=0.0
+        )
+    return {"results": [m.to_dict() for m in results]}
+
+
+@app.delete("/api/rag/clear")
+async def rag_clear(confirm: bool = False) -> dict:
+    if not confirm:
+        raise HTTPException(400, "Добавь ?confirm=true для подтверждения")
+    await rag_engine.clear()
+    return {"ok": True}
+
+
+@app.get("/api/rag/stats")
+async def rag_stats(session: AsyncSession = Depends(get_session)) -> dict:
+    stats = await rag_engine.get_stats()
+    last_log = (
+        await session.execute(
+            select(RagIndexLog).order_by(desc(RagIndexLog.created_at)).limit(1)
+        )
+    ).scalar_one_or_none()
+    return {
+        "total_indexed": stats.total_indexed,
+        "collection_size_mb": stats.collection_size_mb,
+        "last_indexed_at": stats.last_indexed_at,
+        "last_index_run": (
+            {
+                "total_messages": last_log.total_messages,
+                "indexed_count": last_log.indexed_count,
+                "duration_seconds": last_log.duration_seconds,
+                "created_at": _iso_utc(last_log.created_at),
+            }
+            if last_log
+            else None
+        ),
+    }
+
+
+@app.get("/api/settings/rag")
+async def get_rag_settings(session: AsyncSession = Depends(get_session)) -> dict:
+    return await _rag_settings_dict(session)
+
+
+@app.post("/api/settings/rag")
+async def save_rag_settings(
+    payload: RagSettingsIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    if payload.rag_enabled is not None:
+        await set_setting(
+            session, "rag_enabled", "1" if payload.rag_enabled else "0"
+        )
+    if payload.min_similarity is not None:
+        await set_setting(
+            session, "rag_min_similarity", str(payload.min_similarity)
+        )
+    if payload.max_results is not None:
+        await set_setting(
+            session, "rag_max_results", str(payload.max_results)
+        )
+    if payload.search_cross_chat is not None:
+        await set_setting(
+            session,
+            "rag_search_cross_chat",
+            "1" if payload.search_cross_chat else "0",
+        )
+    if payload.cross_chat_min_similarity is not None:
+        await set_setting(
+            session,
+            "rag_cross_chat_min_similarity",
+            str(payload.cross_chat_min_similarity),
+        )
+    return await _rag_settings_dict(session)
 
 
 @app.get("/api/style/profile")

@@ -23,3 +23,5 @@ emoji>=2.10.0
 openai-whisper>=20231117
 pydub>=0.25.1
 ffmpeg-python>=0.2.0
+chromadb>=0.5.0
+sentence-transformers>=2.7.0
