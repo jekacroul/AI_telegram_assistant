@@ -80,6 +80,16 @@ export default function Settings() {
   const [whisperSaving, setWhisperSaving] = useState(false);
   const [whisperMsg, setWhisperMsg] = useState("");
   const [whisperErr, setWhisperErr] = useState("");
+  const [rag, setRag] = useState({
+    rag_enabled: true,
+    min_similarity: 0.6,
+    max_results: 5,
+    search_cross_chat: true,
+    cross_chat_min_similarity: 0.7,
+  });
+  const [ragSaving, setRagSaving] = useState(false);
+  const [ragMsg, setRagMsg] = useState("");
+  const [ragErr, setRagErr] = useState("");
 
   const modelOptions = useMemo(() => {
     const list = [...models];
@@ -140,6 +150,12 @@ export default function Settings() {
     try {
       const w = await api.getWhisperSettings();
       setWhisper((prev) => ({ ...prev, ...w }));
+    } catch {
+      // ignore
+    }
+    try {
+      const r = await api.getRagSettings();
+      setRag((prev) => ({ ...prev, ...r }));
     } catch {
       // ignore
     }
@@ -213,6 +229,26 @@ export default function Settings() {
       setWhisperErr(e.message);
     } finally {
       setWhisperSaving(false);
+    }
+  }
+
+  async function saveRag() {
+    setRagSaving(true);
+    setRagErr("");
+    setRagMsg("");
+    try {
+      await api.saveRagSettings({
+        rag_enabled: !!rag.rag_enabled,
+        min_similarity: Number(rag.min_similarity),
+        max_results: Number(rag.max_results),
+        search_cross_chat: !!rag.search_cross_chat,
+        cross_chat_min_similarity: Number(rag.cross_chat_min_similarity),
+      });
+      setRagMsg("Сохранено");
+    } catch (e) {
+      setRagErr(e.message);
+    } finally {
+      setRagSaving(false);
     }
   }
 
@@ -919,6 +955,134 @@ export default function Settings() {
           {whisperErr && (
             <span className="text-bad text-sm">{whisperErr}</span>
           )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="label">Векторная память (RAG)</div>
+        <label className="flex items-start gap-3 mt-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!rag.rag_enabled}
+            onChange={(e) =>
+              setRag((prev) => ({ ...prev, rag_enabled: e.target.checked }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">
+              Искать контекст по всей истории
+            </div>
+            <div className="text-xs text-muted">
+              Бот находит релевантные сообщения из всей переписки, а не только
+              последние 8.
+            </div>
+          </div>
+        </label>
+
+        {rag.rag_enabled && (
+          <>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm">
+                <span>
+                  Минимальная схожесть: {Number(rag.min_similarity).toFixed(2)}
+                </span>
+                <span className="text-muted">0.40–0.90</span>
+              </div>
+              <input
+                className="w-full mt-2"
+                type="range"
+                min="0.4"
+                max="0.9"
+                step="0.05"
+                value={rag.min_similarity}
+                onChange={(e) =>
+                  setRag((prev) => ({
+                    ...prev,
+                    min_similarity: Number(e.target.value),
+                  }))
+                }
+              />
+              <div className="text-xs text-muted mt-1">
+                Ниже = больше результатов, но менее точные.
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="label">Максимум результатов</div>
+              <input
+                className="input mt-1 w-32"
+                type="number"
+                min="1"
+                max="10"
+                value={rag.max_results}
+                onChange={(e) =>
+                  setRag((prev) => ({
+                    ...prev,
+                    max_results: e.target.value,
+                  }))
+                }
+              />
+            </div>
+
+            <label className="flex items-start gap-3 mt-4">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={!!rag.search_cross_chat}
+                onChange={(e) =>
+                  setRag((prev) => ({
+                    ...prev,
+                    search_cross_chat: e.target.checked,
+                  }))
+                }
+              />
+              <div>
+                <div className="text-sm font-medium">Искать по всем чатам</div>
+                <div className="text-xs text-muted">
+                  Находит повторяющиеся темы у разных собеседников.
+                </div>
+              </div>
+            </label>
+
+            {rag.search_cross_chat && (
+              <div className="mt-4">
+                <div className="flex justify-between text-sm">
+                  <span>
+                    Порог для других чатов:{" "}
+                    {Number(rag.cross_chat_min_similarity).toFixed(2)}
+                  </span>
+                  <span className="text-muted">0.50–0.95</span>
+                </div>
+                <input
+                  className="w-full mt-2"
+                  type="range"
+                  min="0.5"
+                  max="0.95"
+                  step="0.05"
+                  value={rag.cross_chat_min_similarity}
+                  onChange={(e) =>
+                    setRag((prev) => ({
+                      ...prev,
+                      cross_chat_min_similarity: Number(e.target.value),
+                    }))
+                  }
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="flex flex-wrap gap-2 mt-4 items-center">
+          <button
+            className="btn-primary"
+            onClick={saveRag}
+            disabled={ragSaving}
+          >
+            Сохранить
+          </button>
+          {ragMsg && <span className="text-good text-sm">{ragMsg}</span>}
+          {ragErr && <span className="text-bad text-sm">{ragErr}</span>}
         </div>
       </div>
 

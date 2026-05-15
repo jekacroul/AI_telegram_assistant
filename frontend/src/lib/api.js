@@ -196,6 +196,21 @@ export const api = {
     ),
   replicationRunLog: (run_id) =>
     request(`/api/replication/runs/${run_id}/log`),
+  ragStatus: () => request("/api/rag/status"),
+  ragStats: () => request("/api/rag/stats"),
+  ragIndexAll: () => request("/api/rag/index-all", { method: "POST" }),
+  ragSearch: (query, chat_id = null, limit = 5) =>
+    request("/api/rag/search", {
+      method: "POST",
+      body: JSON.stringify({ query, chat_id, limit }),
+    }),
+  ragClear: () => request("/api/rag/clear?confirm=true", { method: "DELETE" }),
+  getRagSettings: () => request("/api/settings/rag"),
+  saveRagSettings: (data) =>
+    request("/api/settings/rag", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
 
 export function streamEvents(path, onEvent) {

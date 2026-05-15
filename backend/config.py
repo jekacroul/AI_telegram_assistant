@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+
+# Keep every downloaded model inside the project folder instead of the
+# system-wide caches. Set before sentence-transformers / transformers are
+# ever imported so their loaders pick these locations up.
+_HF_HOME = ROOT_DIR / "models" / "huggingface"
+_ST_HOME = ROOT_DIR / "models" / "sentence_transformers"
+for _path in (_HF_HOME, _ST_HOME):
+    _path.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("HF_HOME", str(_HF_HOME))
+os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(_ST_HOME))
 
 
 class Settings(BaseSettings):
@@ -86,6 +97,22 @@ class Settings(BaseSettings):
         path = Path(self.media_path)
         if not path.is_absolute():
             path = ROOT_DIR / path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def hf_home_dir(self) -> Path:
+        _HF_HOME.mkdir(parents=True, exist_ok=True)
+        return _HF_HOME
+
+    @property
+    def sentence_transformers_dir(self) -> Path:
+        _ST_HOME.mkdir(parents=True, exist_ok=True)
+        return _ST_HOME
+
+    @property
+    def chroma_db_dir(self) -> Path:
+        path = ROOT_DIR / "data" / "chroma_db"
         path.mkdir(parents=True, exist_ok=True)
         return path
 

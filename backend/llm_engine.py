@@ -53,6 +53,7 @@ SYSTEM_TEMPLATE = (
     " не используй кавычки, двоеточия-разделители, поля sender/text. Просто"
     " сам текст сообщения, как ты бы написал его в чате.\n"
     "Стиль речи: {style_profile}\n"
+    "{rag_block}"
     "История чата:\n{chat_history}\n"
     "Дай ровно 3 разных варианта ответа. Формат — нумерованный список,"
     " каждый вариант с новой строки:\n"
@@ -82,13 +83,16 @@ def build_system_prompt(
     chat_history: Iterable[dict] | None,
     is_voice: bool = False,
     transcription: Optional[str] = None,
+    rag_context: Optional[str] = None,
 ) -> str:
     style_str = json.dumps(style_profile or {}, ensure_ascii=False)
+    rag_block = f"{rag_context.strip()}\n" if rag_context and rag_context.strip() else ""
     base = SYSTEM_TEMPLATE.format(
         user_name=user_name,
         style_profile=style_str,
         sender_name=sender_name or "неизвестно",
         chat_history=_format_history(chat_history),
+        rag_block=rag_block,
     )
     if is_voice:
         voice_note = (
@@ -339,6 +343,7 @@ class LLMClient:
         chat_history: Optional[list[dict]] = None,
         user_name: Optional[str] = None,
         is_voice: bool = False,
+        rag_context: Optional[str] = None,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
         system = build_system_prompt(
@@ -348,6 +353,7 @@ class LLMClient:
             chat_history,
             is_voice=is_voice,
             transcription=incoming_text if is_voice else None,
+            rag_context=rag_context,
         )
         prompt = (
             f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"

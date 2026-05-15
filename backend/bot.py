@@ -55,6 +55,7 @@ ALLOWED_UPDATES = [
 from .event_bus import message_bus
 from .llm_engine import LLMUnavailableError, get_client, pick_auto_variant
 from .quality_filter import is_good_response
+from .rag_engine import get_rag_context, rag_engine
 from .style_engine import get_profile_for_chat, reanalyze_and_store, reanalyze_chat_persona
 from .whisper_engine import convert_to_wav, whisper_engine
 
@@ -67,6 +68,19 @@ log = logging.getLogger(__name__)
 
 
 TELEGRAM_MESSAGE_LIMIT = 4096
+
+# Placeholder strings that carry no semantic content worth embedding.
+RAG_SKIP_TEXTS = {
+    "(фото)",
+    "(видео)",
+    "(кружок)",
+    "(голосовое)",
+    "(стикер)",
+    "(гиф)",
+    "(аудио)",
+    "(документ)",
+    "Приватное сообщение",
+}
 
 
 def _split_for_telegram(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
@@ -458,6 +472,18 @@ class TelegramService:
                 await session.refresh(row)
                 msg_id = row.id
 
+                # Index into RAG vector memory. Fire-and-forget so reply
+                # generation is never blocked by embedding work.
+                self._schedule_rag_index(
+                    msg_id,
+                    content_text,
+                    chat_id,
+                    chat_name,
+                    row.sender_name,
+                    is_mine,
+                    tg_ts,
+                )
+
                 if is_group_chat:
                     group_reply_mode = await get_setting(
                         session, "group_reply_mode", "mention"
@@ -568,6 +594,18 @@ class TelegramService:
                             "error": result.error,
                         },
                     )
+                    # Voice messages were stored as "(голосовое)"; index the
+                    # real transcription now that it is available.
+                    if result.text and not result.error:
+                        self._schedule_rag_index(
+                            msg_id,
+                            result.text,
+                            chat_id,
+                            chat_name,
+                            settings.user_name if is_mine else sender_name,
+                            is_mine,
+                            tg_ts,
+                        )
                 else:
                     voice_download_failed = True
                     async with SessionLocal() as session:
@@ -777,6 +815,37 @@ class TelegramService:
             self.last_error = str(e)
             log.exception("handle_incoming error")
 
+    def _schedule_rag_index(
+        self,
+        msg_id: int,
+        text: str,
+        chat_id: int,
+        chat_name: str,
+        sender_name: str,
+        is_mine: bool,
+        timestamp: datetime,
+    ) -> None:
+        content = (text or "").strip()
+        if not content or content in RAG_SKIP_TEXTS:
+            return
+        ts = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+        metadata = {
+            "chat_id": chat_id,
+            "chat_name": chat_name,
+            "sender_name": sender_name,
+            "is_mine": bool(is_mine),
+            "timestamp": ts.astimezone(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        try:
+            asyncio.create_task(
+                rag_engine.index_message(msg_id, content, metadata)
+            )
+        except RuntimeError:
+            # No running loop (shouldn't happen inside handlers) — skip.
+            pass
+
     def _cancel_delayed_reply(self, chat_id: int) -> None:
         task = self._delayed_reply_tasks.get(chat_id)
         current_task = asyncio.current_task()
@@ -845,6 +914,11 @@ class TelegramService:
             quality_enabled = (
                 await get_setting(session, "quality_filter_enabled", "1")
             ) in ("1", "true", "True")
+            try:
+                rag_context, _ = await get_rag_context(session, text, chat_id)
+            except Exception:  # noqa: BLE001
+                log.exception("RAG context retrieval failed; replying without it")
+                rag_context = ""
         client = get_client()
         if not quality_enabled:
             variants = await client.generate_reply(
@@ -853,6 +927,7 @@ class TelegramService:
                 style_profile=profile,
                 chat_history=history_dicts,
                 is_voice=is_voice,
+                rag_context=rag_context,
             )
             return (variants, "ok") if variants else ([], "no_variants")
         last_reason = "no_variants"
@@ -864,6 +939,7 @@ class TelegramService:
                 style_profile=profile,
                 chat_history=history_dicts,
                 is_voice=is_voice,
+                rag_context=rag_context,
             )
             accepted: list[str] = []
             async with SessionLocal() as session:

@@ -67,6 +67,7 @@ class Message(Base):
     admin_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     admin_feedback: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     admin_correction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rag_indexed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
 class AdminSession(Base):
@@ -181,6 +182,18 @@ class QualityLog(Base):
     reason: Mapped[str] = mapped_column(String(64), index=True)
     incoming_text: Mapped[str] = mapped_column(Text, default="")
     rejected_text: Mapped[str] = mapped_column(Text, default="")
+
+
+class RagIndexLog(Base):
+    __tablename__ = "rag_index_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    total_messages: Mapped[int] = mapped_column(Integer, default=0)
+    indexed_count: Mapped[int] = mapped_column(Integer, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
 
 
 class Setting(Base):
@@ -300,6 +313,10 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "admin_correction" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN admin_correction TEXT"
+        )
+    if "rag_indexed" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN rag_indexed BOOLEAN DEFAULT 0 NOT NULL"
         )
 
     backup_columns = {col["name"] for col in inspector.get_columns("dialog_backup_messages")}

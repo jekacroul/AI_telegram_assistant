@@ -42,6 +42,14 @@ export default function Training() {
   const [runLogs, setRunLogs] = useState({});
   const [loadingLogId, setLoadingLogId] = useState(null);
   const [serverStatus, setServerStatus] = useState(null);
+  const [ragStatus, setRagStatus] = useState(null);
+  const [ragSearch, setRagSearch] = useState({
+    open: false,
+    query: "",
+    results: null,
+    busy: false,
+    error: "",
+  });
 
   const refresh = async () => {
     const [st, rs, qs] = await Promise.all([
@@ -55,6 +63,11 @@ export default function Training() {
     try {
       const vs = await api.voiceStats();
       setVoiceStats(vs);
+    } catch {
+      // ignore
+    }
+    try {
+      setRagStatus(await api.ragStatus());
     } catch {
       // ignore
     }
@@ -79,6 +92,19 @@ export default function Training() {
         }
       } catch {}
     };
+    const ragEv = new EventSource("/api/rag/index-progress");
+    let ragWasRunning = false;
+    ragEv.onmessage = (e) => {
+      try {
+        const p = JSON.parse(e.data);
+        if (!p || typeof p.running === "undefined") return;
+        setRagStatus((s) => (s ? { ...s, indexing: p } : s));
+        if (ragWasRunning && !p.running) {
+          api.ragStatus().then(setRagStatus).catch(() => {});
+        }
+        ragWasRunning = p.running;
+      } catch {}
+    };
     const srvPoll = setInterval(async () => {
       try {
         const srv = await api.llamaServerStatus();
@@ -89,6 +115,7 @@ export default function Training() {
     }, 3000);
     return () => {
       ev.close();
+      ragEv.close();
       clearInterval(srvPoll);
     };
   }, []);
@@ -128,6 +155,50 @@ export default function Training() {
     } catch (e) {
       setError(e.message);
       setServerStatus((s) => (s ? { ...s, auto_resume: !enabled } : s));
+    }
+  }
+
+  async function reindexRag() {
+    setError("");
+    try {
+      const res = await api.ragIndexAll();
+      if (!res.started) {
+        setError(res.reason || "не удалось запустить индексацию");
+        return;
+      }
+      // Optimistically flip the UI into "running" so the progress bar
+      // appears immediately; the SSE stream takes over from here.
+      setRagStatus((s) =>
+        s
+          ? {
+              ...s,
+              indexing: {
+                running: true,
+                indexed: 0,
+                total: s.total_indexed || 0,
+                percent: 0,
+                eta_seconds: 0,
+              },
+            }
+          : s,
+      );
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function runRagSearch() {
+    if (!ragSearch.query.trim()) return;
+    setRagSearch((s) => ({ ...s, busy: true, error: "", results: null }));
+    try {
+      const res = await api.ragSearch(ragSearch.query.trim(), null, 5);
+      setRagSearch((s) => ({
+        ...s,
+        busy: false,
+        results: res.results || [],
+      }));
+    } catch (e) {
+      setRagSearch((s) => ({ ...s, busy: false, error: e.message }));
     }
   }
 
@@ -285,6 +356,159 @@ export default function Training() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {ragStatus && (
+        <div className="card">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="label">Векторная память</div>
+            <span
+              className={`text-sm ${
+                ragStatus.enabled ? "text-good" : "text-muted"
+              }`}
+            >
+              {ragStatus.enabled ? "✅ Активна" : "❌ Выключена"}
+            </span>
+            {ragStatus.available && (
+              <span className="text-xs text-muted">
+                {ragStatus.model} · {ragStatus.device}
+              </span>
+            )}
+          </div>
+
+          {ragStatus.last_error && !ragStatus.available && (
+            <div className="text-bad text-xs mt-2">
+              Ошибка: {ragStatus.last_error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3 text-sm">
+            <div>
+              <div className="text-muted text-xs">Проиндексировано</div>
+              <div className="text-lg font-semibold">
+                {(ragStatus.total_indexed ?? 0).toLocaleString("ru-RU")}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted text-xs">Размер</div>
+              <div className="text-lg font-semibold">
+                {ragStatus.collection_size_mb ?? 0} MB
+              </div>
+            </div>
+            <div>
+              <div className="text-muted text-xs">Последняя индексация</div>
+              <div className="text-lg font-semibold">
+                {ragStatus.last_indexed_at
+                  ? new Date(ragStatus.last_indexed_at).toLocaleString()
+                  : "—"}
+              </div>
+            </div>
+          </div>
+
+          {ragStatus.indexing?.running && (
+            <div className="mt-3">
+              <div className="flex flex-wrap justify-between gap-2 text-xs text-muted">
+                <span>
+                  Индексирую сообщения: {ragStatus.indexing.indexed}/
+                  {ragStatus.indexing.total || "—"}
+                </span>
+                <span>
+                  {ragStatus.indexing.eta_seconds > 0 && (
+                    <span className="mr-3">
+                      ETA: {formatEta(ragStatus.indexing.eta_seconds)}
+                    </span>
+                  )}
+                  {ragStatus.indexing.percent}%
+                </span>
+              </div>
+              {ragStatus.indexing.total > 0 ? (
+                <div className="mt-1 h-2 bg-white/10 rounded">
+                  <div
+                    className="h-2 bg-accent rounded transition-all"
+                    style={{ width: `${ragStatus.indexing.percent}%` }}
+                  />
+                </div>
+              ) : (
+                <div className="mt-1 progress-indeterminate" />
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2 mt-4">
+            <button
+              className="btn-secondary"
+              onClick={reindexRag}
+              disabled={!ragStatus.available || ragStatus.indexing?.running}
+            >
+              Переиндексировать всё
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() =>
+                setRagSearch((s) => ({ ...s, open: !s.open }))
+              }
+              disabled={!ragStatus.available}
+            >
+              {ragSearch.open ? "Скрыть тест поиска" : "Тест поиска"}
+            </button>
+          </div>
+
+          {ragSearch.open && (
+            <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-3">
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="Введите фразу для поиска"
+                  value={ragSearch.query}
+                  onChange={(e) =>
+                    setRagSearch((s) => ({ ...s, query: e.target.value }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") runRagSearch();
+                  }}
+                />
+                <button
+                  className="btn-primary"
+                  onClick={runRagSearch}
+                  disabled={ragSearch.busy}
+                >
+                  {ragSearch.busy ? "..." : "Найти"}
+                </button>
+              </div>
+              {ragSearch.error && (
+                <div className="text-bad text-sm mt-2">{ragSearch.error}</div>
+              )}
+              {ragSearch.results && ragSearch.results.length === 0 && (
+                <div className="text-muted text-sm mt-2">
+                  Ничего не найдено.
+                </div>
+              )}
+              {ragSearch.results && ragSearch.results.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {ragSearch.results.map((r, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-white/10 p-2 text-sm"
+                    >
+                      <div className="flex justify-between gap-2 text-xs text-muted">
+                        <span>
+                          {r.sender_name || r.chat_name || "—"}
+                          {r.chat_name && r.sender_name
+                            ? ` · ${r.chat_name}`
+                            : ""}
+                        </span>
+                        <span className="rounded-full bg-accent/20 text-accent px-2">
+                          {r.similarity_score?.toFixed?.(2) ?? "—"}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-white/90">{r.text}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

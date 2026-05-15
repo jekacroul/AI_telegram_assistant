@@ -23,6 +23,8 @@ export default function ReplyModal({ message, onClose, onSent }) {
   const [newQuickText, setNewQuickText] = useState("");
   const [transcription, setTranscription] = useState(initialTranscription);
   const [generated, setGenerated] = useState(false);
+  const [ragContext, setRagContext] = useState([]);
+  const [ragOpen, setRagOpen] = useState(false);
   const navigate = useNavigate();
 
   async function generate(override) {
@@ -32,6 +34,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
       const res = await api.generateReply(message.id, override);
       setVariants(res.variants || []);
       setText(res.variants?.[0] || "");
+      setRagContext(res.rag_context || []);
       setGenerated(true);
     } catch (e) {
       setError(e.message);
@@ -49,6 +52,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
           if (cancelled) return;
           setVariants(res.variants || []);
           setText(res.variants?.[0] || "");
+          setRagContext(res.rag_context || []);
           setGenerated(true);
         })
         .catch((e) => !cancelled && setError(e.message))
@@ -158,6 +162,38 @@ export default function ReplyModal({ message, onClose, onSent }) {
                     {v}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {ragContext.length > 0 && (
+              <div className="mt-4">
+                <button
+                  className="text-xs text-accent"
+                  onClick={() => setRagOpen((v) => !v)}
+                >
+                  🧠 Контекст из истории ({ragContext.length}){" "}
+                  {ragOpen ? "▲" : "▼"}
+                </button>
+                {ragOpen && (
+                  <div className="mt-2 space-y-1">
+                    {ragContext.map((r, i) => (
+                      <div
+                        key={i}
+                        className="rounded-md border border-white/10 p-2 text-xs"
+                      >
+                        <div className="flex justify-between gap-2 text-muted">
+                          <span>
+                            {r.sender_name || r.chat_name || "—"}
+                          </span>
+                          <span className="text-accent">
+                            {r.similarity_score?.toFixed?.(2) ?? ""}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-white/90">{r.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
