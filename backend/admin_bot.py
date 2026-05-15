@@ -11,7 +11,8 @@ import json
 import logging
 import time
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 
 from aiogram import Bot, Dispatcher
@@ -175,6 +176,18 @@ def _relative(ts: Optional[datetime]) -> str:
     if secs < 86400:
         return f"{secs // 3600} ч"
     return f"{secs // 86400} дн"
+
+
+def _fmt_local(ts: Optional[datetime], tz_name: str, fmt: str = "%H:%M") -> str:
+    """Format a naive-UTC timestamp in the configured timezone."""
+    if ts is None:
+        return ""
+    aware = ts.replace(tzinfo=timezone.utc)
+    try:
+        aware = aware.astimezone(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, ValueError):
+        pass
+    return aware.strftime(fmt)
 
 
 def _today_start() -> datetime:
@@ -1235,9 +1248,10 @@ async def notify_pending(message_id: int) -> None:
                 select(DbMessage).where(DbMessage.id == message_id)
             )
         ).scalar_one_or_none()
+        schedule = await get_schedule_settings(session)
     if not msg or (msg.pending_reason == "schedule"):
         return
-    when = msg.timestamp.strftime("%H:%M") if msg.timestamp else ""
+    when = _fmt_local(msg.timestamp, schedule.timezone)
     text = (
         "📨 <b>Новое сообщение</b>\n\n"
         f"👤 {_esc(msg.sender_name or msg.chat_name)}\n"

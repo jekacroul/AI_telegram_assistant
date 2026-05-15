@@ -28,7 +28,7 @@ const STATUS_LABELS = {
   done: { text: "успех", cls: "text-good" },
   error: { text: "ошибка", cls: "text-bad" },
   cancelled: { text: "отменено", cls: "text-muted" },
-  deleted: { text: "удалён", cls: "text-muted" },
+  deleted: { text: "удалён", cls: "text-bad" },
 };
 
 const PHASE_LABELS = {
