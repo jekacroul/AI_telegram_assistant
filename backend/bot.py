@@ -354,19 +354,6 @@ class TelegramService:
                 is_business and owner_id is not None and sender_id == owner_id
             )
 
-            log.info(
-                "handle_incoming: chat_type=%s chat_id=%s sender_id=%s "
-                "biz_conn=%s owner_id=%s is_business=%s is_mine=%s text=%r",
-                tg_msg.chat.type,
-                tg_msg.chat.id,
-                sender_id,
-                business_connection_id,
-                owner_id,
-                is_business,
-                is_mine,
-                (content_text or "")[:80],
-            )
-
             # A business update whose chat is the owner themselves means the
             # owner is messaging the bot's own chat directly (e.g. to test
             # auto-replies). Telegram still tags it with a business connection,
@@ -682,7 +669,16 @@ class TelegramService:
             )
 
             if is_mine:
-                log.info("handle_incoming: no reply, message is_mine (msg_id=%s)", msg_id)
+                log.info(
+                    "handle_incoming: no reply, message is_mine (msg_id=%s "
+                    "chat_type=%s chat_id=%s sender_id=%s biz_conn=%s owner_id=%s)",
+                    msg_id,
+                    tg_msg.chat.type,
+                    tg_msg.chat.id,
+                    sender_id,
+                    business_connection_id,
+                    owner_id,
+                )
                 await self._maybe_reanalyze(chat_id=chat_id)
                 return
 
