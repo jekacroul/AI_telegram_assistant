@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import ROOT_DIR, settings
@@ -31,9 +31,11 @@ SETTING_TARGET_DIR = "replication_target_dir"
 SETTING_RETENTION = "replication_retention"
 SETTING_DELETE_PROTECTION = "replication_delete_protection"
 SETTING_LAST_RUN = "replication_last_run"
+SETTING_LIST_LIMIT = "replication_list_limit"
 
 DEFAULT_INTERVAL_MINUTES = 60
 DEFAULT_RETENTION = 10
+DEFAULT_LIST_LIMIT = 10
 DEFAULT_TARGET_SUBDIR = "replicas"
 
 
@@ -52,6 +54,7 @@ class ReplicationSettings:
     target_dir: str
     retention: int
     delete_protection: bool
+    list_limit: int
 
 
 def _default_target_dir() -> Path:
@@ -85,6 +88,9 @@ async def load_settings(session: AsyncSession) -> ReplicationSettings:
         session, SETTING_RETENTION, str(DEFAULT_RETENTION)
     )
     protection_raw = await get_setting(session, SETTING_DELETE_PROTECTION, "1")
+    list_limit_raw = await get_setting(
+        session, SETTING_LIST_LIMIT, str(DEFAULT_LIST_LIMIT)
+    )
 
     try:
         interval = max(1, int(interval_raw))
@@ -94,6 +100,10 @@ async def load_settings(session: AsyncSession) -> ReplicationSettings:
         retention = max(1, int(retention_raw))
     except ValueError:
         retention = DEFAULT_RETENTION
+    try:
+        list_limit = max(1, int(list_limit_raw))
+    except ValueError:
+        list_limit = DEFAULT_LIST_LIMIT
 
     return ReplicationSettings(
         enabled=enabled_raw in ("1", "true", "True"),
@@ -101,6 +111,7 @@ async def load_settings(session: AsyncSession) -> ReplicationSettings:
         target_dir=str(_resolve_target_dir(target_raw)),
         retention=retention,
         delete_protection=protection_raw in ("1", "true", "True"),
+        list_limit=list_limit,
     )
 
 
@@ -112,6 +123,7 @@ async def save_settings(
     target_dir: Optional[str] = None,
     retention: Optional[int] = None,
     delete_protection: Optional[bool] = None,
+    list_limit: Optional[int] = None,
 ) -> ReplicationSettings:
     if enabled is not None:
         await set_setting(session, SETTING_ENABLED, "1" if enabled else "0")
@@ -126,6 +138,10 @@ async def save_settings(
     if delete_protection is not None:
         await set_setting(
             session, SETTING_DELETE_PROTECTION, "1" if delete_protection else "0"
+        )
+    if list_limit is not None:
+        await set_setting(
+            session, SETTING_LIST_LIMIT, str(max(1, int(list_limit)))
         )
     return await load_settings(session)
 
@@ -213,17 +229,17 @@ class _ReplicationCancelled(Exception):
     pass
 
 
-def _prune_old_replicas(target_dir: Path, keep: int) -> int:
+def _prune_old_replicas(target_dir: Path, keep: int) -> list[Path]:
     files = sorted(
         (p for p in target_dir.glob("database_*.db") if p.is_file()),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
-    removed = 0
+    removed: list[Path] = []
     for path in files[keep:]:
         try:
             path.unlink()
-            removed += 1
+            removed.append(path)
         except OSError:
             log.exception("failed to prune replica %s", path)
     return removed
@@ -309,7 +325,7 @@ async def _run_one(
     error_message: Optional[str] = None
     source_bytes = 0
     copied_bytes = 0
-    pruned = 0
+    pruned_paths: list[Path] = []
 
     try:
         source_bytes, copied_bytes = await asyncio.to_thread(
@@ -317,7 +333,7 @@ async def _run_one(
         )
         if replication_state.cancelled:
             raise _ReplicationCancelled()
-        pruned = _prune_old_replicas(target_file.parent, cfg.retention)
+        pruned_paths = _prune_old_replicas(target_file.parent, cfg.retention)
     except _ReplicationCancelled:
         error_message = "отменено пользователем"
         with _suppress():
@@ -350,7 +366,17 @@ async def _run_one(
             run.copied_bytes = copied_bytes
             run.duration_ms = duration_ms
             run.error = error_message
-            await session.commit()
+        if pruned_paths:
+            await session.execute(
+                update(ReplicationRun)
+                .where(
+                    ReplicationRun.target_path.in_(
+                        [str(p) for p in pruned_paths]
+                    )
+                )
+                .values(status="deleted")
+            )
+        await session.commit()
         await set_setting(session, SETTING_LAST_RUN, finished.isoformat())
 
     await _emit({
@@ -360,7 +386,7 @@ async def _run_one(
         "source_bytes": source_bytes,
         "copied_bytes": copied_bytes,
         "duration_ms": duration_ms,
-        "pruned": pruned,
+        "pruned": len(pruned_paths),
         "error": error_message,
     })
 
@@ -480,8 +506,11 @@ async def get_run_log(run_id: int) -> dict:
     }
 
 
-async def list_runs(limit: int = 50) -> list[dict]:
+async def list_runs(limit: Optional[int] = None) -> list[dict]:
     async with SessionLocal() as session:
+        if limit is None:
+            cfg = await load_settings(session)
+            limit = cfg.list_limit
         result = await session.execute(
             select(ReplicationRun)
             .order_by(desc(ReplicationRun.id))
@@ -491,11 +520,15 @@ async def list_runs(limit: int = 50) -> list[dict]:
 
 
 def _run_to_dict(r: ReplicationRun) -> dict:
+    exists = _replica_exists(r.target_path)
+    status = r.status
+    if status == "done" and not exists:
+        status = "deleted"
     return {
         "id": r.id,
         "started_at": _iso_utc(r.started_at),
         "finished_at": _iso_utc(r.finished_at),
-        "status": r.status,
+        "status": status,
         "trigger": r.trigger,
         "target_path": r.target_path,
         "source_bytes": r.source_bytes,
@@ -503,7 +536,7 @@ def _run_to_dict(r: ReplicationRun) -> dict:
         "duration_ms": r.duration_ms,
         "error": r.error,
         "protected": r.protected,
-        "exists": _replica_exists(r.target_path),
+        "exists": exists,
     }
 
 
@@ -634,6 +667,7 @@ async def status() -> dict:
             "target_dir": cfg.target_dir,
             "retention": cfg.retention,
             "delete_protection": cfg.delete_protection,
+            "list_limit": cfg.list_limit,
         },
         "source_path": str(source),
         "source_bytes": source_size,
