@@ -117,7 +117,7 @@ from .trainer import (
     start_training,
     training_state,
 )
-from . import llama_server
+from . import admin_bot, llama_server
 
 setup_logging(settings.logs_dir, level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -195,6 +195,13 @@ async def lifespan(app: FastAPI):
             if not current:
                 await set_setting(
                     session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id
+                )
+    if settings.owner_chat_id:
+        async with SessionLocal() as session:
+            current_owner = await get_setting(session, "owner_chat_id", "")
+            if not current_owner:
+                await set_setting(
+                    session, "owner_chat_id", settings.owner_chat_id
                 )
     token = settings.telegram_bot_token
     if token:
@@ -297,6 +304,7 @@ class SettingsIn(BaseModel):
     llm_model: Optional[str] = None
     persona_mode: Optional[str] = None
     group_reply_mode: Optional[str] = None
+    quality_filter_enabled: Optional[bool] = None
 
 
 class QuickReplyIn(BaseModel):
@@ -408,6 +416,12 @@ async def save_settings(
         if payload.group_reply_mode not in ("mention", "all"):
             raise HTTPException(400, "group_reply_mode must be mention or all")
         await set_setting(session, "group_reply_mode", payload.group_reply_mode)
+    if payload.quality_filter_enabled is not None:
+        await set_setting(
+            session,
+            "quality_filter_enabled",
+            "1" if payload.quality_filter_enabled else "0",
+        )
     return {"ok": True}
 
 
@@ -421,12 +435,16 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
     llm_model = await get_setting(session, "llm_model", settings.openai_model)
     persona_mode = await get_setting(session, "persona_mode", "global")
     group_reply_mode = await get_setting(session, "group_reply_mode", "mention")
+    quality_filter_enabled = (
+        await get_setting(session, "quality_filter_enabled", "1")
+    ) in ("1", "true", "True")
     return {
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
         "llm_model": llm_model,
         "persona_mode": persona_mode,
         "group_reply_mode": group_reply_mode,
+        "quality_filter_enabled": quality_filter_enabled,
     }
 
 
@@ -711,6 +729,78 @@ async def detect_notify_chat(session: AsyncSession = Depends(get_session)) -> di
             "Не удалось определить chat_id. Напишите боту /start в личку и попробуйте снова.",
         )
     return {"chat_id": chat_id}
+
+
+class AdminSettingsIn(BaseModel):
+    owner_chat_id: Optional[str] = None
+    admin_notify_auto: Optional[bool] = None
+    admin_notify_pending: Optional[bool] = None
+
+
+@app.get("/api/admin/settings")
+async def get_admin_settings(session: AsyncSession = Depends(get_session)) -> dict:
+    owner = await get_setting(session, "owner_chat_id", settings.owner_chat_id)
+    notify_auto = (
+        await get_setting(session, "admin_notify_auto", "1")
+    ) in ("1", "true", "True")
+    notify_pending = (
+        await get_setting(session, "admin_notify_pending", "1")
+    ) in ("1", "true", "True")
+    return {
+        "owner_chat_id": owner,
+        "admin_notify_auto": notify_auto,
+        "admin_notify_pending": notify_pending,
+        "admin_bot_enabled": settings.admin_bot_enabled,
+    }
+
+
+@app.post("/api/admin/settings")
+async def save_admin_settings(
+    payload: AdminSettingsIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    if payload.owner_chat_id is not None:
+        value = payload.owner_chat_id.strip()
+        if value:
+            try:
+                int(value)
+            except ValueError:
+                raise HTTPException(400, "owner_chat_id must be an integer")
+        await set_setting(session, "owner_chat_id", value)
+    if payload.admin_notify_auto is not None:
+        await set_setting(
+            session, "admin_notify_auto", "1" if payload.admin_notify_auto else "0"
+        )
+    if payload.admin_notify_pending is not None:
+        await set_setting(
+            session,
+            "admin_notify_pending",
+            "1" if payload.admin_notify_pending else "0",
+        )
+    return {"ok": True}
+
+
+@app.get("/api/settings/detect-owner")
+async def detect_owner(session: AsyncSession = Depends(get_session)) -> dict:
+    chat_id = await get_setting(session, SETTING_LAST_PRIVATE_CHAT_ID, "")
+    if not chat_id:
+        raise HTTPException(
+            404,
+            "Не удалось определить chat_id. Напишите боту /start в личку и "
+            "попробуйте снова.",
+        )
+    return {"chat_id": chat_id}
+
+
+@app.post("/api/admin/notify-test")
+async def admin_notify_test() -> dict:
+    ok = await admin_bot.send_test_notification()
+    if not ok:
+        raise HTTPException(
+            400,
+            "Не удалось отправить. Проверь OWNER_CHAT_ID и что бот запущен, "
+            "затем напиши боту /start в личку.",
+        )
+    return {"ok": True}
 
 
 @app.get("/api/messages/pending")
