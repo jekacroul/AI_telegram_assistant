@@ -304,6 +304,7 @@ class SettingsIn(BaseModel):
     llm_model: Optional[str] = None
     persona_mode: Optional[str] = None
     group_reply_mode: Optional[str] = None
+    quality_filter_enabled: Optional[bool] = None
 
 
 class QuickReplyIn(BaseModel):
@@ -415,6 +416,12 @@ async def save_settings(
         if payload.group_reply_mode not in ("mention", "all"):
             raise HTTPException(400, "group_reply_mode must be mention or all")
         await set_setting(session, "group_reply_mode", payload.group_reply_mode)
+    if payload.quality_filter_enabled is not None:
+        await set_setting(
+            session,
+            "quality_filter_enabled",
+            "1" if payload.quality_filter_enabled else "0",
+        )
     return {"ok": True}
 
 
@@ -428,12 +435,16 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
     llm_model = await get_setting(session, "llm_model", settings.openai_model)
     persona_mode = await get_setting(session, "persona_mode", "global")
     group_reply_mode = await get_setting(session, "group_reply_mode", "mention")
+    quality_filter_enabled = (
+        await get_setting(session, "quality_filter_enabled", "1")
+    ) in ("1", "true", "True")
     return {
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
         "llm_model": llm_model,
         "persona_mode": persona_mode,
         "group_reply_mode": group_reply_mode,
+        "quality_filter_enabled": quality_filter_enabled,
     }
 
 

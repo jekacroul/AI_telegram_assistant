@@ -33,6 +33,7 @@ export default function Settings() {
     monitored_chats: [],
     llm_model: "",
     group_reply_mode: "mention",
+    quality_filter_enabled: true,
   });
   const [chats, setChats] = useState([]);
   const [models, setModels] = useState([]);
@@ -102,6 +103,7 @@ export default function Settings() {
       monitored_chats: st.monitored_chats || [],
       llm_model: st.llm_model || "",
       group_reply_mode: st.group_reply_mode || "mention",
+      quality_filter_enabled: st.quality_filter_enabled !== false,
     }));
     setSchedule((prev) => ({
       ...prev,
@@ -362,6 +364,26 @@ export default function Settings() {
         </label>
       </div>
 
+
+      <div className="card">
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={s.quality_filter_enabled}
+            onChange={(e) =>
+              setS({ ...s, quality_filter_enabled: e.target.checked })
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">Фильтр качества</div>
+            <div className="text-xs text-muted">
+              Отбраковывает неудачные варианты ответа модели. Если выключить —
+              бот отправит первый сгенерированный вариант без проверки.
+            </div>
+          </div>
+        </label>
+      </div>
 
       <div className="card">
         <div className="label">Ответы в группах</div>
