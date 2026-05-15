@@ -1,7 +1,12 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
+os.environ.setdefault(
+    "XDG_CACHE_HOME",
+    str(Path(__file__).resolve().parent / ".cache"),
+)
 # Re-exec under the project venv if the user launched us with a different
 # interpreter (system python lacks httpx/dotenv/etc and would crash on the
 # imports below). Must run before any third-party import. We use subprocess
