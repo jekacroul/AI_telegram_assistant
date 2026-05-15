@@ -354,22 +354,26 @@ class TelegramService:
                 is_business and owner_id is not None and sender_id == owner_id
             )
 
-            # A business update whose chat is the owner themselves means the
-            # owner is messaging the bot's own chat directly (e.g. to test
-            # auto-replies). Telegram still tags it with a business connection,
-            # which would mark it is_mine and suppress the reply. Treat it as a
-            # normal incoming private message so the bot answers as itself.
-            if (
-                is_business
-                and owner_id is not None
-                and sender_id == owner_id
-                and tg_msg.chat.id == owner_id
-            ):
-                is_business = False
-                business_connection_id = None
-                is_mine = False
-
             chat_id = tg_msg.chat.id
+
+            # When the owner messages the bot directly, Telegram delivers it as
+            # a business update: sender == owner (so is_mine would be set) and
+            # chat.id is the bot's own id (the owner's view of the chat). That
+            # would suppress the reply and make the bot try to answer itself.
+            # Detect it and handle it as a normal incoming private message
+            # addressed back to the owner.
+            if is_business and owner_id is not None and sender_id == owner_id:
+                bot_id = None
+                if self.bot:
+                    try:
+                        bot_id = (await self.bot.me()).id
+                    except Exception:  # noqa: BLE001
+                        bot_id = None
+                if bot_id is not None and chat_id == bot_id:
+                    is_business = False
+                    business_connection_id = None
+                    is_mine = False
+                    chat_id = sender_id
             chat_username = getattr(tg_msg.chat, "username", None) or (
                 sender.username if sender else ""
             )
