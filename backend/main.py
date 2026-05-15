@@ -1383,13 +1383,16 @@ async def rag_index_all() -> dict:
 @app.get("/api/rag/index-progress")
 async def rag_index_progress(request: Request) -> EventSourceResponse:
     async def gen():
+        last = None
         while True:
             if await request.is_disconnected():
                 break
             progress = rag_engine.progress
-            yield {"data": json.dumps(progress, ensure_ascii=False)}
-            if not progress.get("running"):
-                break
+            if progress != last:
+                yield {"data": json.dumps(progress, ensure_ascii=False)}
+                last = progress
+            else:
+                yield {"event": "ping", "data": "{}"}
             await asyncio.sleep(1.0)
 
     return EventSourceResponse(gen())

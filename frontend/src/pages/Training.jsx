@@ -92,6 +92,19 @@ export default function Training() {
         }
       } catch {}
     };
+    const ragEv = new EventSource("/api/rag/index-progress");
+    let ragWasRunning = false;
+    ragEv.onmessage = (e) => {
+      try {
+        const p = JSON.parse(e.data);
+        if (!p || typeof p.running === "undefined") return;
+        setRagStatus((s) => (s ? { ...s, indexing: p } : s));
+        if (ragWasRunning && !p.running) {
+          api.ragStatus().then(setRagStatus).catch(() => {});
+        }
+        ragWasRunning = p.running;
+      } catch {}
+    };
     const srvPoll = setInterval(async () => {
       try {
         const srv = await api.llamaServerStatus();
@@ -102,6 +115,7 @@ export default function Training() {
     }, 3000);
     return () => {
       ev.close();
+      ragEv.close();
       clearInterval(srvPoll);
     };
   }, []);
@@ -152,19 +166,22 @@ export default function Training() {
         setError(res.reason || "не удалось запустить индексацию");
         return;
       }
-      const ev = new EventSource("/api/rag/index-progress");
-      ev.onmessage = (e) => {
-        try {
-          const p = JSON.parse(e.data);
-          setRagStatus((s) => (s ? { ...s, indexing: p } : s));
-          if (!p.running) {
-            ev.close();
-            api.ragStatus().then(setRagStatus).catch(() => {});
-          }
-        } catch {
-          // ignore
-        }
-      };
+      // Optimistically flip the UI into "running" so the progress bar
+      // appears immediately; the SSE stream takes over from here.
+      setRagStatus((s) =>
+        s
+          ? {
+              ...s,
+              indexing: {
+                running: true,
+                indexed: 0,
+                total: s.total_indexed || 0,
+                percent: 0,
+                eta_seconds: 0,
+              },
+            }
+          : s,
+      );
     } catch (e) {
       setError(e.message);
     }
@@ -391,19 +408,30 @@ export default function Training() {
 
           {ragStatus.indexing?.running && (
             <div className="mt-3">
-              <div className="flex justify-between text-xs text-muted">
+              <div className="flex flex-wrap justify-between gap-2 text-xs text-muted">
                 <span>
                   Индексирую сообщения: {ragStatus.indexing.indexed}/
-                  {ragStatus.indexing.total}
+                  {ragStatus.indexing.total || "—"}
                 </span>
-                <span>{ragStatus.indexing.percent}%</span>
+                <span>
+                  {ragStatus.indexing.eta_seconds > 0 && (
+                    <span className="mr-3">
+                      ETA: {formatEta(ragStatus.indexing.eta_seconds)}
+                    </span>
+                  )}
+                  {ragStatus.indexing.percent}%
+                </span>
               </div>
-              <div className="mt-1 h-2 bg-white/10 rounded">
-                <div
-                  className="h-2 bg-accent rounded transition-all"
-                  style={{ width: `${ragStatus.indexing.percent}%` }}
-                />
-              </div>
+              {ragStatus.indexing.total > 0 ? (
+                <div className="mt-1 h-2 bg-white/10 rounded">
+                  <div
+                    className="h-2 bg-accent rounded transition-all"
+                    style={{ width: `${ragStatus.indexing.percent}%` }}
+                  />
+                </div>
+              ) : (
+                <div className="mt-1 progress-indeterminate" />
+              )}
             </div>
           )}
 
