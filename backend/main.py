@@ -1909,6 +1909,7 @@ class ReplicationSettingsIn(BaseModel):
     target_dir: Optional[str] = Field(default=None, max_length=1024)
     retention: Optional[int] = Field(default=None, ge=1, le=1000)
     delete_protection: Optional[bool] = None
+    list_limit: Optional[int] = Field(default=None, ge=1, le=1000)
 
 
 @app.get("/api/replication/status")
@@ -1928,6 +1929,7 @@ async def replication_save_settings(
         target_dir=payload.target_dir,
         retention=payload.retention,
         delete_protection=payload.delete_protection,
+        list_limit=payload.list_limit,
     )
     replication_scheduler.trigger()
     return {
@@ -1936,6 +1938,7 @@ async def replication_save_settings(
         "target_dir": cfg.target_dir,
         "retention": cfg.retention,
         "delete_protection": cfg.delete_protection,
+        "list_limit": cfg.list_limit,
     }
 
 

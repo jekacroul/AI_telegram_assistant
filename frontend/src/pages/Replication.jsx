@@ -28,6 +28,7 @@ const STATUS_LABELS = {
   done: { text: "успех", cls: "text-good" },
   error: { text: "ошибка", cls: "text-bad" },
   cancelled: { text: "отменено", cls: "text-muted" },
+  deleted: { text: "удалён", cls: "text-muted" },
 };
 
 const PHASE_LABELS = {
@@ -48,6 +49,7 @@ export default function Replication() {
     target_dir: "",
     retention: 10,
     delete_protection: true,
+    list_limit: 10,
   });
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -72,6 +74,7 @@ export default function Replication() {
           target_dir: st.settings.target_dir || "",
           retention: st.settings.retention,
           delete_protection: !!st.settings.delete_protection,
+          list_limit: st.settings.list_limit ?? prev.list_limit,
         }));
       }
     } catch (e) {
@@ -111,6 +114,7 @@ export default function Replication() {
         target_dir: form.target_dir,
         retention: Number(form.retention),
         delete_protection: form.delete_protection,
+        list_limit: Number(form.list_limit),
       });
       setSavedMsg("Сохранено");
       setTimeout(() => setSavedMsg(""), 2000);
@@ -283,6 +287,22 @@ export default function Replication() {
               value={form.retention}
               onChange={(e) =>
                 setForm({ ...form, retention: e.target.value })
+              }
+            />
+          </label>
+
+          <label className="text-sm space-y-1">
+            <div className="text-muted text-xs">
+              Сколько записей показывать в истории
+            </div>
+            <input
+              type="number"
+              min="1"
+              max="1000"
+              className="w-full bg-bg border border-white/10 rounded px-3 py-2"
+              value={form.list_limit}
+              onChange={(e) =>
+                setForm({ ...form, list_limit: e.target.value })
               }
             />
           </label>
