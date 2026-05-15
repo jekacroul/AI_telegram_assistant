@@ -356,12 +356,11 @@ class TelegramService:
 
             chat_id = tg_msg.chat.id
 
-            # When the owner messages the bot directly, Telegram delivers it as
-            # a business update: sender == owner (so is_mine would be set) and
-            # chat.id is the bot's own id (the owner's view of the chat). That
-            # would suppress the reply and make the bot try to answer itself.
-            # Detect it and handle it as a normal incoming private message
-            # addressed back to the owner.
+            # When the owner messages the bot directly, Telegram delivers the
+            # same message twice: as a business update (chat.id == the bot's
+            # own id) and as a regular private message. Drop the business copy
+            # and let the regular @dp.message() handler reply — only it has a
+            # chat.id and message id valid for a normal (non-business) reply.
             if is_business and owner_id is not None and sender_id == owner_id:
                 bot_id = None
                 if self.bot:
@@ -370,10 +369,11 @@ class TelegramService:
                     except Exception:  # noqa: BLE001
                         bot_id = None
                 if bot_id is not None and chat_id == bot_id:
-                    is_business = False
-                    business_connection_id = None
-                    is_mine = False
-                    chat_id = sender_id
+                    log.info(
+                        "handle_incoming: dropped owner->bot business copy "
+                        "(regular update handles the reply)"
+                    )
+                    return
             chat_username = getattr(tg_msg.chat, "username", None) or (
                 sender.username if sender else ""
             )
@@ -421,27 +421,6 @@ class TelegramService:
 
             tg_ts = _naive_utc(getattr(tg_msg, "date", None))
             async with SessionLocal() as session:
-                if (
-                    tg_msg.chat.type == ChatType.PRIVATE
-                    and not is_business
-                    and sender_id
-                    and content_text
-                ):
-                    dupe_q = await session.execute(
-                        select(Message.id).where(
-                            Message.business_connection_id.isnot(None),
-                            Message.sender_id == sender_id,
-                            Message.text == content_text,
-                        ).order_by(Message.id.desc()).limit(1)
-                    )
-                    if dupe_q.scalar_one_or_none() is not None:
-                        log.info(
-                            "handle_incoming: dropped as duplicate of a "
-                            "business message (sender_id=%s)",
-                            sender_id,
-                        )
-                        return
-
                 row = Message(
                     chat_id=chat_id,
                     chat_name=chat_name,
