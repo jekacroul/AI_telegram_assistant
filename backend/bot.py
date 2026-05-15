@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -426,6 +427,13 @@ class TelegramService:
                     me.username if me else None,
                     (content_text or "")[:80],
                 )
+                if mentioned and handle and content_text:
+                    cleaned = re.sub(
+                        re.escape(handle), "", content_text, flags=re.IGNORECASE
+                    )
+                    cleaned = " ".join(cleaned.split())
+                    if cleaned:
+                        content_text = cleaned
 
             tg_ts = _naive_utc(getattr(tg_msg, "date", None))
             async with SessionLocal() as session:
