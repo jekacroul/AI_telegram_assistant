@@ -379,6 +379,12 @@ class TelegramService:
                 ChatType.GROUP,
                 ChatType.SUPERGROUP,
             ):
+                me = None
+                if self.bot:
+                    try:
+                        me = await self.bot.me()
+                    except Exception:  # noqa: BLE001
+                        me = None
                 mentioned = False
                 if me and tg_msg.text and f"@{me.username}" in tg_msg.text:
                     mentioned = True
