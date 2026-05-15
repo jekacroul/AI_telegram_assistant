@@ -420,15 +420,6 @@ class TelegramService:
                 ):
                     mentioned = True
                 should_reply = mentioned
-                log.info(
-                    "handle_incoming: group message chat_id=%s sender_id=%s "
-                    "mentioned=%s bot_username=%s text=%r",
-                    chat_id,
-                    sender_id,
-                    mentioned,
-                    me.username if me else None,
-                    (content_text or "")[:80],
-                )
                 if mentioned and handle and content_text:
                     cleaned = re.sub(
                         re.escape(handle), "", content_text, flags=re.IGNORECASE
