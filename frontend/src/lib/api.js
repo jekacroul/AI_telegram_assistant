@@ -63,7 +63,22 @@ export const api = {
     }),
   trainingStatus: () => request("/api/training/status"),
   qualityStats: () => request("/api/quality/stats"),
-  buildDataset: () => request("/api/training/build-dataset", { method: "POST" }),
+  buildDataset: (config) =>
+    request("/api/training/build-dataset", {
+      method: "POST",
+      ...(config ? { body: JSON.stringify(config) } : {}),
+    }),
+  validateExport: (file_path) =>
+    request("/api/training/export/validate", {
+      method: "POST",
+      body: JSON.stringify({ file_path }),
+    }),
+  parseExport: (file_path) =>
+    request("/api/training/export/parse", {
+      method: "POST",
+      body: JSON.stringify({ file_path }),
+    }),
+  cachedExports: () => request("/api/training/exports/cached"),
   startTraining: () => request("/api/training/start", { method: "POST" }),
   cancelTraining: () => request("/api/training/cancel", { method: "POST" }),
   activateAdapter: (run_id) =>
