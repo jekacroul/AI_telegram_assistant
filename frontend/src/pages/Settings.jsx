@@ -58,6 +58,14 @@ export default function Settings() {
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState("");
   const [notifyError, setNotifyError] = useState("");
+  const [admin, setAdmin] = useState({
+    owner_chat_id: "",
+    admin_notify_auto: true,
+    admin_notify_pending: true,
+  });
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminMsg, setAdminMsg] = useState("");
+  const [adminError, setAdminError] = useState("");
   const [whisper, setWhisper] = useState({
     whisper_enabled: true,
     whisper_model: "large-v3",
@@ -133,7 +141,58 @@ export default function Settings() {
     } catch {
       // ignore
     }
+    try {
+      const a = await api.getAdminSettings();
+      setAdmin({
+        owner_chat_id: a.owner_chat_id || "",
+        admin_notify_auto: a.admin_notify_auto !== false,
+        admin_notify_pending: a.admin_notify_pending !== false,
+      });
+    } catch {
+      // ignore
+    }
   };
+
+  async function saveAdmin() {
+    setAdminSaving(true);
+    setAdminError("");
+    setAdminMsg("");
+    try {
+      await api.saveAdminSettings({
+        owner_chat_id: admin.owner_chat_id.trim(),
+        admin_notify_auto: !!admin.admin_notify_auto,
+        admin_notify_pending: !!admin.admin_notify_pending,
+      });
+      setAdminMsg("Сохранено");
+    } catch (e) {
+      setAdminError(e.message);
+    } finally {
+      setAdminSaving(false);
+    }
+  }
+
+  async function detectOwner() {
+    setAdminError("");
+    setAdminMsg("");
+    try {
+      const res = await api.detectOwner();
+      setAdmin((prev) => ({ ...prev, owner_chat_id: String(res.chat_id || "") }));
+      setAdminMsg("chat_id определён. Не забудь сохранить.");
+    } catch (e) {
+      setAdminError(e.message);
+    }
+  }
+
+  async function testAdminNotify() {
+    setAdminError("");
+    setAdminMsg("");
+    try {
+      await api.adminNotifyTest();
+      setAdminMsg("Тестовое уведомление отправлено.");
+    } catch (e) {
+      setAdminError(e.message);
+    }
+  }
 
   async function saveWhisper() {
     setWhisperSaving(true);
@@ -588,6 +647,93 @@ export default function Settings() {
           )}
           {notifyError && (
             <span className="text-bad text-sm">{notifyError}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="label">Admin Panel</div>
+        <div className="text-xs text-muted mt-1">
+          Бот принимает админ-команды только из указанного чата. Напишите
+          /start боту в личку для активации.
+        </div>
+
+        <div className="mt-3">
+          <div className="label">OWNER_CHAT_ID</div>
+          <div className="flex gap-2 mt-1">
+            <input
+              className="input flex-1"
+              placeholder="например, 123456789"
+              value={admin.owner_chat_id}
+              onChange={(e) =>
+                setAdmin((prev) => ({ ...prev, owner_chat_id: e.target.value }))
+              }
+            />
+            <button className="btn-secondary" onClick={detectOwner}>
+              Определить автоматически
+            </button>
+          </div>
+        </div>
+
+        <label className="flex items-start gap-3 mt-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!admin.admin_notify_auto}
+            onChange={(e) =>
+              setAdmin((prev) => ({
+                ...prev,
+                admin_notify_auto: e.target.checked,
+              }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">
+              Уведомления об авто-ответах
+            </div>
+            <div className="text-xs text-muted">
+              Бот пришлёт уведомление с кнопками оценки после каждого
+              авто-ответа.
+            </div>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-3 mt-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!admin.admin_notify_pending}
+            onChange={(e) =>
+              setAdmin((prev) => ({
+                ...prev,
+                admin_notify_pending: e.target.checked,
+              }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">
+              Уведомления о новых сообщениях
+            </div>
+            <div className="text-xs text-muted">
+              Бот сообщит о сообщениях, попавших в очередь на ручной ответ.
+            </div>
+          </div>
+        </label>
+
+        <div className="flex flex-wrap gap-2 mt-3 items-center">
+          <button
+            className="btn-primary"
+            onClick={saveAdmin}
+            disabled={adminSaving}
+          >
+            Сохранить
+          </button>
+          <button className="btn-secondary" onClick={testAdminNotify}>
+            Отправить тестовое уведомление
+          </button>
+          {adminMsg && <span className="text-good text-sm">{adminMsg}</span>}
+          {adminError && (
+            <span className="text-bad text-sm">{adminError}</span>
           )}
         </div>
       </div>

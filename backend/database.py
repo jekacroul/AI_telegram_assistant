@@ -64,6 +64,32 @@ class Message(Base):
     transcription_error: Mapped[Optional[str]] = mapped_column(
         String(256), nullable=True
     )
+    admin_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_feedback: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    admin_correction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_chat_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    last_active: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
+    current_state: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    state_data_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AdminNotification(Base):
+    __tablename__ = "admin_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(32), index=True, default="")
+    message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    owner_response: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    response_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class DialogBackup(Base):
@@ -262,6 +288,18 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "transcription_error" not in columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE messages ADD COLUMN transcription_error VARCHAR(256)"
+        )
+    if "admin_reviewed" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN admin_reviewed BOOLEAN DEFAULT 0 NOT NULL"
+        )
+    if "admin_feedback" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN admin_feedback VARCHAR(16)"
+        )
+    if "admin_correction" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE messages ADD COLUMN admin_correction TEXT"
         )
 
     backup_columns = {col["name"] for col in inspector.get_columns("dialog_backup_messages")}

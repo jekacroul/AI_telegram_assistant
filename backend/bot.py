@@ -31,6 +31,7 @@ from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
 from sqlalchemy import select
 
+from . import admin_bot
 from .config import settings
 from .database import Message, QualityLog, SessionLocal, get_setting, set_setting
 from .delay import get_delay_settings
@@ -125,6 +126,10 @@ class TelegramService:
             self._register_handlers(self.dp)
 
     def _register_handlers(self, dp: Dispatcher) -> None:
+        # Admin handlers must be registered first so owner commands take
+        # precedence; non-owner updates fall through to the handlers below.
+        admin_bot.register(dp)
+
         @dp.message(Command("start"))
         async def cmd_start(message: TgMessage) -> None:
             await self._remember_private_chat(message)
@@ -493,6 +498,8 @@ class TelegramService:
                     should_reply = False
                     await session.commit()
 
+            await admin_bot.on_schedule_check(within_schedule)
+
             transcription_text: Optional[str] = None
             reply_input_text = content_text
             voice_transcribed_ok = False
@@ -693,6 +700,7 @@ class TelegramService:
                     await message_bus.publish(
                         "pending", {"id": msg_id, "reason": row.pending_reason}
                     )
+                await admin_bot.notify_pending(msg_id)
                 return
 
             if not auto_reply:
@@ -726,6 +734,13 @@ class TelegramService:
                         msg_id, chosen, sender_name, chat_id, chat_name
                     )
                     await notify_owner(chat_name, sender_name, reply_input_text, chosen)
+                    await admin_bot.notify_auto_reply(
+                        chat_name,
+                        sender_name,
+                        reply_input_text,
+                        chosen,
+                        message_id=msg_id,
+                    )
                 except asyncio.CancelledError:
                     log.info("Отменяю отложенный ответ в %s", chat_name)
                     return
@@ -755,6 +770,7 @@ class TelegramService:
                 await message_bus.publish(
                     "pending", {"id": msg_id, "reason": "auto_reply_disabled"}
                 )
+                await admin_bot.notify_pending(msg_id)
 
             await self._maybe_reanalyze(chat_id=chat_id)
         except Exception as e:  # noqa: BLE001
@@ -826,7 +842,19 @@ class TelegramService:
                 {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text}
                 for m in history
             ]
+            quality_enabled = (
+                await get_setting(session, "quality_filter_enabled", "1")
+            ) in ("1", "true", "True")
         client = get_client()
+        if not quality_enabled:
+            variants = await client.generate_reply(
+                incoming_text=text,
+                sender_name=sender_name,
+                style_profile=profile,
+                chat_history=history_dicts,
+                is_voice=is_voice,
+            )
+            return (variants, "ok") if variants else ([], "no_variants")
         last_reason = "no_variants"
         logged_rejection = False
         for _ in range(3):
@@ -882,6 +910,7 @@ class TelegramService:
             "pending",
             {"id": msg_id, "reason": "quality_filter", "quality_reason": reason},
         )
+        await admin_bot.notify_pending(msg_id)
 
     async def _record_reply(
         self,

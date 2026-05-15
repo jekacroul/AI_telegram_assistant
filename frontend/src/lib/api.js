@@ -134,6 +134,14 @@ export const api = {
       body: JSON.stringify(data),
     }),
   detectNotifyChat: () => request("/api/settings/notify-chat/detect"),
+  getAdminSettings: () => request("/api/admin/settings"),
+  saveAdminSettings: (data) =>
+    request("/api/admin/settings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  detectOwner: () => request("/api/settings/detect-owner"),
+  adminNotifyTest: () => request("/api/admin/notify-test", { method: "POST" }),
   statsOverview: () => request("/api/stats/overview"),
   statsActivity: () => request("/api/stats/activity"),
   statsTopChats: () => request("/api/stats/top-chats"),
