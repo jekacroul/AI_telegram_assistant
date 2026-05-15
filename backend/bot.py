@@ -317,22 +317,8 @@ class TelegramService:
             if tg_msg.chat.type == ChatType.CHANNEL:
                 return
 
-            # Telegram can deliver outgoing owner messages twice in business mode:
-            # as a business update (needed) and as a regular private message from owner
-            # to themselves (must be ignored to avoid duplicate rows in dashboard).
             sender = tg_msg.from_user
             sender_id = sender.id if sender else 0
-            owner_ids = {
-                int(v)
-                for v in getattr(self, "_business_owner_cache", {}).values()
-                if isinstance(v, int)
-            }
-            if (
-                tg_msg.chat.type == ChatType.PRIVATE
-                and getattr(tg_msg, "business_connection_id", None) is None
-                and sender_id in owner_ids
-            ):
-                return
 
             content_text = self._extract_message_content(tg_msg)
             voice_file_id, voice_duration = self._extract_voice(tg_msg)
