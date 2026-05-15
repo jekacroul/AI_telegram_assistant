@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -317,22 +318,8 @@ class TelegramService:
             if tg_msg.chat.type == ChatType.CHANNEL:
                 return
 
-            # Telegram can deliver outgoing owner messages twice in business mode:
-            # as a business update (needed) and as a regular private message from owner
-            # to themselves (must be ignored to avoid duplicate rows in dashboard).
             sender = tg_msg.from_user
             sender_id = sender.id if sender else 0
-            owner_ids = {
-                int(v)
-                for v in getattr(self, "_business_owner_cache", {}).values()
-                if isinstance(v, int)
-            }
-            if (
-                tg_msg.chat.type == ChatType.PRIVATE
-                and getattr(tg_msg, "business_connection_id", None) is None
-                and sender_id in owner_ids
-            ):
-                return
 
             content_text = self._extract_message_content(tg_msg)
             voice_file_id, voice_duration = self._extract_voice(tg_msg)
@@ -369,6 +356,25 @@ class TelegramService:
             )
 
             chat_id = tg_msg.chat.id
+
+            # When the owner messages the bot directly, Telegram delivers the
+            # same message twice: as a business update (chat.id == the bot's
+            # own id) and as a regular private message. Drop the business copy
+            # and let the regular @dp.message() handler reply — only it has a
+            # chat.id and message id valid for a normal (non-business) reply.
+            if is_business and owner_id is not None and sender_id == owner_id:
+                bot_id = None
+                if self.bot:
+                    try:
+                        bot_id = (await self.bot.me()).id
+                    except Exception:  # noqa: BLE001
+                        bot_id = None
+                if bot_id is not None and chat_id == bot_id:
+                    log.info(
+                        "handle_incoming: dropped owner->bot business copy "
+                        "(regular update handles the reply)"
+                    )
+                    return
             chat_username = getattr(tg_msg.chat, "username", None) or (
                 sender.username if sender else ""
             )
@@ -389,14 +395,22 @@ class TelegramService:
             self._cancel_delayed_reply(chat_id)
 
             should_reply = not is_mine
-            if not is_business and tg_msg.chat.type in (
+            is_group_chat = not is_business and tg_msg.chat.type in (
                 ChatType.GROUP,
                 ChatType.SUPERGROUP,
-            ):
-                mentioned = False
-                if me and tg_msg.text and f"@{me.username}" in tg_msg.text:
+            )
+            mentioned = False
+            if is_group_chat:
+                me = None
+                if self.bot:
+                    try:
+                        me = await self.bot.me()
+                    except Exception:  # noqa: BLE001
+                        me = None
+                handle = f"@{me.username}".lower() if me and me.username else ""
+                if handle and tg_msg.text and handle in tg_msg.text.lower():
                     mentioned = True
-                if me and tg_msg.caption and f"@{me.username}" in tg_msg.caption:
+                if handle and tg_msg.caption and handle in tg_msg.caption.lower():
                     mentioned = True
                 if (
                     tg_msg.reply_to_message
@@ -406,25 +420,25 @@ class TelegramService:
                 ):
                     mentioned = True
                 should_reply = mentioned
+                log.info(
+                    "handle_incoming: group message chat_id=%s sender_id=%s "
+                    "mentioned=%s bot_username=%s text=%r",
+                    chat_id,
+                    sender_id,
+                    mentioned,
+                    me.username if me else None,
+                    (content_text or "")[:80],
+                )
+                if mentioned and handle and content_text:
+                    cleaned = re.sub(
+                        re.escape(handle), "", content_text, flags=re.IGNORECASE
+                    )
+                    cleaned = " ".join(cleaned.split())
+                    if cleaned:
+                        content_text = cleaned
 
             tg_ts = _naive_utc(getattr(tg_msg, "date", None))
             async with SessionLocal() as session:
-                if (
-                    tg_msg.chat.type == ChatType.PRIVATE
-                    and not is_business
-                    and sender_id
-                    and content_text
-                ):
-                    dupe_q = await session.execute(
-                        select(Message.id).where(
-                            Message.business_connection_id.isnot(None),
-                            Message.sender_id == sender_id,
-                            Message.text == content_text,
-                        ).order_by(Message.id.desc()).limit(1)
-                    )
-                    if dupe_q.scalar_one_or_none() is not None:
-                        return
-
                 row = Message(
                     chat_id=chat_id,
                     chat_name=chat_name,
@@ -447,6 +461,14 @@ class TelegramService:
                 await session.commit()
                 await session.refresh(row)
                 msg_id = row.id
+
+                if is_group_chat:
+                    group_reply_mode = await get_setting(
+                        session, "group_reply_mode", "mention"
+                    )
+                    should_reply = (
+                        True if group_reply_mode == "all" else mentioned
+                    )
 
                 monitored = await get_setting(session, "monitored_chats", "")
                 allowed: list[int] = []
@@ -656,15 +678,34 @@ class TelegramService:
             )
 
             if is_mine:
+                log.info(
+                    "handle_incoming: no reply, message is_mine (msg_id=%s "
+                    "chat_type=%s chat_id=%s sender_id=%s biz_conn=%s owner_id=%s)",
+                    msg_id,
+                    tg_msg.chat.type,
+                    tg_msg.chat.id,
+                    sender_id,
+                    business_connection_id,
+                    owner_id,
+                )
                 await self._maybe_reanalyze(chat_id=chat_id)
                 return
 
             if not should_reply:
+                log.info(
+                    "handle_incoming: no reply, should_reply=False "
+                    "(msg_id=%s reason=%s)",
+                    msg_id,
+                    row.pending_reason,
+                )
                 if row.pending_reason:
                     await message_bus.publish(
                         "pending", {"id": msg_id, "reason": row.pending_reason}
                     )
                 return
+
+            if not auto_reply:
+                log.info("handle_incoming: no reply, auto_reply disabled (msg_id=%s)", msg_id)
 
             if auto_reply:
                 try:
@@ -673,6 +714,13 @@ class TelegramService:
                     )
                     chosen = pick_auto_variant(variants)
                     if not chosen:
+                        log.info(
+                            "handle_incoming: no reply, no usable variant "
+                            "(msg_id=%s variants=%s reject_reason=%s)",
+                            msg_id,
+                            len(variants),
+                            reject_reason,
+                        )
                         await self._mark_pending_quality(msg_id, reject_reason)
                         await self._maybe_reanalyze(chat_id=chat_id)
                         return

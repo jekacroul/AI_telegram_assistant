@@ -32,6 +32,7 @@ export default function Settings() {
     auto_reply: false,
     monitored_chats: [],
     llm_model: "",
+    group_reply_mode: "mention",
   });
   const [chats, setChats] = useState([]);
   const [models, setModels] = useState([]);
@@ -92,6 +93,7 @@ export default function Settings() {
       auto_reply: !!st.auto_reply,
       monitored_chats: st.monitored_chats || [],
       llm_model: st.llm_model || "",
+      group_reply_mode: st.group_reply_mode || "mention",
     }));
     setSchedule((prev) => ({
       ...prev,
@@ -301,6 +303,33 @@ export default function Settings() {
         </label>
       </div>
 
+
+      <div className="card">
+        <div className="label">Ответы в группах</div>
+        <div className="text-xs text-muted mt-1">
+          Как бот реагирует на сообщения в групповых чатах.
+        </div>
+        <div className="space-y-1 mt-2">
+          {[
+            {
+              v: "mention",
+              label:
+                "Только когда упомянули бота (@) или ответили на его сообщение",
+            },
+            { v: "all", label: "На все сообщения в группе" },
+          ].map((opt) => (
+            <label key={opt.v} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="group_reply_mode"
+                checked={s.group_reply_mode === opt.v}
+                onChange={() => setS({ ...s, group_reply_mode: opt.v })}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </div>
 
       <div className="card">
         <div className="flex items-center justify-between gap-3">
