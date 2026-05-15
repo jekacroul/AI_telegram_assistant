@@ -67,6 +67,11 @@ def stream_output(process, prefix=""):
 
 def start_backend():
     log.info("🔧 Запускаю бэкенд (%s)...", BACKEND_PYTHON)
+    # Force the backend's stdout/stderr to UTF-8 so Cyrillic survives the pipe.
+    # Without this the child uses the Windows console code page and the bytes
+    # are invalid UTF-8 here, getting dropped by errors='ignore'.
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
     process = subprocess.Popen(
         [BACKEND_PYTHON, "-u", "-m", "backend.main"],
         cwd=PROJECT_ROOT,
@@ -74,7 +79,8 @@ def start_backend():
         stderr=subprocess.STDOUT,
         text=True,
         encoding='utf-8',
-        errors='ignore'
+        errors='replace',
+        env=env,
     )
     threading.Thread(target=stream_output, args=(process, "[backend]"), daemon=True).start()
     return process
