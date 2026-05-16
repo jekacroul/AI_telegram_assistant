@@ -237,12 +237,15 @@ async def _load_training_pairs(session: AsyncSession) -> tuple[list[dict], Optio
     return await _load_pairs(session), None
 
 
-async def start_training() -> dict:
+async def start_training(source: str = "auto") -> dict:
     if training_state.running:
         return {"started": False, "reason": "already running"}
 
     async with SessionLocal() as session:
-        pairs, build_id = await _load_training_pairs(session)
+        if source == "bot":
+            pairs, build_id = await _load_pairs(session), None
+        else:
+            pairs, build_id = await _load_training_pairs(session)
         if len(pairs) < MIN_PAIRS:
             return {
                 "started": False,

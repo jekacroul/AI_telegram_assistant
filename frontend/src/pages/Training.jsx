@@ -88,6 +88,7 @@ export default function Training() {
     { id: 1, path: "", status: "idle", error: "", preview: null },
   ]);
   const [cachedExports, setCachedExports] = useState([]);
+  const [trainSource, setTrainSource] = useState("auto");
   const [ragSearch, setRagSearch] = useState({
     open: false,
     query: "",
@@ -336,7 +337,7 @@ export default function Training() {
     setBusy(true);
     setError("");
     try {
-      const res = await api.startTraining();
+      const res = await api.startTraining(trainSource);
       if (!res.started) setError(res.reason || "не удалось запустить");
       refresh();
     } catch (e) {
@@ -942,6 +943,16 @@ export default function Training() {
             ? "Сборка..."
             : `Собрать датасет (${combined.total.toLocaleString("ru-RU")} пар)`}
         </button>
+        <select
+          className="input"
+          value={trainSource}
+          onChange={(e) => setTrainSource(e.target.value)}
+          disabled={status?.running}
+          title="Какие данные использовать для обучения"
+        >
+          <option value="auto">Обучать на: последняя сборка</option>
+          <option value="bot">Обучать на: только пары бота</option>
+        </select>
         <button
           className="btn-primary"
           disabled={!canTrain || busy}

@@ -79,7 +79,11 @@ export const api = {
       body: JSON.stringify({ file_path }),
     }),
   cachedExports: () => request("/api/training/exports/cached"),
-  startTraining: () => request("/api/training/start", { method: "POST" }),
+  startTraining: (source) =>
+    request("/api/training/start", {
+      method: "POST",
+      ...(source ? { body: JSON.stringify({ source }) } : {}),
+    }),
   cancelTraining: () => request("/api/training/cancel", { method: "POST" }),
   activateAdapter: (run_id) =>
     request(`/api/training/activate/${run_id}`, { method: "POST" }),

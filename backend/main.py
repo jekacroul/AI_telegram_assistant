@@ -1331,8 +1331,9 @@ async def training_exports_cached(
 
 
 @app.post("/api/training/start")
-async def training_start() -> dict:
-    return await start_training()
+async def training_start(body: Optional[dict] = Body(default=None)) -> dict:
+    source = (body or {}).get("source", "auto")
+    return await start_training(source)
 
 
 @app.post("/api/training/cancel")
