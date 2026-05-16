@@ -39,7 +39,6 @@ export default {
         "accent-fg": "rgb(var(--accent-fg) / <alpha-value>)",
         good: "rgb(var(--good) / <alpha-value>)",
         bad: "rgb(var(--bad) / <alpha-value>)",
-        amber: "rgb(var(--amber) / <alpha-value>)",
       },
       animation: {
         "count-up": "countUp .4s ease forwards",
