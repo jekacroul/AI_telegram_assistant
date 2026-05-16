@@ -618,6 +618,80 @@ async def whisper_unload() -> dict:
     return {"ok": True}
 
 
+@app.get("/api/system/resources")
+async def system_resources() -> dict:
+    """Live host resource usage for the dashboard memory tiles.
+
+    RAM comes from psutil; VRAM from torch.cuda when a GPU is present.
+    Every value is best-effort — absent hardware yields nulls instead
+    of an error so the frontend can degrade gracefully.
+    """
+    import psutil
+
+    vm = psutil.virtual_memory()
+    ram = {
+        "total_gb": round(vm.total / (1024 ** 3), 1),
+        "used_gb": round(vm.used / (1024 ** 3), 1),
+        "percent": int(vm.percent),
+    }
+
+    vram = None
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            free_b, total_b = torch.cuda.mem_get_info()
+            used_b = total_b - free_b
+            vram = {
+                "total_gb": round(total_b / (1024 ** 3), 1),
+                "used_gb": round(used_b / (1024 ** 3), 1),
+                "percent": int(used_b / total_b * 100) if total_b else 0,
+            }
+    except Exception:
+        vram = None
+
+    llama = await llama_server.status_async()
+    llm_online = bool(llama.get("running"))
+    base_model = llama.get("base_model")
+    llm_name = "LLM"
+    if base_model:
+        from pathlib import Path as _Path
+
+        llm_name = _Path(str(base_model)).stem
+
+    whisper_loaded = whisper_engine.is_loaded
+    whisper_vram_mb = whisper_engine.vram_used_mb()
+    whisper_name = f"Whisper {whisper_engine.model_name}".strip()
+
+    models = [
+        {
+            "name": llm_name,
+            "color": "emerald" if llm_online else "rose",
+            "status": "онлайн" if llm_online else "офлайн",
+            "online": llm_online,
+            "memory_gb": None,
+        },
+        {
+            "name": whisper_name or "Whisper",
+            "color": "emerald" if whisper_loaded else "amber",
+            "status": "загружен" if whisper_loaded else "lazy",
+            "online": whisper_loaded,
+            "memory_gb": (
+                round(whisper_vram_mb / 1024, 1) if whisper_vram_mb else None
+            ),
+        },
+        {
+            "name": "RAG embeddings",
+            "color": "emerald" if rag_engine.available else "rose",
+            "status": "онлайн" if rag_engine.available else "офлайн",
+            "online": rag_engine.available,
+            "memory_gb": None,
+        },
+    ]
+
+    return {"ram": ram, "vram": vram, "models": models}
+
+
 async def _transcribe_message(
     session: AsyncSession, message_id: int
 ) -> dict:

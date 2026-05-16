@@ -14,40 +14,22 @@ import { api } from "../lib/api.js";
 import MetricCard from "../components/MetricCard.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import { BarChart2 } from "lucide-react";
+import { useTheme } from "../hooks/useTheme.js";
+import { chartColors } from "../lib/colors.js";
 
 function useChartColors() {
-  const read = () =>
-    document.documentElement.classList.contains("dark")
-      ? {
-          grid: "#27272a",
-          axis: "#a1a1aa",
-          line1: "#fafafa",
-          line2: "#4ade80",
-          bar: "#fafafa",
-          tooltipBg: "#18181b",
-          tooltipBorder: "#27272a",
-          cursor: "rgba(255,255,255,0.06)",
-        }
-      : {
-          grid: "#e4e4e7",
-          axis: "#71717a",
-          line1: "#09090b",
-          line2: "#16a34a",
-          bar: "#09090b",
-          tooltipBg: "#ffffff",
-          tooltipBorder: "#e4e4e7",
-          cursor: "rgba(0,0,0,0.04)",
-        };
-  const [colors, setColors] = useState(read);
-  useEffect(() => {
-    const obs = new MutationObserver(() => setColors(read()));
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => obs.disconnect();
-  }, []);
-  return colors;
+  const { isDark } = useTheme();
+  const c = chartColors(isDark);
+  return {
+    grid: c.grid,
+    axis: c.axisText,
+    line1: c.primary,
+    line2: c.secondary,
+    bar: c.primary,
+    tooltipBg: c.tooltipBg,
+    tooltipBorder: c.tooltipBorder,
+    cursor: isDark ? "rgba(129,140,248,0.10)" : "rgba(79,70,229,0.08)",
+  };
 }
 
 function formatPercent(value) {

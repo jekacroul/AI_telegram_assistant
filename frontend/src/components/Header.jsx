@@ -1,17 +1,23 @@
 import React from "react";
 
-export default function Header({ title, subtitle }) {
+export default function Header({ title, subtitle, actions }) {
   return (
     <header
-      className="flex items-center justify-between px-6 h-[52px] flex-shrink-0
-                 border-b border-line bg-bg sticky top-0 z-10"
+      className="flex items-center justify-between gap-4 px-6 h-[56px] flex-shrink-0
+                 bg-light-card dark:bg-dark-card
+                 border-b border-light-border dark:border-dark-border"
     >
       <div className="min-w-0">
-        <h1 className="text-base font-semibold text-fg truncate">{title}</h1>
+        <h1 className="text-base font-bold text-zinc-900 dark:text-slate-100 truncate">
+          {title}
+        </h1>
         {subtitle && (
-          <p className="text-xs text-muted truncate">{subtitle}</p>
+          <p className="text-xs text-zinc-400 dark:text-slate-500 truncate">
+            {subtitle}
+          </p>
         )}
       </div>
+      {actions && <div className="flex items-center gap-2">{actions}</div>}
     </header>
   );
 }

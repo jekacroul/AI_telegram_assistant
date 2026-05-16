@@ -1,16 +1,17 @@
 import React from "react";
 import { Moon, Sun } from "lucide-react";
+import { useTheme } from "../hooks/useTheme.js";
 
-export default function ThemeToggle({ theme, onToggle, collapsed }) {
-  const isDark = theme === "dark";
+export default function ThemeToggle() {
+  const { isDark, toggle } = useTheme();
   return (
     <button
-      className="nav-item w-full"
-      onClick={onToggle}
+      className="nav-item"
+      onClick={toggle}
       title={isDark ? "Светлая тема" : "Тёмная тема"}
+      aria-label="Переключить тему"
     >
-      {isDark ? <Sun size={16} /> : <Moon size={16} />}
-      {!collapsed && <span>{isDark ? "Светлая тема" : "Тёмная тема"}</span>}
+      {isDark ? <Sun size={17} /> : <Moon size={17} />}
     </button>
   );
 }

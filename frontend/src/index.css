@@ -1,36 +1,36 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --bg: 255 255 255;
+    --bg: 240 242 247;
     --panel: 255 255 255;
-    --surface: 244 244 245;
-    --sidebar: 250 250 250;
-    --fg: 9 9 11;
-    --muted: 113 113 122;
-    --line: 228 228 231;
-    --accent: 9 9 11;
-    --accent-fg: 250 250 250;
-    --good: 22 163 74;
-    --bad: 220 38 38;
+    --surface: 248 250 252;
+    --sidebar: 255 255 255;
+    --fg: 24 24 27;
+    --muted: 148 163 184;
+    --line: 221 227 239;
+    --accent: 79 70 229;
+    --accent-fg: 255 255 255;
+    --good: 5 150 105;
+    --bad: 225 29 72;
     --amber: 217 119 6;
   }
 
   .dark {
-    --bg: 9 9 11;
-    --panel: 17 17 19;
-    --surface: 24 24 27;
-    --sidebar: 9 9 11;
-    --fg: 250 250 250;
-    --muted: 161 161 170;
-    --line: 39 39 42;
-    --accent: 250 250 250;
-    --accent-fg: 9 9 11;
-    --good: 74 222 128;
-    --bad: 248 113 113;
+    --bg: 15 17 23;
+    --panel: 22 27 39;
+    --surface: 30 37 53;
+    --sidebar: 22 27 39;
+    --fg: 241 245 249;
+    --muted: 100 116 139;
+    --line: 42 51 71;
+    --accent: 129 140 248;
+    --accent-fg: 255 255 255;
+    --good: 52 211 153;
+    --bad: 251 113 133;
     --amber: 251 191 36;
   }
 
@@ -41,7 +41,8 @@
   }
 
   body {
-    @apply bg-bg text-fg font-sans antialiased;
+    @apply bg-light-bg dark:bg-dark-bg text-zinc-900 dark:text-slate-100
+           font-sans antialiased;
     font-size: 14px;
   }
 
@@ -60,7 +61,7 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-line rounded-full;
+    @apply bg-light-border dark:bg-dark-border rounded-full;
     border: 3px solid transparent;
     background-clip: content-box;
   }
@@ -70,71 +71,187 @@
 }
 
 @layer components {
-  .card {
-    @apply bg-panel border border-line rounded-lg p-4;
+  .tile {
+    @apply bg-light-card dark:bg-dark-card
+           border border-light-border dark:border-dark-border
+           rounded-xl p-4 transition-all duration-200
+           hover:border-light-border2 dark:hover:border-dark-border2
+           hover:shadow-lg dark:hover:shadow-black/30
+           relative overflow-hidden;
   }
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5
-           text-sm font-medium rounded-md
-           transition-all duration-100 active:scale-[0.98]
-           disabled:opacity-40 disabled:cursor-not-allowed;
+  .tile-label {
+    @apply text-[10px] font-semibold tracking-widest uppercase
+           text-zinc-400 dark:text-slate-500 mb-2;
+  }
+  .tile-value {
+    @apply text-3xl font-bold leading-none mb-1;
+  }
+  .expand-btn {
+    @apply w-6 h-6 rounded-lg flex items-center justify-center
+           bg-light-card2 dark:bg-dark-card2
+           border border-light-border dark:border-dark-border
+           text-zinc-400 dark:text-slate-500 text-xs
+           hover:bg-light-hover dark:hover:bg-dark-hover
+           hover:text-zinc-600 dark:hover:text-slate-300
+           transition-all duration-100 cursor-pointer flex-shrink-0;
+  }
+  .expanded-section {
+    @apply mt-3 pt-3 border-t border-light-border dark:border-dark-border
+           animate-expand;
+  }
+  .stat-row {
+    @apply flex justify-between items-center py-1.5
+           border-b border-light-border dark:border-dark-border
+           last:border-none text-xs;
+  }
+  .stat-label {
+    @apply text-zinc-400 dark:text-slate-500;
+  }
+  .stat-value {
+    @apply text-zinc-700 dark:text-slate-200 font-medium;
+  }
+  .mem-card {
+    @apply bg-light-card2 dark:bg-dark-card2
+           border border-light-border dark:border-dark-border
+           rounded-lg p-3;
+  }
+  .progress-bar {
+    @apply h-1.5 rounded-full overflow-hidden
+           bg-light-hover dark:bg-dark-hover
+           border border-light-border dark:border-dark-border;
+  }
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-500 ease-out;
   }
   .btn-primary {
-    @apply btn bg-accent text-accent-fg hover:opacity-90;
+    @apply inline-flex items-center justify-center gap-2
+           px-4 h-8 text-sm font-semibold rounded-lg
+           bg-indigo-600 hover:bg-indigo-500
+           dark:bg-indigo-500 dark:hover:bg-indigo-400
+           text-white transition-all duration-100 active:scale-[.98]
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2
+           px-3 h-8 text-sm font-medium rounded-lg
+           border border-light-border dark:border-dark-border
+           text-zinc-500 dark:text-slate-400
+           hover:bg-light-hover dark:hover:bg-dark-hover
+           transition-all duration-100
+           disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-secondary {
-    @apply btn border border-line text-muted hover:bg-surface hover:text-fg;
+    @apply btn-ghost;
   }
   .btn-danger {
-    @apply btn bg-bad/10 text-bad hover:bg-bad/20;
+    @apply inline-flex items-center justify-center gap-2
+           px-3 h-8 text-sm font-medium rounded-lg
+           bg-rose-100 dark:bg-rose-950/40
+           text-rose-600 dark:text-rose-300
+           hover:bg-rose-200 dark:hover:bg-rose-950/70
+           transition-all duration-100
+           disabled:opacity-50 disabled:cursor-not-allowed;
   }
-  .btn-icon {
-    @apply inline-flex items-center justify-center w-8 h-8 rounded-md
-           text-muted hover:bg-surface hover:text-fg
-           transition-all duration-100;
+  .btn {
+    @apply btn-ghost;
   }
   .input {
-    @apply w-full bg-panel border border-line rounded-md px-3 py-2
-           text-sm text-fg placeholder:text-muted/50
-           focus:outline-none focus:border-fg/40
-           transition-colors duration-100;
+    @apply h-8 px-3 text-sm rounded-lg w-full
+           bg-light-card dark:bg-dark-card
+           border border-light-border dark:border-dark-border
+           text-zinc-900 dark:text-slate-100
+           placeholder:text-zinc-300 dark:placeholder:text-slate-600
+           focus:outline-none focus:ring-1
+           focus:ring-indigo-500 dark:focus:ring-indigo-400
+           transition-all duration-100;
+  }
+  .toggle {
+    @apply relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer
+           flex-shrink-0;
+  }
+  .toggle-off {
+    @apply bg-zinc-200 dark:bg-slate-700;
+  }
+  .toggle-on {
+    @apply bg-indigo-500 dark:bg-indigo-400;
+  }
+  .toggle-knob {
+    @apply absolute top-0.5 w-4 h-4 rounded-full
+           bg-white shadow-sm transition-transform duration-200;
+  }
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px]
+           bg-light-card2 dark:bg-dark-card2
+           border border-light-border dark:border-dark-border
+           text-zinc-600 dark:text-slate-400;
+  }
+  .nav-item {
+    @apply w-9 h-9 rounded-xl flex items-center justify-center
+           text-zinc-400 dark:text-slate-500
+           hover:bg-light-hover dark:hover:bg-dark-hover
+           hover:text-zinc-700 dark:hover:text-slate-200
+           transition-all duration-100 cursor-pointer;
+  }
+  .nav-item-active {
+    @apply bg-indigo-50 dark:bg-indigo-950/40
+           text-indigo-600 dark:text-indigo-400;
+  }
+  .msg-row {
+    @apply flex items-start gap-2 p-2 rounded-lg
+           bg-light-card2 dark:bg-dark-card2
+           border border-light-border dark:border-dark-border
+           hover:border-light-border2 dark:hover:border-dark-border2
+           transition-colors duration-100 cursor-pointer;
+  }
+
+  /* Legacy semantic classes — keep the non-dashboard pages styled. */
+  .card {
+    @apply bg-light-card dark:bg-dark-card
+           border border-light-border dark:border-dark-border
+           rounded-xl p-4;
   }
   .label {
-    @apply text-2xs font-medium uppercase tracking-wider text-muted;
+    @apply text-2xs font-semibold uppercase tracking-wider
+           text-zinc-400 dark:text-slate-500;
   }
   .section-label {
-    @apply text-2xs font-medium uppercase tracking-wider text-muted mb-3;
+    @apply text-2xs font-semibold uppercase tracking-wider
+           text-zinc-400 dark:text-slate-500 mb-3;
   }
   .badge {
     @apply inline-flex items-center gap-1 px-2 py-0.5
            text-2xs font-medium rounded-full;
   }
   .badge-green {
-    @apply bg-good/10 text-good;
+    @apply bg-emerald-100 dark:bg-emerald-950/40
+           text-emerald-700 dark:text-emerald-300;
   }
   .badge-red {
-    @apply bg-bad/10 text-bad;
+    @apply bg-rose-100 dark:bg-rose-950/40
+           text-rose-700 dark:text-rose-300;
   }
   .badge-amber {
-    @apply bg-amber/10 text-amber;
+    @apply bg-amber-100 dark:bg-amber-950/40
+           text-amber-700 dark:text-amber-300;
   }
   .badge-zinc {
-    @apply bg-surface text-muted;
-  }
-  .nav-item {
-    @apply flex items-center gap-3 px-3 h-9 text-sm rounded-md
-           text-muted hover:bg-surface hover:text-fg
-           transition-all duration-100 cursor-pointer;
-  }
-  .nav-item-active {
-    @apply bg-surface text-fg font-medium;
+    @apply bg-light-card2 dark:bg-dark-card2
+           text-zinc-600 dark:text-slate-400;
   }
   .divider {
-    @apply border-t border-line my-4;
+    @apply border-t border-light-border dark:border-dark-border my-4;
   }
   .skeleton {
     @apply rounded animate-shimmer bg-[length:200%_100%]
-           bg-gradient-to-r from-surface via-line to-surface;
+           bg-gradient-to-r
+           from-light-hover via-light-card2 to-light-hover
+           dark:from-dark-hover dark:via-dark-card2 dark:to-dark-hover;
+  }
+}
+
+@keyframes spark-draw {
+  to {
+    stroke-dashoffset: 0;
   }
 }
 
@@ -147,7 +264,8 @@
   }
 }
 .progress-indeterminate {
-  @apply h-1.5 bg-surface rounded-full relative overflow-hidden;
+  @apply h-1.5 rounded-full relative overflow-hidden
+         bg-light-hover dark:bg-dark-hover;
 }
 .progress-indeterminate::before {
   content: "";
@@ -159,7 +277,7 @@
   background: linear-gradient(
     90deg,
     transparent,
-    rgb(var(--accent)),
+    rgb(99 102 241),
     transparent
   );
   animation: indeterminate-slide 1.4s ease-in-out infinite;

@@ -1,21 +1,19 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import {
-  MessageSquare,
+  LayoutDashboard,
   Archive,
   GraduationCap,
   SlidersHorizontal,
   BarChart2,
-  Settings,
   Zap,
   HardDrive,
-  PanelLeftClose,
-  PanelLeftOpen,
+  Settings,
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle.jsx";
 
 export const NAV_ITEMS = [
-  { to: "/", label: "Дашборд", icon: MessageSquare },
+  { to: "/", label: "Дашборд", icon: LayoutDashboard },
   { to: "/dialogs", label: "Диалоги", icon: Archive },
   { to: "/training", label: "Обучение", icon: GraduationCap },
   { to: "/style", label: "Стиль", icon: SlidersHorizontal },
@@ -25,58 +23,36 @@ export const NAV_ITEMS = [
   { to: "/settings", label: "Настройки", icon: Settings },
 ];
 
-export default function Sidebar({ collapsed, onToggleCollapsed, theme, onToggleTheme }) {
+export default function Sidebar() {
   return (
     <aside
-      className={`flex flex-col h-full border-r border-line bg-sidebar
-                  transition-all duration-200 ${collapsed ? "w-14" : "w-[220px]"}`}
+      className="w-14 flex-shrink-0 flex flex-col items-center gap-1 py-3
+                 bg-light-card dark:bg-dark-card
+                 border-r border-light-border dark:border-dark-border"
     >
-      <div
-        className={`flex items-center gap-2.5 h-[52px] border-b border-line
-                    ${collapsed ? "justify-center px-0" : "px-4"}`}
-      >
-        <div className="w-6 h-6 rounded bg-accent flex-shrink-0" />
-        {!collapsed && (
-          <span className="text-sm font-semibold text-fg truncate">
-            Telegram AI
-          </span>
-        )}
+      <div className="w-9 h-9 rounded-xl mb-2 flex items-center justify-center
+                      bg-indigo-600 dark:bg-indigo-500 text-white font-bold text-sm">
+        AI
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
+      <nav className="flex flex-col items-center gap-1">
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             end={to === "/"}
-            title={collapsed ? label : undefined}
+            title={label}
             className={({ isActive }) =>
-              `nav-item ${isActive ? "nav-item-active" : ""} ${
-                collapsed ? "justify-center px-0" : ""
-              }`
+              `nav-item ${isActive ? "nav-item-active" : ""}`
             }
           >
-            <Icon size={16} className="flex-shrink-0" />
-            {!collapsed && <span className="truncate">{label}</span>}
+            <Icon size={17} />
           </NavLink>
         ))}
       </nav>
 
-      <div className="p-2 border-t border-line space-y-0.5">
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} collapsed={collapsed} />
-        <button
-          className={`nav-item w-full ${collapsed ? "justify-center px-0" : ""}`}
-          onClick={onToggleCollapsed}
-          title={collapsed ? "Развернуть" : "Свернуть"}
-        >
-          {collapsed ? (
-            <PanelLeftOpen size={16} />
-          ) : (
-            <PanelLeftClose size={16} />
-          )}
-          {!collapsed && <span>Свернуть</span>}
-        </button>
-      </div>
+      <div className="flex-1" />
+      <ThemeToggle />
     </aside>
   );
 }
