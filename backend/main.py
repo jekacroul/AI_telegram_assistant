@@ -38,6 +38,7 @@ from .bot import telegram_service
 from .config import ROOT_DIR, settings
 from .logging_setup import setup_logging
 from .database import (
+    DatasetBuild,
     DialogBackup,
     DialogBackupMessage,
     Message,
@@ -45,6 +46,7 @@ from .database import (
     QuickReply,
     RagIndexLog,
     SessionLocal,
+    TelegramExport,
     TrainingPair,
     TrainingRun,
     get_session,
@@ -52,7 +54,14 @@ from .database import (
     init_db,
     set_setting,
 )
-from .dataset_builder import build_dataset_file, dataset_stats
+from .dataset_builder import (
+    DatasetConfig,
+    build_combined_dataset,
+    build_dataset_file,
+    dataset_stats,
+    parse_telegram_export,
+    validate_telegram_export,
+)
 from .delay import delay_to_dict, get_delay_settings, save_delay_settings
 from .dialog_backup import (
     SETTING_INTERVAL,
@@ -1198,13 +1207,133 @@ async def training_status(session: AsyncSession = Depends(get_session)) -> dict:
 
 
 @app.post("/api/training/build-dataset")
-async def build_dataset(session: AsyncSession = Depends(get_session)) -> dict:
-    return await build_dataset_file(session)
+async def build_dataset(
+    body: Optional[dict] = Body(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    if not body or not any(
+        k in body for k in ("telegram_export_paths", "weights", "total_max_samples")
+    ):
+        return await build_dataset_file(session)
+
+    weights = body.get("weights") or {}
+    config = DatasetConfig(
+        use_bot_pairs=bool(body.get("use_bot_pairs", True)),
+        bot_weight=float(weights.get("bot", 0.3)),
+        telegram_export_paths=[p for p in (body.get("telegram_export_paths") or []) if p],
+        export_weight=float(weights.get("export", 0.7)),
+        total_max_samples=int(body.get("total_max_samples", 10000)),
+        shuffle=bool(body.get("shuffle", True)),
+    )
+    result = await build_combined_dataset(config)
+    session.add(
+        DatasetBuild(
+            bot_pairs=result.breakdown.get("bot", 0),
+            export_pairs=result.breakdown.get("export", 0),
+            total_pairs=result.total_pairs,
+            weights_json=json.dumps(
+                weights or {"bot": config.bot_weight, "export": config.export_weight}
+            ),
+            output_path=result.output_path,
+        )
+    )
+    await session.commit()
+    return {
+        "total_pairs": result.total_pairs,
+        "breakdown": result.breakdown,
+        "path": result.output_path,
+        "warnings": result.warnings,
+    }
+
+
+@app.post("/api/training/export/validate")
+async def training_export_validate(body: dict = Body(...)) -> dict:
+    file_path = (body or {}).get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="file_path обязателен")
+    return validate_telegram_export(file_path)
+
+
+@app.post("/api/training/export/parse")
+async def training_export_parse(
+    body: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    file_path = (body or {}).get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="file_path обязателен")
+
+    validation = validate_telegram_export(file_path)
+    if not validation["valid"]:
+        raise HTTPException(status_code=400, detail=validation["error"])
+
+    try:
+        result = await parse_telegram_export(file_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    date_from = result.date_range["from"] if result.date_range else None
+    date_to = result.date_range["to"] if result.date_range else None
+
+    existing = await session.execute(
+        select(TelegramExport).where(TelegramExport.file_path == file_path)
+    )
+    row = existing.scalar_one_or_none()
+    if row:
+        row.parsed_at = datetime.utcnow()
+        row.pairs_count = result.total_pairs
+        row.chats_count = result.chats_count
+        row.date_from = date_from
+        row.date_to = date_to
+        row.avg_reply_length = result.avg_reply_length
+    else:
+        session.add(
+            TelegramExport(
+                file_path=file_path,
+                pairs_count=result.total_pairs,
+                chats_count=result.chats_count,
+                date_from=date_from,
+                date_to=date_to,
+                avg_reply_length=result.avg_reply_length,
+            )
+        )
+    await session.commit()
+
+    return {
+        "total_pairs": result.total_pairs,
+        "chats_count": result.chats_count,
+        "date_range": result.date_range,
+        "sample_pairs": result.sample_pairs,
+        "avg_reply_length": result.avg_reply_length,
+        "top_chats": result.top_chats,
+        "output_path": result.output_path,
+    }
+
+
+@app.get("/api/training/exports/cached")
+async def training_exports_cached(
+    session: AsyncSession = Depends(get_session),
+) -> list:
+    rows = await session.execute(
+        select(TelegramExport).order_by(desc(TelegramExport.parsed_at))
+    )
+    return [
+        {
+            "path": r.file_path,
+            "parsed_at": _iso_utc(r.parsed_at),
+            "pairs_count": r.pairs_count,
+            "date_range": (
+                {"from": r.date_from, "to": r.date_to} if r.date_from else None
+            ),
+        }
+        for r in rows.scalars().all()
+    ]
 
 
 @app.post("/api/training/start")
-async def training_start() -> dict:
-    return await start_training()
+async def training_start(body: Optional[dict] = Body(default=None)) -> dict:
+    source = (body or {}).get("source", "auto")
+    return await start_training(source)
 
 
 @app.post("/api/training/cancel")

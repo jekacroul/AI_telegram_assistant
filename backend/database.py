@@ -152,6 +152,34 @@ class TrainingRun(Base):
     status: Mapped[str] = mapped_column(String(32), default="running")
 
 
+class TelegramExport(Base):
+    __tablename__ = "telegram_exports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_path: Mapped[str] = mapped_column(String(1024), index=True)
+    parsed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    pairs_count: Mapped[int] = mapped_column(Integer, default=0)
+    chats_count: Mapped[int] = mapped_column(Integer, default=0)
+    date_from: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    date_to: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    avg_reply_length: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class DatasetBuild(Base):
+    __tablename__ = "dataset_builds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    bot_pairs: Mapped[int] = mapped_column(Integer, default=0)
+    export_pairs: Mapped[int] = mapped_column(Integer, default=0)
+    total_pairs: Mapped[int] = mapped_column(Integer, default=0)
+    weights_json: Mapped[str] = mapped_column(Text, default="{}")
+    output_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    used_in_training_run_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+
+
 class StyleProfile(Base):
     __tablename__ = "style_profiles"
 

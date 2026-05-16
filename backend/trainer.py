@@ -18,11 +18,11 @@ def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
         return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
-from .database import SessionLocal, TrainingPair, TrainingRun
+from .database import DatasetBuild, SessionLocal, TrainingPair, TrainingRun
 from .event_bus import training_bus
 from .train_worker import EVENT_PREFIX
 
@@ -196,12 +196,56 @@ async def _load_pairs(session: AsyncSession) -> list[dict]:
     ]
 
 
-async def start_training() -> dict:
+def _read_dataset_file(path: Path) -> list[dict]:
+    pairs: list[dict] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            pairs.append(
+                {
+                    "instruction": obj.get(
+                        "instruction", "Ответь на сообщение в моём стиле"
+                    ),
+                    "input": obj.get("input", ""),
+                    "output": obj.get("output", ""),
+                }
+            )
+    return pairs
+
+
+async def _load_training_pairs(session: AsyncSession) -> tuple[list[dict], Optional[int]]:
+    """Prefer the most recent combined dataset build (bot pairs + Telegram
+    export merged with weights); fall back to bot-collected DB pairs."""
+    result = await session.execute(
+        select(DatasetBuild)
+        .where(DatasetBuild.output_path.is_not(None))
+        .order_by(desc(DatasetBuild.created_at))
+    )
+    for build in result.scalars().all():
+        path = Path(build.output_path)
+        if not path.exists():
+            continue
+        pairs = _read_dataset_file(path)
+        if pairs:
+            return pairs, build.id
+    return await _load_pairs(session), None
+
+
+async def start_training(source: str = "auto") -> dict:
     if training_state.running:
         return {"started": False, "reason": "already running"}
 
     async with SessionLocal() as session:
-        pairs = await _load_pairs(session)
+        if source == "bot":
+            pairs, build_id = await _load_pairs(session), None
+        else:
+            pairs, build_id = await _load_training_pairs(session)
         if len(pairs) < MIN_PAIRS:
             return {
                 "started": False,
@@ -221,6 +265,12 @@ async def start_training() -> dict:
         await session.commit()
         await session.refresh(run)
         run_id = run.id
+
+        if build_id is not None:
+            build = await session.get(DatasetBuild, build_id)
+            if build is not None:
+                build.used_in_training_run_id = run_id
+                await session.commit()
 
     training_state.running = True
     training_state.cancelled = False
