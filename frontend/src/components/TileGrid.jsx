@@ -7,20 +7,11 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  rectSortingStrategy,
-} from "@dnd-kit/sortable";
+import { SortableContext, arrayMove } from "@dnd-kit/sortable";
 import SortableTile from "./SortableTile.jsx";
+import { DEFAULT_SIZES } from "../hooks/useTileLayout.js";
 
-export default function TileGrid({
-  order,
-  onReorder,
-  getColSpan,
-  onResize,
-  renderTile,
-}) {
+export default function TileGrid({ order, sizes, onReorder, onResize, renderTile }) {
   const [activeId, setActiveId] = useState(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -38,6 +29,10 @@ export default function TileGrid({
     }
   }
 
+  const activeSize = activeId
+    ? sizes[activeId] || DEFAULT_SIZES[activeId]
+    : null;
+
   return (
     <DndContext
       sensors={sensors}
@@ -46,13 +41,13 @@ export default function TileGrid({
       onDragEnd={handleDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      <SortableContext items={order} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 grid-flow-row-dense gap-4 items-start">
+      <SortableContext items={order}>
+        <div className="flex flex-wrap gap-4 items-start">
           {order.map((id) => (
             <SortableTile
               key={id}
               id={id}
-              colSpan={getColSpan(id)}
+              size={sizes[id] || DEFAULT_SIZES[id]}
               onResize={onResize}
             >
               {({ dragHandleProps }) => renderTile(id, dragHandleProps)}
@@ -61,8 +56,11 @@ export default function TileGrid({
         </div>
       </SortableContext>
       <DragOverlay>
-        {activeId ? (
-          <div className="scale-[1.03] shadow-2xl rotate-[0.5deg]">
+        {activeId && activeSize ? (
+          <div
+            style={{ width: activeSize.w, height: activeSize.h }}
+            className="scale-[1.03] shadow-2xl rotate-[0.5deg]"
+          >
             {renderTile(activeId, {})}
           </div>
         ) : null}

@@ -10,8 +10,6 @@ import MessageFeedTile from "../components/tiles/MessageFeedTile.jsx";
 import ReplyPanelTile from "../components/tiles/ReplyPanelTile.jsx";
 import ReplyModal from "../components/ReplyModal.jsx";
 
-const WIDE_IDS = ["activity-chart", "model-status", "message-feed", "reply-panel"];
-
 const REASON_LABELS = {
   too_short: "Слишком короткий",
   language_mismatch: "Не тот язык",
@@ -32,7 +30,7 @@ function mean(arr) {
 }
 
 export default function Dashboard() {
-  const { order, reorder, spans, setSpan, reset } = useTileLayout();
+  const { order, reorder, sizes, setSize, reset } = useTileLayout();
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [data, setData] = useState({});
   const [active, setActive] = useState(null);
@@ -76,12 +74,6 @@ export default function Dashboard() {
   async function toggleAuto() {
     await api.saveSettings({ auto_reply: !data.status?.auto_reply });
     refresh();
-  }
-
-  function getColSpan(id) {
-    if (spans[id]) return spans[id];
-    if (WIDE_IDS.includes(id)) return 2;
-    return 1;
   }
 
   const activity = Array.isArray(data.activity) ? data.activity : [];
@@ -265,7 +257,7 @@ export default function Dashboard() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-zinc-400 dark:text-slate-500">
-          Перетаскивай блоки за иконку, тяни правый край — меняй ширину
+          Перетаскивай за иконку, тяни края и угол — меняй размер
         </p>
         <button className="btn-ghost" onClick={reset} title="Сбросить раскладку">
           <RotateCcw size={14} />
@@ -275,9 +267,9 @@ export default function Dashboard() {
 
       <TileGrid
         order={order}
+        sizes={sizes}
         onReorder={reorder}
-        getColSpan={getColSpan}
-        onResize={setSpan}
+        onResize={setSize}
         renderTile={renderTile}
       />
 

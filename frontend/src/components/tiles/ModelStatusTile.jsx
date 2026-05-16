@@ -33,8 +33,8 @@ export default function ModelStatusTile({ dragHandleProps }) {
   const models = res?.models || [];
 
   return (
-    <div className="tile">
-      <div className="flex items-center justify-between mb-3">
+    <div className="tile flex flex-col">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <span className="tile-label mb-0">Статус моделей</span>
         <span
           {...dragHandleProps}
@@ -46,7 +46,7 @@ export default function ModelStatusTile({ dragHandleProps }) {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 flex-shrink-0">
         {vram ? (
           <MemoryCard
             label="VRAM"
@@ -86,7 +86,7 @@ export default function ModelStatusTile({ dragHandleProps }) {
         )}
       </div>
 
-      <div className="mt-3 space-y-1">
+      <div className="mt-3 space-y-1 flex-1 min-h-0 overflow-y-auto">
         {models.map((m, i) => (
           <div key={i} className="stat-row">
             <div className="flex items-center gap-2 min-w-0">

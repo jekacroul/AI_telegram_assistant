@@ -46,8 +46,8 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
   const [preview, setPreview] = useState(null);
 
   return (
-    <div className="tile">
-      <div className="flex items-center justify-between mb-3">
+    <div className="tile flex flex-col">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <span className="tile-label mb-0">Лента сообщений</span>
         <div className="flex items-center gap-2">
           <Badge variant="zinc">{messages.length}</Badge>
@@ -62,7 +62,7 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
         </div>
       </div>
 
-      <div className="space-y-1.5 max-h-[340px] overflow-y-auto pr-1">
+      <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
         {messages.length === 0 && (
           <div className="text-xs text-zinc-400 dark:text-slate-500 py-6 text-center">
             Сообщений пока нет

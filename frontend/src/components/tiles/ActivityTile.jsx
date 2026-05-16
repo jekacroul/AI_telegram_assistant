@@ -18,8 +18,8 @@ export default function ActivityTile({ dragHandleProps, bars = [] }) {
       : 50;
 
   return (
-    <div className="tile">
-      <div className="flex items-center justify-between mb-3">
+    <div className="tile flex flex-col">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <span className="tile-label mb-0">Активность · 24 дня</span>
         <span
           {...dragHandleProps}
@@ -31,7 +31,7 @@ export default function ActivityTile({ dragHandleProps, bars = [] }) {
         </span>
       </div>
 
-      <div className="relative">
+      <div className="relative flex-1 min-h-0">
         {hoveredBar && (
           <div
             className="absolute z-10 pointer-events-none"
@@ -56,7 +56,7 @@ export default function ActivityTile({ dragHandleProps, bars = [] }) {
           </div>
         )}
 
-        <div key={String(isDark)} className="flex items-end gap-1 h-28">
+        <div key={String(isDark)} className="flex items-end gap-1 h-full">
           {bars.length === 0 &&
             Array.from({ length: 24 }).map((_, i) => (
               <div
@@ -91,7 +91,7 @@ export default function ActivityTile({ dragHandleProps, bars = [] }) {
         </div>
       </div>
 
-      <div className="flex justify-between mt-2 text-[10px] text-zinc-400 dark:text-slate-500">
+      <div className="flex justify-between mt-2 flex-shrink-0 text-[10px] text-zinc-400 dark:text-slate-500">
         <span>{bars[0]?.label || ""}</span>
         <span>сегодня</span>
       </div>

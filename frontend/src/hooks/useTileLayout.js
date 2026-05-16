@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 
 const ORDER_KEY = "ai-dashboard-layout";
-const SPANS_KEY = "ai-dashboard-spans";
+const SIZES_KEY = "ai-dashboard-sizes";
 
 export const DEFAULT_ORDER = [
   "metrics-received",
@@ -13,6 +13,19 @@ export const DEFAULT_ORDER = [
   "message-feed",
   "reply-panel",
 ];
+
+export const DEFAULT_SIZES = {
+  "metrics-received": { w: 336, h: 168 },
+  "metrics-sent": { w: 336, h: 168 },
+  "metrics-quality": { w: 336, h: 168 },
+  "metrics-rag": { w: 336, h: 168 },
+  "activity-chart": { w: 688, h: 250 },
+  "model-status": { w: 688, h: 320 },
+  "message-feed": { w: 688, h: 440 },
+  "reply-panel": { w: 688, h: 300 },
+};
+
+export const MIN_SIZE = { w: 240, h: 120 };
 
 function loadOrder() {
   try {
@@ -28,14 +41,22 @@ function loadOrder() {
   return DEFAULT_ORDER;
 }
 
-function loadSpans() {
+function loadSizes() {
+  const sizes = { ...DEFAULT_SIZES };
   try {
-    const stored = JSON.parse(localStorage.getItem(SPANS_KEY));
-    if (stored && typeof stored === "object") return stored;
+    const stored = JSON.parse(localStorage.getItem(SIZES_KEY));
+    if (stored && typeof stored === "object") {
+      for (const id of Object.keys(sizes)) {
+        const s = stored[id];
+        if (s && typeof s.w === "number" && typeof s.h === "number") {
+          sizes[id] = { w: s.w, h: s.h };
+        }
+      }
+    }
   } catch {
     // ignore
   }
-  return {};
+  return sizes;
 }
 
 function write(key, value) {
@@ -48,27 +69,27 @@ function write(key, value) {
 
 export function useTileLayout() {
   const [order, setOrder] = useState(loadOrder);
-  const [spans, setSpans] = useState(loadSpans);
+  const [sizes, setSizes] = useState(loadSizes);
 
   const reorder = useCallback((next) => {
     setOrder(next);
     write(ORDER_KEY, next);
   }, []);
 
-  const setSpan = useCallback((id, span) => {
-    setSpans((prev) => {
-      const next = { ...prev, [id]: span };
-      write(SPANS_KEY, next);
+  const setSize = useCallback((id, size) => {
+    setSizes((prev) => {
+      const next = { ...prev, [id]: size };
+      write(SIZES_KEY, next);
       return next;
     });
   }, []);
 
   const reset = useCallback(() => {
     setOrder(DEFAULT_ORDER);
-    setSpans({});
+    setSizes({ ...DEFAULT_SIZES });
     write(ORDER_KEY, DEFAULT_ORDER);
-    write(SPANS_KEY, {});
+    write(SIZES_KEY, {});
   }, []);
 
-  return { order, reorder, spans, setSpan, reset };
+  return { order, reorder, sizes, setSize, reset };
 }
