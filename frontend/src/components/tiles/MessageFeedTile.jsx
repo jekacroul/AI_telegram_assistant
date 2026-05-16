@@ -1,5 +1,5 @@
-import React from "react";
-import { GripVertical, Mic } from "lucide-react";
+import React, { useState } from "react";
+import { GripVertical, Mic, Image as ImageIcon, Video } from "lucide-react";
 import Badge from "../Badge.jsx";
 
 const AVATARS = [
@@ -8,6 +8,8 @@ const AVATARS = [
   "bg-violet-100 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400",
   "bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400",
 ];
+
+const MEDIA_PLACEHOLDERS = ["(фото)", "(видео)", "(кружок)", "(photo)", "(video)"];
 
 function initials(name) {
   if (!name) return "?";
@@ -29,7 +31,20 @@ function timeLabel(ts) {
   });
 }
 
+function isPlaceholder(text) {
+  return MEDIA_PLACEHOLDERS.includes((text || "").trim().toLowerCase());
+}
+
+function mediaLabel(m) {
+  if (m.media_type === "photo") return "Фото";
+  if (m.media_type === "video_note") return "Видео-кружок";
+  if (m.media_type === "video") return "Видео";
+  return "Медиа";
+}
+
 export default function MessageFeedTile({ dragHandleProps, messages = [], onSelect }) {
+  const [preview, setPreview] = useState(null);
+
   return (
     <div className="tile">
       <div className="flex items-center justify-between mb-3">
@@ -60,6 +75,13 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
             : m.replied
             ? { variant: "green", text: "отвечено" }
             : { variant: "amber", text: "ожидает" };
+
+          const hasMedia = !!m.media_type && m.media_type !== "voice";
+          const isVideo =
+            m.media_type === "video" || m.media_type === "video_note";
+          const showText =
+            m.text && !(hasMedia && isPlaceholder(m.text)) && !m.is_voice;
+
           return (
             <div
               key={m.id}
@@ -88,6 +110,11 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                     <span className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400">
                       <Mic size={11} /> голосовое
                     </span>
+                  ) : hasMedia ? (
+                    <span className="flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400">
+                      {isVideo ? <Video size={11} /> : <ImageIcon size={11} />}
+                      {showText ? m.text : mediaLabel(m)}
+                    </span>
                   ) : (
                     <span className="text-[11px] text-zinc-500 dark:text-slate-400 truncate">
                       {m.text || "—"}
@@ -95,6 +122,39 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                   )}
                 </div>
               </div>
+
+              {hasMedia && m.media_path && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPreview(m);
+                  }}
+                  className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0
+                             border border-light-border dark:border-dark-border
+                             bg-light-card2 dark:bg-dark-card2"
+                >
+                  {isVideo ? (
+                    <video
+                      src={m.media_path}
+                      className="w-full h-full object-cover"
+                      muted
+                    />
+                  ) : (
+                    <img
+                      src={m.media_path}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </button>
+              )}
+              {hasMedia && !m.media_path && m.media_private && (
+                <span className="text-[10px] text-zinc-400 dark:text-slate-500 flex-shrink-0">
+                  приватное
+                </span>
+              )}
+
               {badge && (
                 <Badge variant={badge.variant} className="flex-shrink-0">
                   {badge.text}
@@ -104,6 +164,28 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
           );
         })}
       </div>
+
+      {preview?.media_path && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setPreview(null)}
+        >
+          {preview.media_type === "photo" ? (
+            <img
+              src={preview.media_path}
+              alt=""
+              className="max-w-full max-h-full object-contain rounded-lg"
+            />
+          ) : (
+            <video
+              src={preview.media_path}
+              controls
+              autoPlay
+              className="max-w-full max-h-full rounded-lg"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
