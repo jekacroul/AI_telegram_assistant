@@ -79,6 +79,13 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
           const showText =
             m.text && !(hasMedia && isPlaceholder(m.text)) && !m.is_voice;
 
+          const uname = (m.chat_username || "").trim();
+          let chatLabel = "";
+          if (m.chat_name && m.chat_name !== m.sender_name) {
+            chatLabel = m.chat_name;
+          }
+          if (uname) chatLabel = chatLabel ? `${chatLabel} · @${uname}` : `@${uname}`;
+
           return (
             <div
               key={m.id}
@@ -94,11 +101,17 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                 {initials(m.sender_name)}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-slate-200 truncate">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-800 dark:text-slate-200 truncate flex-shrink-0 max-w-[55%]">
                     {m.sender_name || "—"}
                   </span>
-                  <span className="text-[10px] text-zinc-400 dark:text-slate-500 flex-shrink-0">
+                  {chatLabel && (
+                    <span className="text-[10px] text-zinc-400 dark:text-slate-500 truncate">
+                      {m.is_mine ? "→ " : "в "}
+                      {chatLabel}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-zinc-400 dark:text-slate-500 flex-shrink-0 ml-auto">
                     {timeLabel(m.timestamp)}
                   </span>
                 </div>
