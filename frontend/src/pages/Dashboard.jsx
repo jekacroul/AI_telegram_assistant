@@ -43,13 +43,12 @@ export default function Dashboard() {
       api.qualityStats(),
       api.ragStatus(),
       api.statsActivity(),
-      api.whisperStatus(),
       api.pending(),
     ];
     const results = await Promise.allSettled(calls);
-    const [status, messages, overview, quality, rag, activity, whisper, pending] =
+    const [status, messages, overview, quality, rag, activity, pending] =
       results.map((r) => (r.status === "fulfilled" ? r.value : null));
-    setData({ status, messages, overview, quality, rag, activity, whisper, pending });
+    setData({ status, messages, overview, quality, rag, activity, pending });
   }, []);
 
   useEffect(() => {
@@ -89,7 +88,7 @@ export default function Dashboard() {
   const rag = data.rag || {};
   const status = data.status || {};
   const messages = Array.isArray(data.messages) ? data.messages : [];
-  const pendingCount = Array.isArray(data.pending) ? data.pending.length : 0;
+  const pending = Array.isArray(data.pending) ? data.pending : [];
 
   const recvToday = recv14[recv14.length - 1] || 0;
   const sentToday = sent14[sent14.length - 1] || 0;
@@ -242,9 +241,8 @@ export default function Dashboard() {
           <ReplyPanelTile
             dragHandleProps={dragHandleProps}
             status={status}
-            ragOk={!!rag.enabled}
-            whisperOk={!!data.whisper?.model_loaded}
-            pendingCount={pendingCount}
+            messages={pending}
+            onSelect={setActive}
             onToggleAuto={toggleAuto}
           />
         );

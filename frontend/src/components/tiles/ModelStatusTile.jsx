@@ -21,17 +21,80 @@ function EmptyCard({ label, hint }) {
   );
 }
 
+function StatusRow({ color, name, status, device, detail, memory, error }) {
+  return (
+    <div className="py-2 border-b border-light-border dark:border-dark-border last:border-none">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              DOT[color] || DOT.rose
+            }`}
+          />
+          <span className="text-xs font-semibold text-zinc-700 dark:text-slate-200 truncate">
+            {name}
+          </span>
+        </div>
+        <span className="text-[11px] text-zinc-400 dark:text-slate-500 flex-shrink-0">
+          {status}
+          {memory ? ` · ${memory} GB` : ""}
+        </span>
+      </div>
+      {(device || detail) && (
+        <div className="ml-4 mt-0.5 flex items-center gap-1.5 text-[10px] text-zinc-400 dark:text-slate-500 truncate">
+          {device && (
+            <span
+              className="px-1.5 py-px rounded font-mono
+                         bg-light-hover dark:bg-dark-hover
+                         text-zinc-500 dark:text-slate-400"
+            >
+              {device}
+            </span>
+          )}
+          {detail && <span className="truncate">{detail}</span>}
+        </div>
+      )}
+      {error && (
+        <div
+          className="ml-4 mt-0.5 text-[10px] text-rose-500 dark:text-rose-400 truncate"
+          title={error}
+        >
+          ⚠ {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GroupLabel({ children }) {
+  return (
+    <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-500 mt-3 mb-1">
+      {children}
+    </div>
+  );
+}
+
 export default function ModelStatusTile({ dragHandleProps }) {
   const [res, setRes] = useState(null);
+  const [status, setStatus] = useState(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const load = () =>
-      api
-        .systemResources()
-        .then((r) => !cancelled && (setRes(r), setError(false)))
-        .catch(() => !cancelled && setError(true));
+    const load = async () => {
+      const [r, s] = await Promise.allSettled([
+        api.systemResources(),
+        api.status(),
+      ]);
+      if (cancelled) return;
+      if (r.status === "fulfilled") {
+        setRes(r.value);
+        setError(false);
+      } else {
+        setError(true);
+      }
+      if (s.status === "fulfilled") setStatus(s.value);
+    };
     load();
     const id = setInterval(load, 15000);
     return () => {
@@ -45,13 +108,20 @@ export default function ModelStatusTile({ dragHandleProps }) {
   const cpu = res?.cpu;
   const disk = res?.disk;
   const models = res?.models || [];
-  const gpuLoad =
-    vram && (vram.util_percent != null || vram.temp_c != null);
+  const gpuLoad = vram && (vram.util_percent != null || vram.temp_c != null);
+
+  const services = status
+    ? [
+        { name: "LM Studio", ok: !!status.llm },
+        { name: "Telegram-бот", ok: !!status.bot },
+        { name: "База данных", ok: !!status.db },
+      ]
+    : [];
 
   return (
     <div className="tile flex flex-col">
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
-        <span className="tile-label mb-0">Статус моделей</span>
+        <span className="tile-label mb-0">Статус системы</span>
         <span
           {...dragHandleProps}
           className="cursor-grab active:cursor-grabbing text-zinc-300
@@ -74,7 +144,6 @@ export default function ModelStatusTile({ dragHandleProps }) {
         ) : (
           <EmptyCard label="VRAM" hint="GPU не обнаружен" />
         )}
-
         {ram ? (
           <MemoryCard
             label="RAM"
@@ -86,7 +155,6 @@ export default function ModelStatusTile({ dragHandleProps }) {
         ) : (
           <EmptyCard label="RAM" hint={error ? "нет данных" : "загрузка…"} />
         )}
-
         {cpu ? (
           <MemoryCard
             label="CPU"
@@ -98,7 +166,6 @@ export default function ModelStatusTile({ dragHandleProps }) {
         ) : (
           <EmptyCard label="CPU" hint="—" />
         )}
-
         {disk ? (
           <MemoryCard
             label="Диск"
@@ -137,57 +204,38 @@ export default function ModelStatusTile({ dragHandleProps }) {
         </div>
       )}
 
-      <div className="mt-3 flex-1 min-h-0 overflow-y-auto">
-        {models.map((m, i) => (
-          <div
-            key={i}
-            className="py-2 border-b border-light-border dark:border-dark-border last:border-none"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span
-                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    DOT[m.color] || DOT.rose
-                  }`}
-                />
-                <span className="text-xs font-semibold text-zinc-700 dark:text-slate-200 truncate">
-                  {m.name}
-                </span>
-              </div>
-              <span className="text-[11px] text-zinc-400 dark:text-slate-500 flex-shrink-0">
-                {m.status}
-                {m.memory_gb ? ` · ${m.memory_gb} GB` : ""}
-              </span>
-            </div>
-            {(m.device || m.detail) && (
-              <div className="ml-4 mt-0.5 flex items-center gap-1.5 text-[10px] text-zinc-400 dark:text-slate-500 truncate">
-                {m.device && (
-                  <span
-                    className="px-1.5 py-px rounded font-mono
-                               bg-light-hover dark:bg-dark-hover
-                               text-zinc-500 dark:text-slate-400"
-                  >
-                    {m.device}
-                  </span>
-                )}
-                {m.detail && <span className="truncate">{m.detail}</span>}
-              </div>
-            )}
-            {m.error && (
-              <div
-                className="ml-4 mt-0.5 text-[10px] text-rose-500 dark:text-rose-400 truncate"
-                title={m.error}
-              >
-                ⚠ {m.error}
-              </div>
-            )}
-          </div>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <GroupLabel>Сервисы</GroupLabel>
+        {services.length === 0 && (
+          <div className="stat-label text-xs py-2">Загрузка…</div>
+        )}
+        {services.map((s) => (
+          <StatusRow
+            key={s.name}
+            name={s.name}
+            color={s.ok ? "emerald" : "rose"}
+            status={s.ok ? "онлайн" : "офлайн"}
+          />
         ))}
+
+        <GroupLabel>Модели</GroupLabel>
         {models.length === 0 && (
           <div className="stat-label text-xs py-2">
             {error ? "Не удалось получить статус" : "Загрузка…"}
           </div>
         )}
+        {models.map((m, i) => (
+          <StatusRow
+            key={i}
+            name={m.name}
+            color={m.color}
+            status={m.status}
+            device={m.device}
+            detail={m.detail}
+            memory={m.memory_gb}
+            error={m.error}
+          />
+        ))}
       </div>
     </div>
   );
