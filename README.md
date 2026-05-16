@@ -1,86 +1,144 @@
 # Telegram Local AI Assistant
 
 Полностью локальный Telegram-ассистент, который учится твоему стилю общения через
-LoRA fine-tuning локального LLM (Mistral 7B / LLaMA 3.1 8B). Никаких внешних API.
+LoRA fine-tuning локального LLM (Mistral 7B / LLaMA 3.1 8B / Saiga и т.п.) и
+отвечает собеседникам от твоего имени. Никаких внешних API — все данные, модели
+и обучение остаются на твоей машине.
+
+## Возможности
+
+- **Сбор переписки**. Каждое входящее/исходящее сообщение сохраняется в SQLite.
+- **Анализ стиля**. Автоматически собирается профиль стиля: длина реплик,
+  эмодзи, тон, частые слова, приветствия.
+- **Генерация ответов**. Локальный LLM выдаёт варианты ответа с учётом профиля
+  стиля и истории чата.
+- **Векторная память (RAG)**. Семантический поиск по всей истории переписки
+  через ChromaDB — бот «помнит» больше, чем последние сообщения.
+- **LoRA fine-tuning**. Обучение адаптера на собранных парах прямо из веб-панели,
+  с авто-экспортом в GGUF.
+- **Голосовые сообщения**. Локальная транскрипция через openai-whisper.
+- **Авто-запуск llama-server**. Бэкенд сам поднимает llama.cpp HTTP-сервер с
+  базовой моделью и активным LoRA — LM Studio не обязательна.
+- **Telegram admin-панель**. Управление ботом командами из своего личного чата.
+- **Режим репликации**. Импорт личного экспорта Telegram для обучения.
+- **Веб-дашборд**. React-панель: диалоги, очередь ответов, обучение, статистика,
+  настройки.
 
 ## Стек
 
 - **LLM**: локальный OpenAI-совместимый сервер ([LM Studio](https://lmstudio.ai),
-  llama.cpp server, vLLM и т.п.)
+  llama.cpp server, vLLM) — либо автозапуск llama-server бэкендом.
 - **Fine-tuning**: PEFT + transformers + bitsandbytes (4-bit NF4) + TRL/SFTTrainer
-- **Telegram**: aiogram 3.x (Bot API, async). Подключается через Telegram Premium
-  «Chat Automation» — бот отвечает от твоего имени.
+- **Telegram**: aiogram 3.x (Bot API, async), доставка через webhook
 - **Backend**: FastAPI + SQLAlchemy (async) + SQLite + SSE
 - **Frontend**: React + Vite + Tailwind
-- **GPU**: NVIDIA 8 GB+, `device_map="cuda:0"`, flash-attn 2 (если доступен)
+- **RAG**: ChromaDB + sentence-transformers
+- **Голос**: openai-whisper + ffmpeg
+- **GPU**: NVIDIA 8 GB+ (для обучения), CUDA-сборка PyTorch
 
-## Структура
+## Структура проекта
 
 ```
-telegram-local-ai/
+AI_telegram_assistant/
+├── start.py                  # Лаунчер: backend + frontend + cloudflare tunnel
 ├── backend/
-│   ├── main.py               # FastAPI + lifespan
+│   ├── main.py               # FastAPI + lifespan, все API-роуты
 │   ├── bot.py                # aiogram bot, обработчик webhook
-│   ├── llm_engine.py         # OpenAI-compatible LLM client
+│   ├── admin_bot.py          # Telegram admin-панель для владельца
+│   ├── llm_engine.py         # OpenAI-совместимый LLM-клиент
+│   ├── llama_server.py       # Авто-запуск llama.cpp server
 │   ├── trainer.py            # LoRA fine-tuning pipeline
+│   ├── train_worker.py       # Подпроцесс обучения
 │   ├── dataset_builder.py    # Сбор обучающих пар
+│   ├── gguf_export.py        # Конвертация/квантизация в GGUF
+│   ├── merge_worker.py       # Слияние LoRA с базовой моделью
+│   ├── rag_engine.py         # Векторная память (ChromaDB)
 │   ├── style_engine.py       # Анализ стиля
+│   ├── whisper_engine.py     # Транскрипция голосовых
+│   ├── replication.py        # Импорт экспорта Telegram
+│   ├── quality_filter.py     # Фильтр качества обучающих пар
+│   ├── schedule.py           # Расписание активности бота
+│   ├── delay.py              # Имитация задержки ответа
+│   ├── dialog_backup.py      # Бэкап диалогов
 │   ├── database.py           # SQLAlchemy модели
 │   └── config.py             # Настройки из .env
 ├── frontend/
 │   └── src/
-│       ├── pages/            # Dashboard, Training, StyleProfile, Settings
+│       ├── pages/            # Dashboard, Dialogs, QuickReplies, Replication,
+│       │                     # Settings, Stats, StyleProfile, Training
 │       └── components/       # MessageCard, ReplyModal, StatusDot
+├── data/                     # SQLite БД + ChromaDB (создаётся автоматически)
 ├── training_data/            # JSONL датасеты
-├── models/                   # LoRA адаптеры
+├── models/                   # LoRA адаптеры, кэш HF/sentence-transformers
+├── logs/                     # Логи
+├── media/                    # Скачанные медиа/голосовые
 ├── .env.example
 ├── requirements.txt
 └── README.md
 ```
 
-## Быстрый старт
+> Папки `data/`, `logs/`, `media/`, `models/`, `training_data/` и `.env`
+> в `.gitignore` — они создаются при первом запуске.
 
-### 1. LM Studio
+---
 
-Скачай [LM Studio](https://lmstudio.ai), загрузи нужную модель и запусти
-встроенный OpenAI-совместимый сервер (по умолчанию `http://localhost:1234/v1`).
-Любой другой OpenAI-совместимый бэкенд (llama.cpp server, vLLM) тоже подойдёт —
-укажи его URL в `OPENAI_BASE_URL`.
+# Установка с нуля
 
-### 2. Backend
+## 0. Предварительные требования
+
+- **Python 3.11** (рекомендуется именно эта версия)
+- **Node.js 18+** и npm (для фронтенда)
+- **NVIDIA GPU 8 GB+** с актуальным драйвером — обязательно для LoRA-обучения,
+  желательно для инференса
+- **ffmpeg** в PATH — для транскрипции голосовых
+- **Git**
+- Telegram-бот: токен от [@BotFather](https://t.me/BotFather)
+
+## 1. Клонирование и виртуальное окружение
 
 ```bash
-python -m venv .venv
+git clone https://github.com/jekacroul/ai_telegram_assistant.git
+cd ai_telegram_assistant
+
+# Создание venv (Windows)
+py -3.11 -m venv .venv
+.venv\Scripts\activate
+
+# Создание venv (Linux/macOS)
+python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-cp .env .env
-# отредактируй .env: TELEGRAM_BOT_TOKEN, USER_NAME, при желании HF_BASE_MODEL
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-> ⚠️ Для LoRA-обучения нужна CUDA-сборка PyTorch. Дефолтный wheel из
-> `requirements.txt` на Windows ставится в CPU-only режиме, и обучение упадёт
-> с `CUDA is not available`. Переустанови torch под свою версию драйвера:
->
-> ```bash
-> pip uninstall -y torch torchvision torchaudio
-> pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-> ```
->
-> (или `cu124` / `cu118` под нужную версию). Проверь:
-> `python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"`.
+> `start.py` сам перезапускается под `.venv`, поэтому важно, чтобы окружение
+> лежало именно в `.venv/` в корне проекта.
 
-### 3. Frontend
+## 2. Установка зависимостей Python
 
 ```bash
-cd frontend
-npm install
-npm run dev      # http://localhost:5173 (проксирует /api на :8000)
-# или для прода:
-npm run build    # backend сам отдаст dist на /
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-### 4. ffmpeg (для голосовых)
+### CUDA-сборка PyTorch (обязательно для обучения)
+
+Дефолтный `torch` из `requirements.txt` на Windows ставится в **CPU-only**
+режиме, и LoRA-обучение упадёт с `CUDA is not available`. Переустанови torch
+под свою версию драйвера:
+
+```bash
+pip uninstall -y torch torchvision torchaudio
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+(или `cu124` / `cu118` — под нужную версию CUDA). Проверка:
+
+```bash
+python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+```
+
+Должно вывести `True` и версию CUDA.
+
+## 3. ffmpeg (для голосовых сообщений)
 
 Транскрипция голосовых через Whisper требует ffmpeg в PATH:
 
@@ -89,112 +147,273 @@ npm run build    # backend сам отдаст dist на /
 winget install ffmpeg
 # перезапусти терминал после установки
 
+# Linux
+sudo apt install ffmpeg
+
+# macOS
+brew install ffmpeg
+
 # проверка
 ffmpeg -version
 ```
 
-Проверить что openai-whisper установлен:
+## 4. Настройка .env
+
+Скопируй пример и отредактируй:
 
 ```bash
-py -3.11 -c "import whisper; print(whisper.available_models())"
+# Windows
+copy .env.example .env
+# Linux/macOS
+cp .env.example .env
 ```
 
-### 5. Webhook
+Минимально нужно заполнить:
 
-Бот работает через webhook. После старта backend:
+| Переменная | Описание |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather |
+| `USER_NAME` | Твоё имя — как бот тебя называет в промптах |
+| `OPENAI_BASE_URL` | URL локального LLM-сервера (по умолчанию `http://localhost:1234/v1`) |
+| `OPENAI_MODEL` | Имя модели на сервере |
+
+Остальные параметры — см. раздел [Конфигурация .env](#конфигурация-env) ниже.
+
+## 5. LLM — два варианта
+
+### Вариант A. LM Studio (проще)
+
+1. Скачай [LM Studio](https://lmstudio.ai).
+2. Загрузи нужную модель (Mistral 7B Instruct, Saiga, LLaMA 3.1 8B и т.п.).
+3. Запусти встроенный OpenAI-совместимый сервер (вкладка **Developer / Local Server**).
+4. В `.env` оставь `OPENAI_BASE_URL=http://localhost:1234/v1` и
+   `LLAMA_SERVER_AUTO_START=false`.
+
+Подойдёт любой OpenAI-совместимый бэкенд (llama.cpp server, vLLM) — укажи его URL.
+
+### Вариант B. Авто-запуск llama-server (LM Studio не нужна)
+
+Бэкенд сам поднимет llama.cpp HTTP-сервер с базовой `.gguf`-моделью и
+автоматически подцепит активный LoRA-адаптер. В `.env`:
 
 ```
-POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
+LLAMA_SERVER_AUTO_START=true
+LLAMA_BASE_MODEL_GGUF=C:\models\mistral-7b-instruct-Q5_K_M.gguf
+LLAMA_SERVER_BIN=        # необязательно, путь к llama-server.exe
+LLAMA_SERVER_PORT=1234
+LLAMA_SERVER_NGL=99      # слоёв на GPU (99 = все)
+LLAMA_SERVER_CTX=4096
 ```
 
-Для локальной разработки можно использовать [ngrok](https://ngrok.com).
+`OPENAI_BASE_URL` должен указывать на тот же порт (`http://127.0.0.1:1234/v1`).
 
-## Как это работает
+## 6. Frontend
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+## 7. Webhook / публичный доступ
+
+Telegram доставляет сообщения боту через webhook, а значит нужен публичный
+HTTPS-URL, ведущий на бэкенд (`:8000`).
+
+- **Автоматически**: `start.py` запускает [cloudflared](https://github.com/cloudflare/cloudflared)
+  quick-tunnel и сам регистрирует webhook. Положи бинарник `cloudflared`
+  (или `cloudflared.exe`) в корень проекта.
+- **Вручную**: подними любой туннель ([ngrok](https://ngrok.com), cloudflared,
+  свой домен) и зарегистрируй webhook:
+
+  ```
+  POST /api/webhook/set { "url": "https://your-public-host/webhook/<TOKEN>" }
+  ```
+
+---
+
+# Запуск
+
+## Способ 1. Всё одной командой (рекомендуется)
+
+```bash
+python start.py
+```
+
+`start.py`:
+
+1. Перезапускается под `.venv`.
+2. Поднимает backend (`backend.main` на `:8000`).
+3. Поднимает frontend (`npm run dev` на `:5173`).
+4. Запускает Cloudflare quick-tunnel (с ретраями) и регистрирует webhook.
+
+После старта:
+
+- 📊 Дашборд: <http://localhost:5173>
+- 📡 API docs: <http://localhost:8000/docs>
+- 🌐 Публичный URL — в логах
+
+`Ctrl+C` останавливает все процессы.
+
+## Способ 2. Компоненты по отдельности
+
+```bash
+# Терминал 1 — backend
+.venv\Scripts\activate
+python -m backend.main          # или: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+# Терминал 2 — frontend (разработка)
+cd frontend
+npm run dev                     # http://localhost:5173, проксирует /api на :8000
+```
+
+Для прода собери фронтенд — бэкенд сам отдаст `dist/`:
+
+```bash
+cd frontend
+npm run build
+```
+
+---
+
+# Как это работает
 
 1. **Сбор данных**. Каждое входящее и исходящее сообщение сохраняется в SQLite.
-2. **Анализ стиля** (`style_engine`). Каждые 20 новых сообщений автоматически
-   пересобирается профиль: средняя длина, эмодзи, тон, частые слова, приветствия.
+2. **Анализ стиля** (`style_engine`). Каждые ~20 новых сообщений профиль стиля
+   пересобирается: средняя длина, эмодзи, тон, частые слова, приветствия.
 3. **Генерация ответа** (`llm_engine`). На входящее сообщение локальный LLM
-   выдаёт 3 варианта ответа, с системным промптом, в который инжектится
-   профиль стиля и история чата.
+   выдаёт варианты ответа с системным промптом, куда инжектится профиль стиля,
+   история чата и найденный RAG-контекст.
 4. **Режимы**:
    - `AUTO_REPLY=true` — бот отвечает сам, ты ставишь 👍/👎 и правишь.
    - `AUTO_REPLY=false` — варианты приходят на дашборд, ты выбираешь.
-5. **Fine-tuning** (`trainer`). Когда накопилось ≥ 50 пар (input → output),
-   запускаешь LoRA-обучение: r=16, alpha=32, target=`q_proj,v_proj`,
-   3 эпохи, 4-bit NF4, fp16 compute. По завершении адаптер сохраняется
-   в `models/lora_adapter_v{N}/`. Если в `.env` указан `LLAMA_CPP_PATH`,
-   адаптер автоматически **сливается с базовой моделью** в fp16 и
-   квантизуется в один GGUF (`GGUF_QUANT`, по умолчанию `Q8_0`),
-   результат остаётся в той же `lora_adapter_v{N}/` папке.
+5. **Fine-tuning** (`trainer`). Когда накопилось достаточно пар (input → output),
+   запускаешь LoRA-обучение: r=16, alpha=32, target `q_proj,v_proj`, 3 эпохи,
+   4-bit NF4, fp16 compute. Адаптер сохраняется в `models/lora_adapter_v{N}/`.
+   Если задан `LLAMA_CPP_PATH`, адаптер автоматически сливается с базовой
+   моделью и квантизуется в один GGUF (`GGUF_QUANT`, по умолчанию `Q8_0`).
    `/api/training/activate/{run_id}` помечает адаптер активным в БД.
-6. **Обратная связь**. 👎 в режиме авто-ответа открывает редактор: правишь,
-   re-send, правильная пара уходит в `training_pairs` со `feedback=bad/good`.
+6. **Обратная связь**. 👎 открывает редактор: правишь, re-send, корректная пара
+   уходит в `training_pairs` со `feedback=good/bad`.
 
-## Голосовые сообщения
+---
 
-Бот умеет принимать голосовые/аудио сообщения и транскрибировать их локально
-через [openai-whisper](https://github.com/openai/whisper). По умолчанию
-используется модель `large-v3` с языком `ru` — она даёт лучшее качество для
-русского.
+# Голосовые сообщения
 
-VRAM (приблизительно):
+Бот принимает голосовые/аудио и транскрибирует их локально через
+[openai-whisper](https://github.com/openai/whisper). По умолчанию модель
+`large-v3`, язык `ru`.
 
-- `tiny`     — ~1 GB
-- `base`     — ~1 GB
-- `small`    — ~1.5 GB
-- `medium`   — ~3 GB (хороший компромисс)
-- `large-v3` — ~6 GB
+VRAM (приблизительно): `tiny`/`base` ~1 GB, `small` ~1.5 GB, `medium` ~3 GB,
+`large-v3` ~6 GB.
 
-Если основная LLM крупная (например saiga 12B Q8 ≈13 GB) и видеокарта на 12 GB,
-включи в Settings → «Голосовые сообщения» опцию *«Освобождать VRAM после
-транскрипции»* (lazy_load): Whisper будет загружаться перед обработкой и
-выгружаться сразу после, освобождая память для LLM.
+Если основная LLM крупная, включи в **Settings → Голосовые сообщения** опцию
+*«Освобождать VRAM после транскрипции»* (lazy_load): Whisper грузится перед
+обработкой и выгружается сразу после.
 
-В Settings → «Голосовые сообщения» можно выбрать как бот реагирует на
-голосовые:
+Режимы реакции на голосовые (Settings):
 
-- *Отвечать текстом автоматически* — стандартный режим: транскрипция →
-  генерация ответа → отправка.
-- *Добавлять в очередь для ручного ответа* — голосовые попадают в pending,
-  ответы готовишь сам.
-- *Игнорировать голосовые* — бот их пропускает.
+- *Отвечать текстом автоматически* — транскрипция → генерация → отправка.
+- *Добавлять в очередь для ручного ответа* — голосовые попадают в pending.
+- *Игнорировать голосовые*.
 
-Низкая уверенность транскрипции (avg confidence < 0.5) автоматически
-переводит сообщение в pending, чтобы можно было поправить текст вручную
-перед генерацией.
+Низкая уверенность транскрипции (avg confidence < 0.5) автоматически переводит
+сообщение в pending.
 
-## Векторная память (RAG)
+---
 
-Бот не ограничивается последними 8 сообщениями: каждое сообщение
-векторизуется и складывается в локальную базу [ChromaDB](https://www.trychroma.com/),
-а при генерации ответа бот находит семантически близкие сообщения по всей
-истории переписки. Эмбеддинги считаются моделью
-`paraphrase-multilingual-mpnet-base-v2` (лучшая мультиязычная модель для
-русского). Всё работает локально, ничего не уходит наружу.
+# Векторная память (RAG)
 
-Установка и проверка:
+Каждое сообщение векторизуется и складывается в локальную базу
+[ChromaDB](https://www.trychroma.com/); при генерации ответа бот находит
+семантически близкие сообщения по всей истории. Эмбеддинги —
+`paraphrase-multilingual-mpnet-base-v2`.
+
+Установка/проверка:
 
 ```bash
-py -3.11 -m pip install chromadb sentence-transformers
+pip install chromadb sentence-transformers
 ```
 
-Все модели скачиваются в папку проекта (`models/huggingface`,
-`models/sentence_transformers`), а векторная база — в `data/chroma_db/`.
-Примерный размер базы: ~40 КБ на 1000 сообщений.
+Модели скачиваются в `models/huggingface` и `models/sentence_transformers`,
+векторная база — в `data/chroma_db/` (~40 КБ на 1000 сообщений).
 
-Первый запуск — автоматическая индексация: при старте бот проиндексирует
-все существующие сообщения. Это занимает ~1–5 минут в зависимости от
-размера истории, прогресс виден в логах: `RAG: индексирую 450/1200...`.
-Новые сообщения индексируются в фоне, не задерживая ответ.
+При первом запуске бот автоматически индексирует существующие сообщения
+(~1–5 мин, прогресс в логах). Новые сообщения индексируются в фоне.
 
-Тест поиска: Training → «Векторная память» → «Тест поиска» — введи любую
-фразу и посмотри, какой контекст находит бот.
+Тест поиска: **Training → Векторная память → Тест поиска**.
+Настройка: **Settings → Векторная память (RAG)** — порог схожести, число
+результатов, поиск по всем чатам.
 
-Настройка чувствительности — Settings → «Векторная память (RAG)»:
-порог схожести, число результатов и поиск по всем чатам.
+---
 
-## API (выжимка)
+# Telegram admin-панель
+
+Бот принимает админ-команды из твоего личного чата. В `.env`:
+
+```
+ADMIN_BOT_ENABLED=true
+OWNER_CHAT_ID=        # твой личный chat_id
+```
+
+`chat_id` определяется автоматически: напиши `/start` боту в личку, затем
+нажми «Определить автоматически» в **Settings → Admin Panel**. То же касается
+`NOTIFY_CHAT_ID` — чат для уведомлений об авто-ответах.
+
+---
+
+# Конфигурация .env
+
+```ini
+# --- Telegram ---
+TELEGRAM_BOT_TOKEN=                 # токен от @BotFather
+WEBHOOK_BASE_URL=                   # базовый публичный URL (если задаёшь вручную)
+
+# --- LLM (OpenAI-совместимый сервер) ---
+OPENAI_BASE_URL=http://localhost:1234/v1
+OPENAI_API_KEY=local
+OPENAI_MODEL=local-model
+LLM_MAX_TOKENS=2048
+
+# --- Поведение ---
+AUTO_REPLY=false                    # true = бот отвечает сам
+USER_NAME=Я                         # как бот тебя называет
+
+# --- Пути (создаются автоматически) ---
+DB_PATH=./data/database.db
+TRAINING_DATA_PATH=./training_data/
+MODELS_PATH=./models/
+LOGS_PATH=./logs/
+
+# --- Fine-tuning ---
+HF_BASE_MODEL=mistralai/Mistral-7B-Instruct-v0.2
+
+# --- Авто-экспорт обученной модели в GGUF (необязательно) ---
+# LLAMA_CPP_PATH — путь к собранному клону https://github.com/ggerganov/llama.cpp
+#   (нужны convert_hf_to_gguf.py и собранный llama-quantize в build/bin/).
+# GGUF_QUANT — тип квантизации (Q4_K_M / Q5_K_M / Q8_0 / F16). По умолчанию Q8_0.
+LLAMA_CPP_PATH=
+GGUF_QUANT=Q8_0
+
+# --- Авто-запуск llama-server (альтернатива LM Studio) ---
+LLAMA_BASE_MODEL_GGUF=              # путь к базовой .gguf
+LLAMA_SERVER_BIN=                   # путь к llama-server.exe (необязательно)
+LLAMA_SERVER_PORT=1234
+LLAMA_SERVER_NGL=99                 # слоёв на GPU (99 = все)
+LLAMA_SERVER_CTX=4096
+LLAMA_SERVER_AUTO_START=true
+
+# --- Уведомления ---
+NOTIFY_CHAT_ID=                     # chat_id для уведомлений об авто-ответах
+
+# --- Admin-панель ---
+OWNER_CHAT_ID=                      # твой личный chat_id
+ADMIN_BOT_ENABLED=true
+```
+
+---
+
+# API (выжимка)
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
@@ -202,49 +421,43 @@ py -3.11 -m pip install chromadb sentence-transformers
 | GET | `/api/chats` | Список чатов |
 | GET/POST | `/api/settings` | Токен, авто-ответ, мониторинг |
 | GET | `/api/messages/pending` | Очередь на ручной ответ |
-| POST | `/api/reply/generate` | 3 варианта для message_id |
+| POST | `/api/reply/generate` | Варианты ответа для message_id |
 | POST | `/api/reply/approve` | Одобрить и отправить |
 | POST | `/api/reply/feedback` | 👍/👎 + правка |
 | GET | `/api/training/status` | Статистика и активный адаптер |
 | POST | `/api/training/build-dataset` | Собрать JSONL |
 | POST | `/api/training/start` | Запустить обучение |
 | GET | `/api/training/progress` | SSE: epoch/step/loss/eta |
-| POST | `/api/training/activate/{id}` | Пометить адаптер активным в БД |
-| GET | `/api/style/profile` | Текущий профиль |
+| POST | `/api/training/activate/{id}` | Пометить адаптер активным |
+| GET | `/api/style/profile` | Текущий профиль стиля |
 | PUT | `/api/style/profile` | Ручное редактирование |
-| POST | `/api/style/reanalyze` | Пересобрать |
+| POST | `/api/style/reanalyze` | Пересобрать профиль |
 | GET | `/api/stream/events` | SSE входящих сообщений |
-| GET | `/api/whisper/status` | Статус модели Whisper, VRAM |
-| POST | `/api/whisper/transcribe` | Транскрипция конкретного сообщения |
-| POST | `/api/whisper/retranscribe` | Перегенерация транскрипции |
+| GET | `/api/whisper/status` | Статус Whisper, VRAM |
+| POST | `/api/whisper/transcribe` | Транскрипция сообщения |
 | POST | `/api/whisper/unload` | Выгрузить Whisper из VRAM |
-| GET/POST | `/api/settings/whisper` | Настройки Whisper и режима ответа |
+| GET/POST | `/api/settings/whisper` | Настройки Whisper |
 | GET | `/api/stats/voice` | Статистика по голосовым |
+| POST | `/api/webhook/set` | Зарегистрировать webhook |
 | POST | `/webhook/{token}` | Telegram webhook |
 
-## .env
+Полный список — в Swagger: <http://localhost:8000/docs>.
 
-```
-TELEGRAM_BOT_TOKEN=
-OPENAI_BASE_URL=http://localhost:1234/v1
-OPENAI_API_KEY=local
-OPENAI_MODEL=local-model
-LLM_MAX_TOKENS=2048
-AUTO_REPLY=false
-DB_PATH=./data/database.db
-TRAINING_DATA_PATH=./training_data/
-MODELS_PATH=./models/
-USER_NAME=Я
-HF_BASE_MODEL=mistralai/Mistral-7B-Instruct-v0.2
+---
 
-# Авто-экспорт обученной модели в GGUF. Необязательно.
-# LLAMA_CPP_PATH — путь к собранному клону https://github.com/ggerganov/llama.cpp
-# (нужны convert_hf_to_gguf.py и собранный llama-quantize в build/bin/).
-# GGUF_QUANT — тип квантизации (Q4_K_M / Q5_K_M / Q8_0 / F16). По умолчанию Q8_0.
-LLAMA_CPP_PATH=
-GGUF_QUANT=Q8_0
-```
+# Частые проблемы
 
-## Лицензия
+| Симптом | Решение |
+| --- | --- |
+| `CUDA is not available` при обучении | Переустанови CUDA-сборку torch (см. шаг 2) |
+| Бот не получает сообщения | Туннель не поднялся / webhook не зарегистрирован — проверь логи и `/api/webhook/set` |
+| `cloudflared` quick-tunnel падает | Временный 500 на trycloudflare.com — перезапусти `start.py` или используй ngrok |
+| Whisper не запускается | Установи ffmpeg в PATH, перезапусти терминал |
+| Кириллица в логах ломается | `start.py` форсит UTF-8; запускай через него, а не напрямую |
+| `start.py` не находит venv | Создай `.venv` в корне проекта (`py -3.11 -m venv .venv`) |
+
+---
+
+# Лицензия
 
 MIT
