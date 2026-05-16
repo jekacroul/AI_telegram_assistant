@@ -84,17 +84,137 @@ AI_telegram_assistant/
 
 # Установка с нуля
 
-## 0. Предварительные требования
+Эта инструкция рассчитана на **полностью пустую машину** — предполагается, что
+ничего, кроме операционной системы, не установлено. Делай шаги по порядку.
 
-- **Python 3.11** (рекомендуется именно эта версия)
-- **Node.js 18+** и npm (для фронтенда)
-- **NVIDIA GPU 8 GB+** с актуальным драйвером — обязательно для LoRA-обучения,
-  желательно для инференса
-- **ffmpeg** в PATH — для транскрипции голосовых
-- **Git**
-- Telegram-бот: токен от [@BotFather](https://t.me/BotFather)
+## 0. Что в итоге будет установлено
 
-## 1. Клонирование и виртуальное окружение
+| Компонент | Зачем | Версия |
+| --- | --- | --- |
+| Python | Backend, обучение, бот | **3.11** |
+| Git | Скачать проект | любая свежая |
+| Node.js + npm | Веб-дашборд (frontend) | 18+ |
+| ffmpeg | Транскрипция голосовых | любая свежая |
+| cloudflared | Публичный туннель для Telegram webhook | любая свежая |
+| NVIDIA-драйвер | GPU для обучения и инференса | актуальный |
+| Telegram bot token | Сам бот | — |
+
+> **GPU.** Для LoRA-обучения нужна видеокарта NVIDIA 8 GB+ с актуальным
+> драйвером. Без GPU можно собирать данные и пользоваться панелью, но обучение
+> и быстрый инференс работать не будут.
+
+---
+
+## 1. Python 3.11
+
+### Windows
+
+1. Скачай установщик с <https://www.python.org/downloads/release/python-3119/>
+   (раздел *Windows installer (64-bit)*).
+2. Запусти его и **обязательно поставь галочку «Add python.exe to PATH»**.
+3. Нажми *Install Now*.
+4. Проверь в новом окне терминала (PowerShell или cmd):
+
+   ```bash
+   py -3.11 --version
+   ```
+
+### Linux (Ubuntu/Debian)
+
+```bash
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev
+python3.11 --version
+```
+
+### macOS
+
+```bash
+brew install python@3.11
+python3.11 --version
+```
+
+## 2. Git
+
+- **Windows**: скачай и установи с <https://git-scm.com/download/win> (все
+  настройки по умолчанию подходят).
+- **Linux**: `sudo apt install -y git`
+- **macOS**: `brew install git` (или установится вместе с Xcode CLT).
+
+Проверка: `git --version`.
+
+## 3. Node.js + npm (для веб-дашборда)
+
+- **Windows / macOS**: скачай LTS-версию с <https://nodejs.org/> и установи.
+- **Linux**:
+
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt install -y nodejs
+  ```
+
+Проверка: `node --version` и `npm --version`.
+
+## 4. ffmpeg (для голосовых сообщений)
+
+Транскрипция голосовых через Whisper требует ffmpeg в PATH:
+
+```bash
+# Windows (через встроенный winget)
+winget install ffmpeg
+# перезапусти терминал после установки
+
+# Linux
+sudo apt install -y ffmpeg
+
+# macOS
+brew install ffmpeg
+```
+
+Проверка: `ffmpeg -version`.
+
+> Если на Windows `winget` недоступен — скачай сборку с
+> <https://www.gyan.dev/ffmpeg/builds/> (gyan.dev → *release essentials*),
+> распакуй и добавь папку `bin` в системную переменную PATH.
+
+## 5. cloudflared (публичный туннель)
+
+Telegram доставляет сообщения боту через webhook — нужен публичный HTTPS-URL.
+`start.py` поднимает бесплатный Cloudflare quick-tunnel автоматически, но для
+этого в **корне проекта** должен лежать бинарник `cloudflared`.
+
+- **Windows**: скачай `cloudflared-windows-amd64.exe` со страницы релизов
+  <https://github.com/cloudflare/cloudflared/releases/latest>, переименуй
+  в `cloudflared.exe` и положи в корень проекта.
+- **Linux**:
+
+  ```bash
+  wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+  chmod +x cloudflared
+  ```
+
+- **macOS**: `brew install cloudflared` (или скачай `cloudflared-darwin-amd64.tgz`
+  с той же страницы релизов и распакуй бинарник в корень проекта).
+
+> Альтернатива cloudflared — [ngrok](https://ngrok.com) или собственный домен;
+> тогда webhook регистрируется вручную (см. шаг 13).
+
+## 6. NVIDIA-драйвер
+
+Скачай и установи актуальный драйвер для своей видеокарты с
+<https://www.nvidia.com/Download/index.aspx>. После установки проверь:
+
+```bash
+nvidia-smi
+```
+
+Команда покажет модель GPU и поддерживаемую версию CUDA — она понадобится на
+шаге 9 при установке PyTorch. Отдельно ставить CUDA Toolkit не нужно: CUDA-сборка
+PyTorch уже содержит нужные библиотеки.
+
+---
+
+## 7. Клонирование проекта и виртуальное окружение
 
 ```bash
 git clone https://github.com/jekacroul/ai_telegram_assistant.git
@@ -112,18 +232,18 @@ source .venv/bin/activate
 > `start.py` сам перезапускается под `.venv`, поэтому важно, чтобы окружение
 > лежало именно в `.venv/` в корне проекта.
 
-## 2. Установка зависимостей Python
+## 8. Установка зависимостей Python
 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### CUDA-сборка PyTorch (обязательно для обучения)
+## 9. CUDA-сборка PyTorch (обязательно для обучения)
 
 Дефолтный `torch` из `requirements.txt` на Windows ставится в **CPU-only**
 режиме, и LoRA-обучение упадёт с `CUDA is not available`. Переустанови torch
-под свою версию драйвера:
+под версию CUDA, которую показал `nvidia-smi` (шаг 6):
 
 ```bash
 pip uninstall -y torch torchvision torchaudio
@@ -138,26 +258,7 @@ python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
 
 Должно вывести `True` и версию CUDA.
 
-## 3. ffmpeg (для голосовых сообщений)
-
-Транскрипция голосовых через Whisper требует ffmpeg в PATH:
-
-```bash
-# Windows
-winget install ffmpeg
-# перезапусти терминал после установки
-
-# Linux
-sudo apt install ffmpeg
-
-# macOS
-brew install ffmpeg
-
-# проверка
-ffmpeg -version
-```
-
-## 4. Настройка .env
+## 10. Настройка .env
 
 Скопируй пример и отредактируй:
 
@@ -179,9 +280,42 @@ cp .env.example .env
 
 Остальные параметры — см. раздел [Конфигурация .env](#конфигурация-env) ниже.
 
-## 5. LLM — два варианта
+## 11. LLM-сервер — два варианта
 
-### Вариант A. LM Studio (проще)
+### ✅ Вариант B (предпочтительный). Свой llama-server — чтобы цеплялись LoRA-адаптеры
+
+**Рекомендуется именно этот вариант.** Бэкенд сам поднимает llama.cpp
+HTTP-сервер с базовой `.gguf`-моделью и **автоматически подцепляет активный
+LoRA-адаптер**, обученный на твоём стиле. Так бот реально использует результаты
+fine-tuning — при варианте A (LM Studio) адаптеры не подключаются.
+
+1. Скачай базовую модель в формате `.gguf` (например Mistral 7B Instruct,
+   Saiga, LLaMA 3.1 8B — квантизация Q4_K_M / Q5_K_M / Q8_0) с
+   [Hugging Face](https://huggingface.co/models?library=gguf).
+2. Получи бинарник `llama-server`: скачай готовую сборку со страницы релизов
+   <https://github.com/ggerganov/llama.cpp/releases> (например
+   `llama-bXXXX-bin-win-cuda-x64.zip` под Windows + CUDA) или собери llama.cpp
+   самостоятельно.
+3. Пропиши в `.env`:
+
+   ```ini
+   OPENAI_BASE_URL=http://127.0.0.1:1234/v1
+   LLAMA_SERVER_AUTO_START=true
+   LLAMA_BASE_MODEL_GGUF=C:\models\mistral-7b-instruct-Q5_K_M.gguf
+   LLAMA_SERVER_BIN=C:\llama.cpp\llama-server.exe   # путь к бинарнику
+   LLAMA_SERVER_PORT=1234
+   LLAMA_SERVER_NGL=99      # слоёв на GPU (99 = все)
+   LLAMA_SERVER_CTX=4096
+   ```
+
+`OPENAI_BASE_URL` должен указывать на тот же порт, что `LLAMA_SERVER_PORT`.
+После обучения адаптер подключается автоматически при следующем запуске сервера
+(или через `/api/training/activate/{id}`).
+
+### Вариант A. LM Studio (проще, но без адаптеров)
+
+Годится для первого знакомства и сбора данных, **но обученные LoRA-адаптеры
+подключаться не будут** — бот всегда отвечает базовой моделью.
 
 1. Скачай [LM Studio](https://lmstudio.ai).
 2. Загрузи нужную модель (Mistral 7B Instruct, Saiga, LLaMA 3.1 8B и т.п.).
@@ -189,25 +323,9 @@ cp .env.example .env
 4. В `.env` оставь `OPENAI_BASE_URL=http://localhost:1234/v1` и
    `LLAMA_SERVER_AUTO_START=false`.
 
-Подойдёт любой OpenAI-совместимый бэкенд (llama.cpp server, vLLM) — укажи его URL.
+Подойдёт любой OpenAI-совместимый бэкенд (vLLM и т.п.) — укажи его URL.
 
-### Вариант B. Авто-запуск llama-server (LM Studio не нужна)
-
-Бэкенд сам поднимет llama.cpp HTTP-сервер с базовой `.gguf`-моделью и
-автоматически подцепит активный LoRA-адаптер. В `.env`:
-
-```
-LLAMA_SERVER_AUTO_START=true
-LLAMA_BASE_MODEL_GGUF=C:\models\mistral-7b-instruct-Q5_K_M.gguf
-LLAMA_SERVER_BIN=        # необязательно, путь к llama-server.exe
-LLAMA_SERVER_PORT=1234
-LLAMA_SERVER_NGL=99      # слоёв на GPU (99 = все)
-LLAMA_SERVER_CTX=4096
-```
-
-`OPENAI_BASE_URL` должен указывать на тот же порт (`http://127.0.0.1:1234/v1`).
-
-## 6. Frontend
+## 12. Frontend
 
 ```bash
 cd frontend
@@ -215,14 +333,14 @@ npm install
 cd ..
 ```
 
-## 7. Webhook / публичный доступ
+## 13. Webhook / публичный доступ
 
 Telegram доставляет сообщения боту через webhook, а значит нужен публичный
 HTTPS-URL, ведущий на бэкенд (`:8000`).
 
 - **Автоматически**: `start.py` запускает [cloudflared](https://github.com/cloudflare/cloudflared)
-  quick-tunnel и сам регистрирует webhook. Положи бинарник `cloudflared`
-  (или `cloudflared.exe`) в корень проекта.
+  quick-tunnel и сам регистрирует webhook. Убедись, что бинарник `cloudflared`
+  лежит в корне проекта (шаг 5).
 - **Вручную**: подними любой туннель ([ngrok](https://ngrok.com), cloudflared,
   свой домен) и зарегистрируй webhook:
 
