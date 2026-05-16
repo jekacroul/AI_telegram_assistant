@@ -1,6 +1,12 @@
 import React, { useState } from "react";
-import { GripVertical, Mic, Image as ImageIcon, Video } from "lucide-react";
-import Badge from "../Badge.jsx";
+import {
+  GripVertical,
+  Mic,
+  Image as ImageIcon,
+  Video,
+  Check,
+  Hourglass,
+} from "lucide-react";
 
 const AVATARS = [
   "bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400",
@@ -8,6 +14,23 @@ const AVATARS = [
   "bg-violet-100 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400",
   "bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400",
 ];
+
+const STATUS = {
+  sent: {
+    text: "Отправлено",
+    Icon: Check,
+    cls:
+      "bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 " +
+      "ring-1 ring-emerald-300/70 dark:ring-emerald-500/30",
+  },
+  pending: {
+    text: "Ожидает",
+    Icon: Hourglass,
+    cls:
+      "bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 " +
+      "ring-1 ring-amber-300/70 dark:ring-amber-500/30",
+  },
+};
 
 const MEDIA_PLACEHOLDERS = ["(фото)", "(видео)", "(кружок)", "(photo)", "(video)"];
 
@@ -67,11 +90,11 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
         )}
         {messages.map((m) => {
           const canReply = !m.is_mine && !m.replied;
-          const badge = m.is_mine
+          const status = m.is_mine
             ? null
             : m.replied
-            ? { variant: "green", text: "отвечено" }
-            : { variant: "amber", text: "ожидает" };
+            ? STATUS.sent
+            : STATUS.pending;
 
           const hasMedia = !!m.media_type && m.media_type !== "voice";
           const isVideo =
@@ -165,10 +188,14 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                 </span>
               )}
 
-              {badge && (
-                <Badge variant={badge.variant} className="flex-shrink-0">
-                  {badge.text}
-                </Badge>
+              {status && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-full
+                    text-[10px] font-semibold flex-shrink-0 self-center ${status.cls}`}
+                >
+                  <status.Icon size={11} strokeWidth={2.5} />
+                  {status.text}
+                </span>
               )}
             </div>
           );
