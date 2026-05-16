@@ -78,7 +78,6 @@ export default function Training() {
   const [error, setError] = useState("");
   const [runLogs, setRunLogs] = useState({});
   const [loadingLogId, setLoadingLogId] = useState(null);
-  const [serverStatus, setServerStatus] = useState(null);
   const [ragStatus, setRagStatus] = useState(null);
   const [botEnabled, setBotEnabled] = useState(true);
   const [botWeight, setBotWeight] = useState(30);
@@ -118,12 +117,6 @@ export default function Training() {
       // ignore
     }
     try {
-      const srv = await api.llamaServerStatus();
-      setServerStatus(srv);
-    } catch {
-      // ignore
-    }
-    try {
       setCachedExports(await api.cachedExports());
     } catch {
       // ignore
@@ -156,58 +149,11 @@ export default function Training() {
         ragWasRunning = p.running;
       } catch {}
     };
-    const srvPoll = setInterval(async () => {
-      try {
-        const srv = await api.llamaServerStatus();
-        setServerStatus(srv);
-      } catch {
-        // ignore
-      }
-    }, 3000);
     return () => {
       ev.close();
       ragEv.close();
-      clearInterval(srvPoll);
     };
   }, []);
-
-  async function serverStart() {
-    setError("");
-    try {
-      const res = await api.llamaServerStart();
-      if (!res.started) setError(res.reason || "не удалось запустить");
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function serverStop() {
-    setError("");
-    try {
-      await api.llamaServerStop();
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function serverRestart() {
-    setError("");
-    try {
-      await api.llamaServerRestart();
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function setServerAutoResume(enabled) {
-    setServerStatus((s) => (s ? { ...s, auto_resume: enabled } : s));
-    try {
-      await api.llamaServerSetAutoResume(enabled);
-    } catch (e) {
-      setError(e.message);
-      setServerStatus((s) => (s ? { ...s, auto_resume: !enabled } : s));
-    }
-  }
 
   async function reindexRag() {
     setError("");
@@ -641,78 +587,6 @@ export default function Training() {
                   ))}
                 </div>
               )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {serverStatus && (
-        <div className="card">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="label">Llama Server</div>
-            <span
-              className={
-                serverStatus.starting
-                  ? "text-accent text-sm"
-                  : serverStatus.stopping
-                  ? "text-muted text-sm"
-                  : serverStatus.running
-                  ? "text-good text-sm"
-                  : "text-muted text-sm"
-              }
-            >
-              {serverStatus.starting
-                ? "● запуск..."
-                : serverStatus.stopping
-                ? "● останавливается..."
-                : serverStatus.running
-                ? `● работает на :${serverStatus.port}`
-                : "○ остановлен"}
-            </span>
-            {serverStatus.running && serverStatus.lora_path && (
-              <span className="text-xs text-muted">
-                LoRA: <code>{serverStatus.lora_path.split(/[\\/]/).pop()}</code>
-              </span>
-            )}
-            {serverStatus.running && !serverStatus.lora_path && (
-              <span className="text-xs text-muted">без адаптера (чистая база)</span>
-            )}
-            <div className="ml-auto flex gap-2">
-              {!serverStatus.running && !serverStatus.starting && (
-                <button className="btn-secondary" onClick={serverStart}>
-                  Запустить
-                </button>
-              )}
-              {serverStatus.running && (
-                <button className="btn-secondary" onClick={serverRestart}>
-                  Перезапустить
-                </button>
-              )}
-              {serverStatus.running && (
-                <button className="btn-danger" onClick={serverStop}>
-                  Остановить
-                </button>
-              )}
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-xs text-muted mt-3 select-none">
-            <input
-              type="checkbox"
-              checked={!!serverStatus.auto_resume}
-              onChange={(e) => setServerAutoResume(e.target.checked)}
-            />
-            <span>
-              Авто-подъём после обучения и Merge → GGUF (если был запущен до)
-            </span>
-          </label>
-          {!serverStatus.configured && (
-            <div className="text-bad text-xs mt-2">
-              Не задан LLAMA_BASE_MODEL_GGUF в .env — сервер запустить нельзя.
-            </div>
-          )}
-          {serverStatus.last_error && !serverStatus.running && (
-            <div className="text-bad text-xs mt-2">
-              Ошибка: {serverStatus.last_error}
             </div>
           )}
         </div>

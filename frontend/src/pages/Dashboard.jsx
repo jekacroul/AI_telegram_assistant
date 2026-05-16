@@ -6,6 +6,7 @@ import TileGrid from "../components/TileGrid.jsx";
 import MetricTile from "../components/tiles/MetricTile.jsx";
 import ActivityTile from "../components/tiles/ActivityTile.jsx";
 import ModelStatusTile from "../components/tiles/ModelStatusTile.jsx";
+import LlamaServerTile from "../components/tiles/LlamaServerTile.jsx";
 import MessageFeedTile from "../components/tiles/MessageFeedTile.jsx";
 import ReplyPanelTile from "../components/tiles/ReplyPanelTile.jsx";
 import ReplyModal from "../components/ReplyModal.jsx";
@@ -228,6 +229,8 @@ export default function Dashboard() {
         return <ActivityTile dragHandleProps={dragHandleProps} bars={bars} />;
       case "model-status":
         return <ModelStatusTile dragHandleProps={dragHandleProps} />;
+      case "llama-server":
+        return <LlamaServerTile dragHandleProps={dragHandleProps} />;
       case "message-feed":
         return (
           <MessageFeedTile

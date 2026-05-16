@@ -10,6 +10,7 @@ export const DEFAULT_ORDER = [
   "metrics-rag",
   "activity-chart",
   "model-status",
+  "llama-server",
   "message-feed",
   "reply-panel",
 ];
@@ -21,8 +22,9 @@ export const DEFAULT_SIZES = {
   "metrics-rag": { w: 336, h: 168 },
   "activity-chart": { w: 688, h: 250 },
   "model-status": { w: 688, h: 470 },
+  "llama-server": { w: 336, h: 250 },
   "message-feed": { w: 688, h: 440 },
-  "reply-panel": { w: 688, h: 300 },
+  "reply-panel": { w: 688, h: 440 },
 };
 
 export const MIN_SIZE = { w: 240, h: 120 };
