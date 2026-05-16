@@ -49,17 +49,14 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
     <div className="tile flex flex-col">
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <span className="tile-label mb-0">Лента сообщений</span>
-        <div className="flex items-center gap-2">
-          <Badge variant="zinc">{messages.length}</Badge>
-          <span
-            {...dragHandleProps}
-            className="cursor-grab active:cursor-grabbing text-zinc-300
-                       dark:text-slate-600 hover:text-zinc-500
-                       dark:hover:text-slate-400 touch-none"
-          >
-            <GripVertical size={16} />
-          </span>
-        </div>
+        <span
+          {...dragHandleProps}
+          className="cursor-grab active:cursor-grabbing text-zinc-300
+                     dark:text-slate-600 hover:text-zinc-500
+                     dark:hover:text-slate-400 touch-none"
+        >
+          <GripVertical size={16} />
+        </span>
       </div>
 
       <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
