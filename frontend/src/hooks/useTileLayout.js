@@ -20,7 +20,7 @@ export const DEFAULT_SIZES = {
   "metrics-quality": { w: 336, h: 168 },
   "metrics-rag": { w: 336, h: 168 },
   "activity-chart": { w: 688, h: 250 },
-  "model-status": { w: 688, h: 320 },
+  "model-status": { w: 688, h: 470 },
   "message-feed": { w: 688, h: 440 },
   "reply-panel": { w: 688, h: 300 },
 };

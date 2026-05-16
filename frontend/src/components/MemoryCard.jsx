@@ -2,12 +2,20 @@ import React, { useEffect, useState } from "react";
 
 const COLORS = {
   amber: {
-    text: "text-amber-400 dark:text-amber-300",
-    fill: "bg-amber-400 dark:bg-amber-300",
+    text: "text-amber-500 dark:text-amber-300",
+    fill: "bg-amber-500 dark:bg-amber-300",
   },
   emerald: {
-    text: "text-emerald-400 dark:text-emerald-300",
-    fill: "bg-emerald-400 dark:bg-emerald-300",
+    text: "text-emerald-500 dark:text-emerald-300",
+    fill: "bg-emerald-500 dark:bg-emerald-300",
+  },
+  sky: {
+    text: "text-sky-500 dark:text-sky-300",
+    fill: "bg-sky-500 dark:bg-sky-300",
+  },
+  violet: {
+    text: "text-violet-500 dark:text-violet-300",
+    fill: "bg-violet-500 dark:bg-violet-300",
   },
 };
 

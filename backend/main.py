@@ -620,13 +620,15 @@ async def whisper_unload() -> dict:
 
 @app.get("/api/system/resources")
 async def system_resources() -> dict:
-    """Live host resource usage for the dashboard memory tiles.
+    """Live host resource usage for the dashboard model-status tile.
 
-    RAM comes from psutil; VRAM from torch.cuda when a GPU is present.
-    Every value is best-effort — absent hardware yields nulls instead
-    of an error so the frontend can degrade gracefully.
+    RAM/CPU/disk come from psutil; VRAM and GPU load/temperature from
+    torch.cuda when a GPU is present. Every value is best-effort —
+    absent hardware yields nulls instead of an error so the frontend
+    can degrade gracefully.
     """
     import psutil
+    from pathlib import Path as _Path
 
     vm = psutil.virtual_memory()
     ram = {
@@ -634,6 +636,22 @@ async def system_resources() -> dict:
         "used_gb": round(vm.used / (1024 ** 3), 1),
         "percent": int(vm.percent),
     }
+
+    cpu = {
+        "percent": int(psutil.cpu_percent(interval=0.1)),
+        "cores": psutil.cpu_count() or 0,
+    }
+
+    disk = None
+    try:
+        du = psutil.disk_usage(str(ROOT_DIR))
+        disk = {
+            "total_gb": round(du.total / (1024 ** 3), 1),
+            "used_gb": round(du.used / (1024 ** 3), 1),
+            "percent": int(du.percent),
+        }
+    except Exception:
+        disk = None
 
     vram = None
     try:
@@ -646,7 +664,17 @@ async def system_resources() -> dict:
                 "total_gb": round(total_b / (1024 ** 3), 1),
                 "used_gb": round(used_b / (1024 ** 3), 1),
                 "percent": int(used_b / total_b * 100) if total_b else 0,
+                "util_percent": None,
+                "temp_c": None,
             }
+            try:
+                vram["util_percent"] = int(torch.cuda.utilization())
+            except Exception:
+                pass
+            try:
+                vram["temp_c"] = int(torch.cuda.temperature())
+            except Exception:
+                pass
     except Exception:
         vram = None
 
@@ -655,13 +683,27 @@ async def system_resources() -> dict:
     base_model = llama.get("base_model")
     llm_name = "LLM"
     if base_model:
-        from pathlib import Path as _Path
-
         llm_name = _Path(str(base_model)).stem
+    lora_path = llama.get("lora_path")
+    if lora_path:
+        llm_detail = f"LoRA: {_Path(str(lora_path)).name}"
+    elif llm_online:
+        llm_detail = "чистая база"
+    else:
+        llm_detail = None
 
     whisper_loaded = whisper_engine.is_loaded
     whisper_vram_mb = whisper_engine.vram_used_mb()
     whisper_name = f"Whisper {whisper_engine.model_name}".strip()
+    whisper_device = (whisper_engine.device or "").upper() or None
+    whisper_detail = (
+        "ffmpeg доступен"
+        if whisper_engine.ffmpeg_available()
+        else "ffmpeg не найден"
+    )
+
+    rag_device = (rag_engine.device or "").upper() or None
+    rag_indexing = bool((rag_engine.progress or {}).get("running"))
 
     models = [
         {
@@ -669,27 +711,44 @@ async def system_resources() -> dict:
             "color": "emerald" if llm_online else "rose",
             "status": "онлайн" if llm_online else "офлайн",
             "online": llm_online,
+            "device": None,
+            "detail": llm_detail,
             "memory_gb": None,
+            "error": None if llm_online else (llama.get("last_error") or None),
         },
         {
             "name": whisper_name or "Whisper",
             "color": "emerald" if whisper_loaded else "amber",
             "status": "загружен" if whisper_loaded else "lazy",
             "online": whisper_loaded,
+            "device": whisper_device,
+            "detail": whisper_detail,
             "memory_gb": (
                 round(whisper_vram_mb / 1024, 1) if whisper_vram_mb else None
             ),
+            "error": whisper_engine.last_error or None,
         },
         {
             "name": "RAG embeddings",
             "color": "emerald" if rag_engine.available else "rose",
-            "status": "онлайн" if rag_engine.available else "офлайн",
+            "status": "индексация…"
+            if rag_indexing
+            else ("онлайн" if rag_engine.available else "офлайн"),
             "online": rag_engine.available,
+            "device": rag_device,
+            "detail": EMBED_MODEL_NAME,
             "memory_gb": None,
+            "error": rag_engine.last_error or None,
         },
     ]
 
-    return {"ram": ram, "vram": vram, "models": models}
+    return {
+        "ram": ram,
+        "cpu": cpu,
+        "disk": disk,
+        "vram": vram,
+        "models": models,
+    }
 
 
 async def _transcribe_message(
