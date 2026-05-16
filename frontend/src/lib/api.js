@@ -24,6 +24,7 @@ async function request(path, options = {}) {
 
 export const api = {
   status: () => request("/api/status"),
+  systemResources: () => request("/api/system/resources"),
   chats: () => request("/api/chats"),
   getSettings: () => request("/api/settings"),
   getSchedule: () => request("/api/schedule"),

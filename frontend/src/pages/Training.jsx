@@ -78,7 +78,6 @@ export default function Training() {
   const [error, setError] = useState("");
   const [runLogs, setRunLogs] = useState({});
   const [loadingLogId, setLoadingLogId] = useState(null);
-  const [serverStatus, setServerStatus] = useState(null);
   const [ragStatus, setRagStatus] = useState(null);
   const [botEnabled, setBotEnabled] = useState(true);
   const [botWeight, setBotWeight] = useState(30);
@@ -118,12 +117,6 @@ export default function Training() {
       // ignore
     }
     try {
-      const srv = await api.llamaServerStatus();
-      setServerStatus(srv);
-    } catch {
-      // ignore
-    }
-    try {
       setCachedExports(await api.cachedExports());
     } catch {
       // ignore
@@ -156,58 +149,11 @@ export default function Training() {
         ragWasRunning = p.running;
       } catch {}
     };
-    const srvPoll = setInterval(async () => {
-      try {
-        const srv = await api.llamaServerStatus();
-        setServerStatus(srv);
-      } catch {
-        // ignore
-      }
-    }, 3000);
     return () => {
       ev.close();
       ragEv.close();
-      clearInterval(srvPoll);
     };
   }, []);
-
-  async function serverStart() {
-    setError("");
-    try {
-      const res = await api.llamaServerStart();
-      if (!res.started) setError(res.reason || "не удалось запустить");
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function serverStop() {
-    setError("");
-    try {
-      await api.llamaServerStop();
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function serverRestart() {
-    setError("");
-    try {
-      await api.llamaServerRestart();
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function setServerAutoResume(enabled) {
-    setServerStatus((s) => (s ? { ...s, auto_resume: enabled } : s));
-    try {
-      await api.llamaServerSetAutoResume(enabled);
-    } catch (e) {
-      setError(e.message);
-      setServerStatus((s) => (s ? { ...s, auto_resume: !enabled } : s));
-    }
-  }
 
   async function reindexRag() {
     setError("");
@@ -557,7 +503,7 @@ export default function Training() {
                 </span>
               </div>
               {ragStatus.indexing.total > 0 ? (
-                <div className="mt-1 h-2 bg-white/10 rounded">
+                <div className="mt-1 h-2 bg-surface rounded">
                   <div
                     className="h-2 bg-accent rounded transition-all"
                     style={{ width: `${ragStatus.indexing.percent}%` }}
@@ -589,7 +535,7 @@ export default function Training() {
           </div>
 
           {ragSearch.open && (
-            <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-3">
+            <div className="mt-4 rounded-lg border border-line bg-bg p-3">
               <div className="flex gap-2">
                 <input
                   className="input flex-1"
@@ -623,7 +569,7 @@ export default function Training() {
                   {ragSearch.results.map((r, i) => (
                     <div
                       key={i}
-                      className="rounded-lg border border-white/10 p-2 text-sm"
+                      className="rounded-lg border border-line p-2 text-sm"
                     >
                       <div className="flex justify-between gap-2 text-xs text-muted">
                         <span>
@@ -632,87 +578,15 @@ export default function Training() {
                             ? ` · ${r.chat_name}`
                             : ""}
                         </span>
-                        <span className="rounded-full bg-accent/20 text-accent px-2">
+                        <span className="badge badge-zinc font-mono">
                           {r.similarity_score?.toFixed?.(2) ?? "—"}
                         </span>
                       </div>
-                      <div className="mt-1 text-white/90">{r.text}</div>
+                      <div className="mt-1 text-fg/90">{r.text}</div>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {serverStatus && (
-        <div className="card">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="label">Llama Server</div>
-            <span
-              className={
-                serverStatus.starting
-                  ? "text-accent text-sm"
-                  : serverStatus.stopping
-                  ? "text-muted text-sm"
-                  : serverStatus.running
-                  ? "text-good text-sm"
-                  : "text-muted text-sm"
-              }
-            >
-              {serverStatus.starting
-                ? "● запуск..."
-                : serverStatus.stopping
-                ? "● останавливается..."
-                : serverStatus.running
-                ? `● работает на :${serverStatus.port}`
-                : "○ остановлен"}
-            </span>
-            {serverStatus.running && serverStatus.lora_path && (
-              <span className="text-xs text-muted">
-                LoRA: <code>{serverStatus.lora_path.split(/[\\/]/).pop()}</code>
-              </span>
-            )}
-            {serverStatus.running && !serverStatus.lora_path && (
-              <span className="text-xs text-muted">без адаптера (чистая база)</span>
-            )}
-            <div className="ml-auto flex gap-2">
-              {!serverStatus.running && !serverStatus.starting && (
-                <button className="btn-secondary" onClick={serverStart}>
-                  Запустить
-                </button>
-              )}
-              {serverStatus.running && (
-                <button className="btn-secondary" onClick={serverRestart}>
-                  Перезапустить
-                </button>
-              )}
-              {serverStatus.running && (
-                <button className="btn-danger" onClick={serverStop}>
-                  Остановить
-                </button>
-              )}
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-xs text-muted mt-3 select-none">
-            <input
-              type="checkbox"
-              checked={!!serverStatus.auto_resume}
-              onChange={(e) => setServerAutoResume(e.target.checked)}
-            />
-            <span>
-              Авто-подъём после обучения и Merge → GGUF (если был запущен до)
-            </span>
-          </label>
-          {!serverStatus.configured && (
-            <div className="text-bad text-xs mt-2">
-              Не задан LLAMA_BASE_MODEL_GGUF в .env — сервер запустить нельзя.
-            </div>
-          )}
-          {serverStatus.last_error && !serverStatus.running && (
-            <div className="text-bad text-xs mt-2">
-              Ошибка: {serverStatus.last_error}
             </div>
           )}
         </div>
@@ -730,7 +604,7 @@ export default function Training() {
             qualityStats.reasons.map((item) => (
               <span
                 key={item.reason}
-                className="rounded-full bg-white/10 px-3 py-1 text-muted"
+                className="rounded-full bg-surface px-3 py-1 text-muted"
               >
                 {reasonLabel(item.reason)}: {item.count}
               </span>
@@ -744,7 +618,7 @@ export default function Training() {
       <div className="card space-y-4">
         <div className="label">Источники данных</div>
 
-        <div className="rounded-lg border border-white/10 p-3 space-y-2">
+        <div className="rounded-lg border border-line p-3 space-y-2">
           <div className="flex items-center gap-3">
             <span className="font-semibold">🤖 Пары из бота</span>
             <label className="flex items-center gap-2 text-sm text-muted ml-auto select-none">
@@ -778,9 +652,9 @@ export default function Training() {
           )}
         </div>
 
-        <div className="rounded-lg border border-white/10 p-3 space-y-3">
+        <div className="rounded-lg border border-line p-3 space-y-3">
           <div className="font-semibold">📱 Экспорт Telegram</div>
-          <div className="text-xs text-muted whitespace-pre-line bg-black/30 rounded p-2">
+          <div className="text-xs text-muted whitespace-pre-line bg-bg rounded p-2">
             {`Как экспортировать историю:
  1. Открой Telegram Desktop
  2. Настройки → Конфиденциальность и безопасность
@@ -876,7 +750,7 @@ export default function Training() {
                 {cachedExports.map((c, i) => (
                   <button
                     key={i}
-                    className="rounded-full bg-white/10 px-2 py-0.5 hover:bg-white/20"
+                    className="rounded-full bg-surface px-2 py-0.5 hover:bg-surface"
                     onClick={() => addCachedExport(c.path)}
                     title={c.path}
                   >
@@ -888,11 +762,11 @@ export default function Training() {
           )}
         </div>
 
-        <div className="rounded-lg border border-white/10 p-3 space-y-2">
+        <div className="rounded-lg border border-line p-3 space-y-2">
           <div className="text-sm text-muted">Итого будет использовано:</div>
           <div className="space-y-1 text-sm">
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-3 bg-white/10 rounded overflow-hidden">
+              <div className="flex-1 h-3 bg-surface rounded overflow-hidden">
                 <div
                   className="h-3 bg-accent transition-all"
                   style={{ width: `${combined.botPct}%` }}
@@ -903,7 +777,7 @@ export default function Training() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-3 bg-white/10 rounded overflow-hidden">
+              <div className="flex-1 h-3 bg-surface rounded overflow-hidden">
                 <div
                   className="h-3 bg-good transition-all"
                   style={{ width: `${combined.exportPct}%` }}
@@ -914,7 +788,7 @@ export default function Training() {
               </span>
             </div>
           </div>
-          <div className="border-t border-white/10 pt-2 font-semibold">
+          <div className="border-t border-line pt-2 font-semibold">
             Всего: ~{combined.total.toLocaleString("ru-RU")} пар
           </div>
           {lowBotShare && (
@@ -1053,7 +927,7 @@ export default function Training() {
             )}
           </div>
           {percent != null && (
-            <div className="mt-3 h-2 bg-white/10 rounded">
+            <div className="mt-3 h-2 bg-surface rounded">
               <div
                 className="h-2 bg-accent rounded transition-all"
                 style={{ width: `${percent}%` }}
@@ -1090,7 +964,7 @@ export default function Training() {
             )}
             {runs.map((r) => (
               <React.Fragment key={r.id}>
-                <tr className="border-t border-white/5">
+                <tr className="border-t border-line">
                   <td className="py-2">v{r.version}</td>
                   <td>
                     {r.started_at ? new Date(r.started_at).toLocaleString() : "—"}
@@ -1172,9 +1046,9 @@ export default function Training() {
                   </td>
                 </tr>
                 {runLogs[r.id]?.open && (
-                  <tr className="border-t border-white/5">
+                  <tr className="border-t border-line">
                     <td colSpan="6" className="pb-3">
-                      <div className="mt-2 rounded-lg border border-white/10 bg-black/30 p-3">
+                      <div className="mt-2 rounded-lg border border-line bg-bg p-3">
                         <div className="flex flex-wrap gap-2 items-center text-xs text-muted mb-2">
                           <span>Лог запуска v{r.version}</span>
                           {runLogs[r.id].data?.log_path && (
@@ -1192,7 +1066,7 @@ export default function Training() {
                           </div>
                         )}
                         {runLogs[r.id].data?.excerpt ? (
-                          <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-white/90">
+                          <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-fg/90">
                             {runLogs[r.id].data.excerpt}
                           </pre>
                         ) : (

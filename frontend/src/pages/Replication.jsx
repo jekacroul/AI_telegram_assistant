@@ -267,7 +267,7 @@ export default function Replication() {
               type="number"
               min="1"
               max="10080"
-              className="w-full bg-bg border border-white/10 rounded px-3 py-2"
+              className="w-full bg-bg border border-line rounded px-3 py-2"
               value={form.interval_minutes}
               onChange={(e) =>
                 setForm({ ...form, interval_minutes: e.target.value })
@@ -283,7 +283,7 @@ export default function Replication() {
               type="number"
               min="1"
               max="1000"
-              className="w-full bg-bg border border-white/10 rounded px-3 py-2"
+              className="w-full bg-bg border border-line rounded px-3 py-2"
               value={form.retention}
               onChange={(e) =>
                 setForm({ ...form, retention: e.target.value })
@@ -299,7 +299,7 @@ export default function Replication() {
               type="number"
               min="1"
               max="1000"
-              className="w-full bg-bg border border-white/10 rounded px-3 py-2"
+              className="w-full bg-bg border border-line rounded px-3 py-2"
               value={form.list_limit}
               onChange={(e) =>
                 setForm({ ...form, list_limit: e.target.value })
@@ -314,7 +314,7 @@ export default function Replication() {
             <input
               type="text"
               placeholder="./replicas"
-              className="w-full bg-bg border border-white/10 rounded px-3 py-2"
+              className="w-full bg-bg border border-line rounded px-3 py-2"
               value={form.target_dir}
               onChange={(e) =>
                 setForm({ ...form, target_dir: e.target.value })
@@ -403,7 +403,7 @@ export default function Replication() {
             )}
           </div>
           {progress.phase === "copying" && percent != null && (
-            <div className="mt-3 h-2 bg-white/10 rounded">
+            <div className="mt-3 h-2 bg-surface rounded">
               <div
                 className="h-2 bg-accent rounded transition-all"
                 style={{ width: `${percent}%` }}
@@ -443,7 +443,7 @@ export default function Replication() {
               const logState = runLogs[r.id];
               return (
                 <React.Fragment key={r.id}>
-                  <tr className="border-t border-white/5 align-top">
+                  <tr className="border-t border-line align-top">
                     <td className="py-2">
                       {r.started_at
                         ? new Date(r.started_at).toLocaleString()
@@ -499,9 +499,9 @@ export default function Replication() {
                     </td>
                   </tr>
                   {logState?.open && (
-                    <tr className="border-t border-white/5">
+                    <tr className="border-t border-line">
                       <td colSpan="7" className="pb-3">
-                        <div className="mt-2 rounded-lg border border-white/10 bg-black/30 p-3">
+                        <div className="mt-2 rounded-lg border border-line bg-bg p-3">
                           <div className="flex flex-wrap gap-2 items-center text-xs text-muted mb-2">
                             <span>Лог репликации #{r.id}</span>
                             {logState.data?.log_path && (
@@ -525,7 +525,7 @@ export default function Replication() {
                             </div>
                           )}
                           {logState.data?.excerpt ? (
-                            <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-white/90">
+                            <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-fg/90">
                               {logState.data.excerpt}
                             </pre>
                           ) : (
