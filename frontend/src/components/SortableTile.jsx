@@ -3,7 +3,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { MIN_SIZE } from "../hooks/useTileLayout.js";
 
-export default function SortableTile({ id, size, onResize, children }) {
+export default function SortableTile({ id, size, expanded, onResize, children }) {
   const {
     attributes,
     listeners,
@@ -80,7 +80,8 @@ export default function SortableTile({ id, size, onResize, children }) {
         transform: CSS.Transform.toString(transform),
         transition,
         width: size.w,
-        height: size.h,
+        height: expanded ? "auto" : size.h,
+        minHeight: expanded ? size.h : undefined,
         maxWidth: "100%",
       }}
       className={`relative group flex-shrink-0 ${stateClass}`}
@@ -100,31 +101,35 @@ export default function SortableTile({ id, size, onResize, children }) {
           >
             <span className="w-1 h-8 rounded-full bg-light-border2 dark:bg-dark-border2" />
           </div>
-          {/* bottom edge — height */}
-          <div
-            onPointerDown={(e) => startResize(e, "y")}
-            onPointerMove={moveResize}
-            onPointerUp={endResize}
-            title="Высота"
-            className={`${handleBase} left-3 right-6 bottom-0 h-1.5
-                        cursor-ns-resize flex items-center justify-center`}
-          >
-            <span className="h-1 w-8 rounded-full bg-light-border2 dark:bg-dark-border2" />
-          </div>
-          {/* corner — both */}
-          <div
-            onPointerDown={(e) => startResize(e, "xy")}
-            onPointerMove={moveResize}
-            onPointerUp={endResize}
-            title="Размер"
-            className={`${handleBase} bottom-0 right-0 w-5 h-5
-                        cursor-nwse-resize flex items-end justify-end p-1`}
-          >
-            <span
-              className="w-2.5 h-2.5 border-r-2 border-b-2
-                         border-light-border2 dark:border-dark-border2 rounded-br-sm"
-            />
-          </div>
+          {!expanded && (
+            <>
+              {/* bottom edge — height */}
+              <div
+                onPointerDown={(e) => startResize(e, "y")}
+                onPointerMove={moveResize}
+                onPointerUp={endResize}
+                title="Высота"
+                className={`${handleBase} left-3 right-6 bottom-0 h-1.5
+                            cursor-ns-resize flex items-center justify-center`}
+              >
+                <span className="h-1 w-8 rounded-full bg-light-border2 dark:bg-dark-border2" />
+              </div>
+              {/* corner — both */}
+              <div
+                onPointerDown={(e) => startResize(e, "xy")}
+                onPointerMove={moveResize}
+                onPointerUp={endResize}
+                title="Размер"
+                className={`${handleBase} bottom-0 right-0 w-5 h-5
+                            cursor-nwse-resize flex items-end justify-end p-1`}
+              >
+                <span
+                  className="w-2.5 h-2.5 border-r-2 border-b-2
+                             border-light-border2 dark:border-dark-border2 rounded-br-sm"
+                />
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

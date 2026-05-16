@@ -11,7 +11,14 @@ import { SortableContext, arrayMove } from "@dnd-kit/sortable";
 import SortableTile from "./SortableTile.jsx";
 import { DEFAULT_SIZES } from "../hooks/useTileLayout.js";
 
-export default function TileGrid({ order, sizes, onReorder, onResize, renderTile }) {
+export default function TileGrid({
+  order,
+  sizes,
+  expandedIds,
+  onReorder,
+  onResize,
+  renderTile,
+}) {
   const [activeId, setActiveId] = useState(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -48,6 +55,7 @@ export default function TileGrid({ order, sizes, onReorder, onResize, renderTile
               key={id}
               id={id}
               size={sizes[id] || DEFAULT_SIZES[id]}
+              expanded={!!expandedIds?.has(id)}
               onResize={onResize}
             >
               {({ dragHandleProps }) => renderTile(id, dragHandleProps)}

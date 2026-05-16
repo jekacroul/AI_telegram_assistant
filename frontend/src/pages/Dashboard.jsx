@@ -268,6 +268,7 @@ export default function Dashboard() {
       <TileGrid
         order={order}
         sizes={sizes}
+        expandedIds={expandedIds}
         onReorder={reorder}
         onResize={setSize}
         renderTile={renderTile}
