@@ -14,7 +14,7 @@ export default function Toggle({ checked, onChange, disabled }) {
     >
       <span
         className={`toggle-knob ${
-          checked ? "translate-x-4" : "translate-x-0.5"
+          checked ? "translate-x-4" : "translate-x-0"
         }`}
       />
     </button>
