@@ -19,16 +19,12 @@ const STATUS = {
   sent: {
     text: "Отправлено",
     Icon: Check,
-    cls:
-      "bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 " +
-      "ring-1 ring-emerald-300/70 dark:ring-emerald-500/30",
+    cls: "bg-emerald-500 text-emerald-950 shadow-sm shadow-emerald-500/30",
   },
   pending: {
     text: "Ожидает",
     Icon: Hourglass,
-    cls:
-      "bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 " +
-      "ring-1 ring-amber-300/70 dark:ring-amber-500/30",
+    cls: "bg-amber-500 text-amber-950 shadow-sm shadow-amber-500/30",
   },
 };
 
