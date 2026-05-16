@@ -10,12 +10,6 @@ import MessageFeedTile from "../components/tiles/MessageFeedTile.jsx";
 import ReplyPanelTile from "../components/tiles/ReplyPanelTile.jsx";
 import ReplyModal from "../components/ReplyModal.jsx";
 
-const METRIC_IDS = [
-  "metrics-received",
-  "metrics-sent",
-  "metrics-quality",
-  "metrics-rag",
-];
 const WIDE_IDS = ["activity-chart", "model-status", "message-feed", "reply-panel"];
 
 const REASON_LABELS = {
@@ -38,7 +32,7 @@ function mean(arr) {
 }
 
 export default function Dashboard() {
-  const { order, reorder, reset } = useTileLayout();
+  const { order, reorder, spans, setSpan, reset } = useTileLayout();
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [data, setData] = useState({});
   const [active, setActive] = useState(null);
@@ -85,7 +79,7 @@ export default function Dashboard() {
   }
 
   function getColSpan(id) {
-    if (METRIC_IDS.includes(id)) return expandedIds.has(id) ? 2 : 1;
+    if (spans[id]) return spans[id];
     if (WIDE_IDS.includes(id)) return 2;
     return 1;
   }
@@ -269,7 +263,10 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-zinc-400 dark:text-slate-500">
+          Перетаскивай блоки за иконку, тяни правый край — меняй ширину
+        </p>
         <button className="btn-ghost" onClick={reset} title="Сбросить раскладку">
           <RotateCcw size={14} />
           Сбросить раскладку
@@ -280,6 +277,7 @@ export default function Dashboard() {
         order={order}
         onReorder={reorder}
         getColSpan={getColSpan}
+        onResize={setSpan}
         renderTile={renderTile}
       />
 
