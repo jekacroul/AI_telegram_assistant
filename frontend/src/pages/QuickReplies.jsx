@@ -57,8 +57,8 @@ export default function QuickReplies() {
 function QuickRow({ item, onSave, onDelete }) {
   const [text, setText] = useState(item.text);
   return (
-    <div className="flex items-center gap-2 border border-white/10 rounded-md p-2">
-      <span className="text-xs px-2 py-1 rounded-full bg-white/10">{item.usage_count}</span>
+    <div className="flex items-center gap-2 border border-line rounded-md p-2">
+      <span className="text-xs px-2 py-1 rounded-full bg-surface">{item.usage_count}</span>
       <input className="input" value={text} onChange={(e) => setText(e.target.value)} />
       <button className="btn-secondary" onClick={() => onSave(item.id, text)}>Сохранить</button>
       <button className="btn-secondary text-bad" onClick={() => onDelete(item.id)}>Удалить</button>

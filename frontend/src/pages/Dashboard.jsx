@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import { api, streamEvents } from "../lib/api.js";
 import MessageCard from "../components/MessageCard.jsx";
 import ReplyModal from "../components/ReplyModal.jsx";
-import StatusDot from "../components/StatusDot.jsx";
+import StatusPill from "../components/StatusPill.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import { MessageSquare } from "lucide-react";
 
 export default function Dashboard() {
   const [status, setStatus] = useState({});
@@ -10,6 +12,7 @@ export default function Dashboard() {
   const [active, setActive] = useState(null);
   const [editingFeedback, setEditingFeedback] = useState(null);
   const [correction, setCorrection] = useState("");
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -18,6 +21,8 @@ export default function Dashboard() {
       setMessages(m);
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -57,38 +62,37 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="card flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-6">
-          <StatusDot ok={!!status.llm} label="LLM" />
-          <StatusDot ok={!!status.bot} label="Bot" />
-          <StatusDot ok={!!status.db} label="DB" />
-          <div className="text-xs text-muted">
-            апдейтов: <span className="text-white">{status.update_count ?? 0}</span>
+    <div className="space-y-6">
+      <div className="flex items-center gap-2 flex-wrap">
+        <StatusPill ok={!!status.llm} label="LM Studio" />
+        <StatusPill ok={!!status.bot} label="Бот" />
+        <StatusPill ok={!!status.db} label="База данных" />
+        <button
+          onClick={toggleAuto}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border
+            text-xs font-medium transition-colors duration-100
+            ${
+              status.auto_reply
+                ? "border-accent bg-accent text-accent-fg"
+                : "border-line text-muted hover:text-fg"
+            }`}
+        >
+          Авто-ответ {status.auto_reply ? "ВКЛ" : "ВЫКЛ"}
+        </button>
+        {status.update_count != null && (
+          <span className="text-xs text-muted ml-auto">
+            апдейтов: <span className="text-fg">{status.update_count}</span>
             {status.last_update_at && (
               <>
-                {" · последний: "}
-                <span className="text-white">
+                {" · "}
+                <span className="text-fg">
                   {new Date(status.last_update_at).toLocaleTimeString()}
                 </span>
-                {status.last_update_kind && (
-                  <span className="text-muted"> ({status.last_update_kind})</span>
-                )}
+                {status.last_update_kind && ` (${status.last_update_kind})`}
               </>
             )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted">Авто-ответ</span>
-          <button
-            onClick={toggleAuto}
-            className={`btn ${
-              status.auto_reply ? "bg-good text-white" : "bg-white/10 text-muted"
-            }`}
-          >
-            {status.auto_reply ? "ON" : "OFF"}
-          </button>
-        </div>
+          </span>
+        )}
       </div>
 
       {status.last_error && (
@@ -99,33 +103,51 @@ export default function Dashboard() {
 
       {status.bot && (status.update_count ?? 0) === 0 && (
         <div className="card text-sm text-muted">
-          ⚠️ Апдейтов от Telegram пока не приходило. Проверь:
-          <ul className="list-disc ml-5 mt-1 space-y-0.5">
-            <li>webhook зарегистрирован при старте через start.py (Cloudflare tunnel)</li>
-            <li>в Telegram → Settings → Business → Chatbots бот подключён, и в Manage messages выбраны нужные чаты</li>
+          <p className="text-fg font-medium mb-1">
+            Апдейтов от Telegram пока не приходило
+          </p>
+          <ul className="list-disc ml-5 mt-2 space-y-1">
+            <li>
+              webhook зарегистрирован при старте через start.py (Cloudflare
+              tunnel)
+            </li>
+            <li>
+              в Telegram → Settings → Business → Chatbots бот подключён, и в
+              Manage messages выбраны нужные чаты
+            </li>
             <li>backend доступен по HTTPS снаружи (ngrok/cloudflared)</li>
           </ul>
         </div>
       )}
 
-      <div className="text-sm text-muted">
-        Лента сообщений ({messages.length})
-      </div>
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="section-label mb-0">Лента сообщений</p>
+          {messages.length > 0 && (
+            <span className="badge badge-zinc">{messages.length}</span>
+          )}
+        </div>
 
-      <div className="grid gap-3">
-        {messages.length === 0 && (
-          <div className="card text-muted text-sm">
-            Сообщений пока нет. Отправь что-нибудь боту в Telegram.
+        {loaded && messages.length === 0 ? (
+          <div className="card">
+            <EmptyState
+              icon={MessageSquare}
+              title="Нет входящих сообщений"
+              description="Они появятся когда бот получит первое сообщение в Telegram"
+            />
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {messages.map((m) => (
+              <MessageCard
+                key={m.id}
+                msg={m}
+                onReply={!status.auto_reply ? setActive : undefined}
+                onFeedback={status.auto_reply ? onFeedback : undefined}
+              />
+            ))}
           </div>
         )}
-        {messages.map((m) => (
-          <MessageCard
-            key={m.id}
-            msg={m}
-            onReply={!status.auto_reply ? setActive : undefined}
-            onFeedback={status.auto_reply ? onFeedback : undefined}
-          />
-        ))}
       </div>
 
       {active && (
@@ -137,14 +159,14 @@ export default function Dashboard() {
       )}
 
       {editingFeedback && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="card w-full max-w-xl">
-            <div className="label">Исправь ответ</div>
-            <div className="text-sm mt-1 mb-3 text-muted whitespace-pre-wrap">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="card w-full max-w-xl animate-fadeIn">
+            <p className="section-label">Исправь ответ</p>
+            <p className="text-sm mb-3 text-muted whitespace-pre-wrap">
               На сообщение: {editingFeedback.text}
-            </div>
+            </p>
             <textarea
-              className="input min-h-[100px]"
+              className="input min-h-[100px] resize-none"
               value={correction}
               onChange={(e) => setCorrection(e.target.value)}
             />

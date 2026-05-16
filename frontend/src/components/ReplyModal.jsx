@@ -154,8 +154,8 @@ export default function ReplyModal({ message, onClose, onSent }) {
                     key={i}
                     className={`text-left p-3 rounded-md border text-sm ${
                       text === v
-                        ? "border-accent bg-accent/10"
-                        : "border-white/10 hover:border-white/20"
+                        ? "border-fg bg-surface"
+                        : "border-line hover:bg-surface"
                     }`}
                     onClick={() => setText(v)}
                   >
@@ -179,7 +179,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
                     {ragContext.map((r, i) => (
                       <div
                         key={i}
-                        className="rounded-md border border-white/10 p-2 text-xs"
+                        className="rounded-md border border-line p-2 text-xs"
                       >
                         <div className="flex justify-between gap-2 text-muted">
                           <span>
@@ -189,7 +189,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
                             {r.similarity_score?.toFixed?.(2) ?? ""}
                           </span>
                         </div>
-                        <div className="mt-1 text-white/90">{r.text}</div>
+                        <div className="mt-1 text-fg/90">{r.text}</div>
                       </div>
                     ))}
                   </div>

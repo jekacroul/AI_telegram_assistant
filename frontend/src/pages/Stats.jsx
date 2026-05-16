@@ -11,11 +11,44 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../lib/api.js";
+import MetricCard from "../components/MetricCard.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import { BarChart2 } from "lucide-react";
 
-const tooltipStyle = {
-  background: "#12151c",
-  border: "1px solid #2a2f3a",
-};
+function useChartColors() {
+  const read = () =>
+    document.documentElement.classList.contains("dark")
+      ? {
+          grid: "#27272a",
+          axis: "#a1a1aa",
+          line1: "#fafafa",
+          line2: "#4ade80",
+          bar: "#fafafa",
+          tooltipBg: "#18181b",
+          tooltipBorder: "#27272a",
+          cursor: "rgba(255,255,255,0.06)",
+        }
+      : {
+          grid: "#e4e4e7",
+          axis: "#71717a",
+          line1: "#09090b",
+          line2: "#16a34a",
+          bar: "#09090b",
+          tooltipBg: "#ffffff",
+          tooltipBorder: "#e4e4e7",
+          cursor: "rgba(0,0,0,0.04)",
+        };
+  const [colors, setColors] = useState(read);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setColors(read()));
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => obs.disconnect();
+  }, []);
+  return colors;
+}
 
 function formatPercent(value) {
   if (value == null || Number.isNaN(value)) return "—";
@@ -44,29 +77,11 @@ function formatUsername(username) {
   return username.startsWith("@") ? username : `@${username}`;
 }
 
-function TopChatTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null;
-  const item = payload[0].payload;
-  return (
-    <div style={tooltipStyle} className="px-3 py-2 text-sm shadow-lg">
-      <div className="font-semibold text-white">{item.name}</div>
-      <div className="text-muted">Ник: {formatUsername(item.username)}</div>
-      <div className="text-muted">Сообщений: {item.count}</div>
-    </div>
-  );
-}
-
-function Card({ title, value, hint }) {
-  return (
-    <div className="card">
-      <div className="label">{title}</div>
-      <div className="text-2xl font-semibold mt-1">{value}</div>
-      {hint && <div className="text-xs text-muted mt-1">{hint}</div>}
-    </div>
-  );
-}
+const TH =
+  "px-4 py-3 text-2xs font-medium uppercase tracking-wider text-muted";
 
 export default function Stats() {
+  const colors = useChartColors();
   const [overview, setOverview] = useState(null);
   const [activity, setActivity] = useState([]);
   const [topChats, setTopChats] = useState([]);
@@ -103,6 +118,25 @@ export default function Stats() {
     };
   }, []);
 
+  const tooltipStyle = {
+    background: colors.tooltipBg,
+    border: `1px solid ${colors.tooltipBorder}`,
+    borderRadius: "8px",
+    fontSize: "12px",
+  };
+
+  function TopChatTooltip({ active, payload }) {
+    if (!active || !payload?.length) return null;
+    const item = payload[0].payload;
+    return (
+      <div style={tooltipStyle} className="px-3 py-2 text-xs">
+        <div className="font-medium text-fg">{item.name}</div>
+        <div className="text-muted">Ник: {formatUsername(item.username)}</div>
+        <div className="text-muted">Сообщений: {item.count}</div>
+      </div>
+    );
+  }
+
   const activityChartData = activity.map((row) => ({
     ...row,
     label: shortDay(row.day),
@@ -120,48 +154,59 @@ export default function Stats() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {error && (
         <div className="card border-bad/40 text-sm text-bad">{error}</div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card
-          title="Получено"
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard
+          label="Получено"
           value={overview?.received ?? "—"}
-          hint="Входящих сообщений"
+          hint="входящих сообщений"
         />
-        <Card
-          title="Отправлено"
+        <MetricCard
+          label="Отправлено"
           value={overview?.sent ?? "—"}
-          hint={`Отвечено: ${overview?.replied ?? 0}`}
+          hint={`отвечено: ${overview?.replied ?? 0}`}
         />
-        <Card
-          title="Одобрено вручную"
+        <MetricCard
+          label="Одобрено вручную"
           value={overview?.approved_manual ?? "—"}
-          hint={`Approval rate: ${formatPercent(overview?.approval_rate)}`}
+          hint={`approval rate: ${formatPercent(overview?.approval_rate)}`}
         />
-        <Card
-          title="Отклонено фильтром"
+        <MetricCard
+          label="Отклонено фильтром"
           value={overview?.rejected ?? "—"}
-          hint="Плохой фидбек"
+          hint="плохой фидбек"
         />
       </div>
 
       <div className="card">
-        <div className="label mb-2">Активность за 30 дней</div>
+        <p className="section-label">Активность за 30 дней</p>
         <div className="h-64">
           <ResponsiveContainer>
             <LineChart data={activityChartData}>
-              <CartesianGrid stroke="#1f2430" strokeDasharray="3 3" />
-              <XAxis dataKey="label" stroke="#9aa3b2" />
-              <YAxis stroke="#9aa3b2" allowDecimals={false} />
+              <CartesianGrid stroke={colors.grid} strokeDasharray="3 3" />
+              <XAxis
+                dataKey="label"
+                stroke={colors.axis}
+                fontSize={11}
+                tickLine={false}
+              />
+              <YAxis
+                stroke={colors.axis}
+                fontSize={11}
+                tickLine={false}
+                allowDecimals={false}
+              />
               <Tooltip contentStyle={tooltipStyle} />
               <Line
                 type="monotone"
                 dataKey="received"
                 name="Получено"
-                stroke="#5b8cff"
+                stroke={colors.line1}
+                strokeWidth={2}
                 dot={false}
                 isAnimationActive={false}
               />
@@ -169,7 +214,8 @@ export default function Stats() {
                 type="monotone"
                 dataKey="sent"
                 name="Отправлено"
-                stroke="#22c55e"
+                stroke={colors.line2}
+                strokeWidth={2}
                 dot={false}
                 isAnimationActive={false}
               />
@@ -179,73 +225,92 @@ export default function Stats() {
       </div>
 
       <div className="card">
-        <div className="label mb-2">Топ чатов по числу сообщений</div>
-        <div className="h-64">
-          <ResponsiveContainer>
-            <BarChart
-              data={topChatsData}
-              layout="vertical"
-              margin={{ left: 8, right: 12 }}
-            >
-              <CartesianGrid stroke="#1f2430" strokeDasharray="3 3" />
-              <XAxis type="number" stroke="#9aa3b2" allowDecimals={false} />
-              <YAxis
-                type="category"
-                dataKey="name"
-                stroke="#9aa3b2"
-                width={topChatsAxisWidth}
-                interval={0}
-              />
-              <Tooltip
-                content={<TopChatTooltip />}
-                cursor={{ fill: "rgba(91, 140, 255, 0.12)" }}
-                shared={false}
-              />
-              <Bar dataKey="count" fill="#5b8cff" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <p className="section-label">Топ чатов по числу сообщений</p>
+        {topChatsData.length === 0 ? (
+          <EmptyState
+            icon={BarChart2}
+            title="Нет данных"
+            description="Статистика появится после первых сообщений"
+          />
+        ) : (
+          <div className="h-64">
+            <ResponsiveContainer>
+              <BarChart
+                data={topChatsData}
+                layout="vertical"
+                margin={{ left: 8, right: 12 }}
+              >
+                <CartesianGrid stroke={colors.grid} strokeDasharray="3 3" />
+                <XAxis
+                  type="number"
+                  stroke={colors.axis}
+                  fontSize={11}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  stroke={colors.axis}
+                  fontSize={11}
+                  tickLine={false}
+                  width={topChatsAxisWidth}
+                  interval={0}
+                />
+                <Tooltip
+                  content={<TopChatTooltip />}
+                  cursor={{ fill: colors.cursor }}
+                  shared={false}
+                />
+                <Bar dataKey="count" fill={colors.bar} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
 
-      <div className="card">
-        <div className="label mb-2">Качество по версиям модели</div>
+      <div className="card overflow-hidden p-0">
+        <p className="section-label px-4 pt-4">Качество по версиям модели</p>
         <table className="w-full text-sm">
-          <thead className="text-muted">
-            <tr className="text-left">
-              <th className="py-1">Версия</th>
-              <th>Завершено</th>
-              <th>Одобрено</th>
-              <th>Отклонено</th>
-              <th>Approval</th>
-              <th>Rejection</th>
-              <th>Статус</th>
+          <thead>
+            <tr className="border-b border-line text-left">
+              <th className={TH}>Версия</th>
+              <th className={TH}>Завершено</th>
+              <th className={TH}>Одобрено</th>
+              <th className={TH}>Отклонено</th>
+              <th className={TH}>Approval</th>
+              <th className={TH}>Rejection</th>
+              <th className={TH}>Статус</th>
             </tr>
           </thead>
           <tbody>
             {modelQuality.length === 0 && (
               <tr>
-                <td colSpan="7" className="text-muted py-3">
+                <td colSpan="7" className="text-muted px-4 py-4">
                   Данных пока нет.
                 </td>
               </tr>
             )}
             {modelQuality.map((m) => (
-              <tr key={m.run_id} className="border-t border-white/5">
-                <td className="py-2">v{m.version}</td>
-                <td>
+              <tr
+                key={m.run_id}
+                className="border-t border-line hover:bg-surface/50 transition-colors"
+              >
+                <td className="px-4 py-3 font-mono">v{m.version}</td>
+                <td className="px-4 py-3">
                   {m.finished_at
                     ? new Date(m.finished_at).toLocaleDateString()
                     : "—"}
                 </td>
-                <td>{m.approved}</td>
-                <td>{m.rejected}</td>
-                <td>{formatPercent(m.approval_rate)}</td>
-                <td>{formatPercent(m.rejection_rate)}</td>
-                <td>
+                <td className="px-4 py-3">{m.approved}</td>
+                <td className="px-4 py-3">{m.rejected}</td>
+                <td className="px-4 py-3">{formatPercent(m.approval_rate)}</td>
+                <td className="px-4 py-3">{formatPercent(m.rejection_rate)}</td>
+                <td className="px-4 py-3">
                   {m.is_active ? (
-                    <span className="text-good">активный</span>
+                    <span className="badge badge-green">активный</span>
                   ) : (
-                    m.status
+                    <span className="text-muted">{m.status}</span>
                   )}
                 </td>
               </tr>
@@ -254,29 +319,36 @@ export default function Stats() {
         </table>
       </div>
 
-      <div className="card">
-        <div className="label mb-2">Среднее время ответа по чатам</div>
+      <div className="card overflow-hidden p-0">
+        <p className="section-label px-4 pt-4">
+          Среднее время ответа по чатам
+        </p>
         <table className="w-full text-sm">
-          <thead className="text-muted">
-            <tr className="text-left">
-              <th className="py-1">Чат</th>
-              <th>Среднее время</th>
-              <th>Ответов</th>
+          <thead>
+            <tr className="border-b border-line text-left">
+              <th className={TH}>Чат</th>
+              <th className={TH}>Среднее время</th>
+              <th className={TH}>Ответов</th>
             </tr>
           </thead>
           <tbody>
             {responseTime.length === 0 && (
               <tr>
-                <td colSpan="3" className="text-muted py-3">
+                <td colSpan="3" className="text-muted px-4 py-4">
                   Данных пока нет.
                 </td>
               </tr>
             )}
             {responseTime.slice(0, 20).map((r) => (
-              <tr key={r.chat_id} className="border-t border-white/5">
-                <td className="py-2">{r.chat_name || `chat ${r.chat_id}`}</td>
-                <td>{formatDuration(r.avg_seconds)}</td>
-                <td>{r.replies}</td>
+              <tr
+                key={r.chat_id}
+                className="border-t border-line hover:bg-surface/50 transition-colors"
+              >
+                <td className="px-4 py-3">
+                  {r.chat_name || `chat ${r.chat_id}`}
+                </td>
+                <td className="px-4 py-3">{formatDuration(r.avg_seconds)}</td>
+                <td className="px-4 py-3">{r.replies}</td>
               </tr>
             ))}
           </tbody>

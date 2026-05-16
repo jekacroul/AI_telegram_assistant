@@ -54,8 +54,8 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
   return (
     <div className="card flex gap-3 items-start">
       <div
-        className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold ${
-          isMine ? "bg-accent/30 text-accent" : "bg-white/10 text-white"
+        className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0 ${
+          isMine ? "bg-accent text-accent-fg" : "bg-surface text-muted"
         }`}
       >
         {initials(msg.sender_name)}
@@ -126,7 +126,7 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
             <img
               src={msg.media_path}
               alt="photo"
-              className="max-h-56 rounded-lg border border-white/10 object-cover"
+              className="max-h-56 rounded-lg border border-line object-cover"
             />
           </button>
         )}
@@ -135,7 +135,7 @@ export default function MessageCard({ msg, onReply, onFeedback }) {
             <button className="mt-2 block" onClick={() => setOpenMedia(true)}>
               <video
                 src={msg.media_path}
-                className="max-h-56 rounded-lg border border-white/10"
+                className="max-h-56 rounded-lg border border-line"
               />
             </button>
           )}

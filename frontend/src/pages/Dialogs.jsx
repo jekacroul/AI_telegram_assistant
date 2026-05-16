@@ -259,7 +259,7 @@ export default function Dialogs() {
 
       <div className="grid grid-cols-12 gap-3 h-[70vh]">
         <div className="col-span-4 card overflow-y-auto p-0">
-          <div className="px-3 py-2 text-xs text-muted border-b border-white/5 sticky top-0 bg-panel">
+          <div className="px-3 py-2 text-xs text-muted border-b border-line sticky top-0 bg-panel">
             Чаты ({chats.length})
           </div>
           {chats.length === 0 && (
@@ -273,8 +273,8 @@ export default function Dialogs() {
             return (
               <div
                 key={c.chat_id}
-                className={`flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-white/5 ${
-                  isActive ? "bg-accent/20" : "hover:bg-white/5"
+                className={`flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-line ${
+                  isActive ? "bg-accent/20" : "hover:bg-surface"
                 }`}
                 onClick={() => setSelectedChatId(c.chat_id)}
               >
@@ -293,7 +293,7 @@ export default function Dialogs() {
                   className={`text-xs px-2 py-1 rounded ${
                     isExcluded
                       ? "bg-bad/30 text-bad"
-                      : "bg-white/5 text-muted hover:text-white"
+                      : "bg-surface text-muted hover:text-fg"
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -315,7 +315,7 @@ export default function Dialogs() {
         <div className="col-span-8 card flex flex-col p-0 overflow-hidden">
           {selectedChat ? (
             <>
-              <div className="px-4 py-2 border-b border-white/5 flex flex-wrap items-center gap-3">
+              <div className="px-4 py-2 border-b border-line flex flex-wrap items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate">
                     {selectedChat.chat_name || `chat ${selectedChat.chat_id}`}
@@ -396,8 +396,8 @@ export default function Dialogs() {
                       <div
                         className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
                           m.is_mine
-                            ? "bg-accent/80 text-white"
-                            : "bg-panel border border-white/10 text-white"
+                            ? "bg-accent text-accent-fg"
+                            : "bg-surface border border-line text-fg"
                         }`}
                       >
                         {!m.is_mine && (
@@ -415,7 +415,7 @@ export default function Dialogs() {
                             <img
                               src={m.media_path}
                               alt="backup photo"
-                              className="max-h-44 rounded-md border border-white/10 object-cover"
+                              className="max-h-44 rounded-md border border-line object-cover"
                             />
                           </button>
                         )}
@@ -424,16 +424,20 @@ export default function Dialogs() {
                             <button className="mt-2 block" onClick={() => setMediaPreview(m)}>
                               <video
                                 src={m.media_path}
-                                className="max-h-44 rounded-md border border-white/10"
+                                className="max-h-44 rounded-md border border-line"
                               />
                             </button>
                           )}
                         {m.media_private && !m.media_path && (
-                          <div className="mt-2 text-[11px] text-white/70">
+                          <div className="mt-2 text-[11px] text-fg/70">
                             Приватное {m.media_type === "photo" ? "фото" : "видео"} (одноразовое)
                           </div>
                         )}
-                        <div className="text-[10px] text-white/60 mt-1 text-right">
+                        <div
+                          className={`text-[10px] mt-1 text-right ${
+                            m.is_mine ? "text-accent-fg/60" : "text-muted"
+                          }`}
+                        >
                           {formatTime(m.timestamp)}
                         </div>
                       </div>

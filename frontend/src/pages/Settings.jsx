@@ -530,7 +530,7 @@ export default function Settings() {
             {dayOptions.map((d) => (
               <label
                 key={d.value}
-                className="flex items-center gap-2 text-sm rounded-lg border border-white/10 px-3 py-2"
+                className="flex items-center gap-2 text-sm rounded-lg border border-line px-3 py-2"
               >
                 <input
                   type="checkbox"
@@ -1094,7 +1094,7 @@ export default function Settings() {
           {test.variants && (
             <ul className="mt-2 text-sm space-y-1">
               {test.variants.map((v, i) => (
-                <li key={i} className="text-white">• {v}</li>
+                <li key={i} className="text-fg">• {v}</li>
               ))}
             </ul>
           )}
