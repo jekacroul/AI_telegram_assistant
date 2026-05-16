@@ -39,7 +39,7 @@ function mean(arr) {
 
 export default function Dashboard() {
   const { order, reorder, reset } = useTileLayout();
-  const [expandedId, setExpandedId] = useState(null);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [data, setData] = useState({});
   const [active, setActive] = useState(null);
 
@@ -71,7 +71,12 @@ export default function Dashboard() {
   }, [refresh]);
 
   function toggleExpand(id) {
-    setExpandedId((cur) => (cur === id ? null : id));
+    setExpandedIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   async function toggleAuto() {
@@ -80,7 +85,7 @@ export default function Dashboard() {
   }
 
   function getColSpan(id) {
-    if (METRIC_IDS.includes(id)) return expandedId === id ? 2 : 1;
+    if (METRIC_IDS.includes(id)) return expandedIds.has(id) ? 2 : 1;
     if (WIDE_IDS.includes(id)) return 2;
     return 1;
   }
@@ -115,7 +120,7 @@ export default function Dashboard() {
             value={recvToday}
             accent="sky"
             series={recv14}
-            expanded={expandedId === id}
+            expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >
             <div>
@@ -144,7 +149,7 @@ export default function Dashboard() {
             value={sentToday}
             accent="emerald"
             series={sent14}
-            expanded={expandedId === id}
+            expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >
             <div>
@@ -173,7 +178,7 @@ export default function Dashboard() {
             value={approvalPct}
             format={(v) => `${Math.round(v)}%`}
             accent="violet"
-            expanded={expandedId === id}
+            expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >
             <div>
@@ -207,7 +212,7 @@ export default function Dashboard() {
             label="RAG индексировано"
             value={rag.total_indexed || 0}
             accent="indigo"
-            expanded={expandedId === id}
+            expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >
             <div>

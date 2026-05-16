@@ -41,7 +41,7 @@ export default function TileGrid({ order, onReorder, getColSpan, renderTile }) {
       onDragCancel={() => setActiveId(null)}
     >
       <SortableContext items={order} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 grid-flow-row-dense gap-4 items-start">
           {order.map((id) => (
             <SortableTile key={id} id={id} colSpan={getColSpan(id)}>
               {({ dragHandleProps }) => renderTile(id, dragHandleProps)}
