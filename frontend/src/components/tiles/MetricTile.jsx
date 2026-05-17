@@ -2,18 +2,20 @@ import React from "react";
 import { GripVertical, Maximize2, Minimize2 } from "lucide-react";
 import Sparkline from "../Sparkline.jsx";
 import { useCountUp } from "../../hooks/useCountUp.js";
+import { useLang } from "../../hooks/useLang.js";
 
 export default function MetricTile({
   dragHandleProps,
   label,
   value,
-  format = (v) => Math.round(v).toLocaleString("ru-RU"),
+  format = (v) => Math.round(v).toLocaleString(),
   accent = "indigo",
   series = null,
   expanded = false,
   onToggleExpand,
   children,
 }) {
+  const { t } = useLang();
   const animated = useCountUp(Number(value) || 0);
 
   return (
@@ -24,7 +26,7 @@ export default function MetricTile({
           <button
             className="expand-btn"
             onClick={onToggleExpand}
-            title={expanded ? "Свернуть" : "Развернуть"}
+            title={expanded ? t("tiles.collapse") : t("tiles.expand")}
           >
             {expanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           </button>

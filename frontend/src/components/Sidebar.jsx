@@ -11,19 +11,22 @@ import {
   Settings,
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle.jsx";
+import LanguageToggle from "./LanguageToggle.jsx";
+import { useLang } from "../hooks/useLang.js";
 
 export const NAV_ITEMS = [
-  { to: "/", label: "Дашборд", icon: LayoutDashboard },
-  { to: "/dialogs", label: "Диалоги", icon: Archive },
-  { to: "/training", label: "Обучение", icon: GraduationCap },
-  { to: "/style", label: "Стиль", icon: SlidersHorizontal },
-  { to: "/stats", label: "Статистика", icon: BarChart2 },
-  { to: "/quick-replies", label: "Быстрые ответы", icon: Zap },
-  { to: "/replication", label: "Репликация", icon: HardDrive },
-  { to: "/settings", label: "Настройки", icon: Settings },
+  { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
+  { to: "/dialogs", labelKey: "nav.dialogs", icon: Archive },
+  { to: "/training", labelKey: "nav.training", icon: GraduationCap },
+  { to: "/style", labelKey: "nav.style", icon: SlidersHorizontal },
+  { to: "/stats", labelKey: "nav.stats", icon: BarChart2 },
+  { to: "/quick-replies", labelKey: "nav.quickReplies", icon: Zap },
+  { to: "/replication", labelKey: "nav.replication", icon: HardDrive },
+  { to: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 export default function Sidebar() {
+  const { t } = useLang();
   return (
     <aside
       className="w-14 flex-shrink-0 flex flex-col items-center gap-1 py-3
@@ -36,12 +39,12 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex flex-col items-center gap-1">
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+        {NAV_ITEMS.map(({ to, labelKey, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             end={to === "/"}
-            title={label}
+            title={t(labelKey)}
             className={({ isActive }) =>
               `nav-item ${isActive ? "nav-item-active" : ""}`
             }
@@ -52,6 +55,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="flex-1" />
+      <LanguageToggle />
       <ThemeToggle />
     </aside>
   );

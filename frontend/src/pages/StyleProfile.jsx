@@ -1,25 +1,27 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
+import { useLang } from "../hooks/useLang.js";
 
 const FIELDS = [
-  ["avg_message_length", "Средняя длина сообщения", "number"],
-  ["uses_emoji", "Использует эмодзи", "bool"],
-  ["emoji_frequency", "Частота эмодзи", "number"],
-  ["uses_lowercase", "Пишет в нижнем регистре", "bool"],
-  ["punctuation_style", "Стиль пунктуации", "string"],
-  ["tone", "Тон", "string"],
-  ["avg_response_delay_minutes", "Средняя задержка ответа (мин)", "number"],
+  ["avg_message_length", "number"],
+  ["uses_emoji", "bool"],
+  ["emoji_frequency", "number"],
+  ["uses_lowercase", "bool"],
+  ["punctuation_style", "string"],
+  ["tone", "string"],
+  ["avg_response_delay_minutes", "number"],
 ];
 
 function ProfileEditor({ profile, setProfile }) {
+  const { t } = useLang();
   const updateField = (key, value) => setProfile((p) => ({ ...(p || {}), [key]: value }));
   return <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-    {FIELDS.map(([key, label, type]) => <div key={key} className="card">
-      <div className="label">{label}</div>
+    {FIELDS.map(([key, type]) => <div key={key} className="card">
+      <div className="label">{t(`style.fields.${key}`)}</div>
       {type === "bool" ? (
         <label className="flex items-center gap-2 mt-2 text-sm">
           <input type="checkbox" checked={!!profile?.[key]} onChange={(e) => updateField(key, e.target.checked)} />
-          {profile?.[key] ? "да" : "нет"}
+          {profile?.[key] ? t("common.yes") : t("common.no")}
         </label>
       ) : (
         <input
@@ -35,6 +37,7 @@ function ProfileEditor({ profile, setProfile }) {
 }
 
 export default function StyleProfile() {
+  const { t } = useLang();
   const [settings, setSettings] = useState({ persona_mode: "global" });
   const [globalProfile, setGlobalProfile] = useState({});
   const [personas, setPersonas] = useState([]);
@@ -86,15 +89,15 @@ export default function StyleProfile() {
 
   return <div className="space-y-4">
     <div className="card flex gap-2 items-center">
-      <button className={`btn-secondary ${settings.persona_mode === "global" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("global")} disabled={saving}>Глобальный стиль</button>
-      <button className={`btn-secondary ${settings.persona_mode === "per_chat" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("per_chat")} disabled={saving}>Стиль по чатам</button>
+      <button className={`btn-secondary ${settings.persona_mode === "global" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("global")} disabled={saving}>{t("style.globalStyle")}</button>
+      <button className={`btn-secondary ${settings.persona_mode === "per_chat" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("per_chat")} disabled={saving}>{t("style.perChatStyle")}</button>
       {error && <span className="text-bad text-sm">{error}</span>}
     </div>
 
     {settings.persona_mode === "global" && <>
       <div className="flex gap-2">
-        <button className="btn-primary" onClick={async () => { setSaving(true); try { await api.saveStyle(globalProfile || {}); } finally { setSaving(false); } }} disabled={saving}>Сохранить</button>
-        <button className="btn-secondary" onClick={async () => { setSaving(true); try { setGlobalProfile(await api.reanalyzeStyle()); } finally { setSaving(false); } }} disabled={saving}>Пересчитать из сообщений</button>
+        <button className="btn-primary" onClick={async () => { setSaving(true); try { await api.saveStyle(globalProfile || {}); } finally { setSaving(false); } }} disabled={saving}>{t("common.save")}</button>
+        <button className="btn-secondary" onClick={async () => { setSaving(true); try { setGlobalProfile(await api.reanalyzeStyle()); } finally { setSaving(false); } }} disabled={saving}>{t("style.recalculate")}</button>
       </div>
       <ProfileEditor profile={globalProfile} setProfile={setGlobalProfile} />
     </>}
@@ -103,19 +106,19 @@ export default function StyleProfile() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {chatCards.map((p) => <div key={p.chat_id} className="card cursor-pointer" onClick={() => setSelected({ ...p, profile: p.profile || { ...globalProfile } })}>
           <div className="font-medium">{p.chat_name || p.chat_id}</div>
-          <div className="text-sm text-muted">Тон: {p.profile?.tone || "—"}</div>
-          <div className="text-sm text-muted">Средняя длина: {p.profile?.avg_message_length || 0}</div>
-          <div className="text-xs text-muted">Обновлено: {p.updated_at || "нет"}</div>
+          <div className="text-sm text-muted">{t("style.tone", { value: p.profile?.tone || t("common.dash") })}</div>
+          <div className="text-sm text-muted">{t("style.avgLength", { value: p.profile?.avg_message_length || 0 })}</div>
+          <div className="text-xs text-muted">{t("style.updated", { value: p.updated_at || t("common.none") })}</div>
         </div>)}
       </div>
-      {!chatCards.length && <div className="card text-muted text-sm">Нет чатов для персонализации.</div>}
+      {!chatCards.length && <div className="card text-muted text-sm">{t("style.noChats")}</div>}
       {selected && <div className="space-y-3">
-        <div className="card font-medium">Редактирование: {selected.chat_name || selected.chat_id}</div>
+        <div className="card font-medium">{t("style.editing", { name: selected.chat_name || selected.chat_id })}</div>
         <ProfileEditor profile={selected.profile || {}} setProfile={(updater) => setSelected((prev) => ({ ...prev, profile: typeof updater === "function" ? updater(prev.profile || {}) : updater }))} />
         <div className="flex gap-2">
-          <button className="btn-primary" disabled={saving} onClick={async () => { setSaving(true); try { await api.savePersona(selected.chat_id, selected.profile || {}); await refresh(); } finally { setSaving(false); } }}>Сохранить</button>
-          <button className="btn-secondary" disabled={saving} onClick={async () => { setSaving(true); try { const p = await api.reanalyzePersona(selected.chat_id); setSelected((s) => ({ ...s, profile: p })); await refresh(); } finally { setSaving(false); } }}>Пересчитать из сообщений</button>
-          <button className="btn-secondary" disabled={saving} onClick={async () => { setSaving(true); try { await api.deletePersona(selected.chat_id); setSelected(null); await refresh(); } finally { setSaving(false); } }}>Удалить</button>
+          <button className="btn-primary" disabled={saving} onClick={async () => { setSaving(true); try { await api.savePersona(selected.chat_id, selected.profile || {}); await refresh(); } finally { setSaving(false); } }}>{t("common.save")}</button>
+          <button className="btn-secondary" disabled={saving} onClick={async () => { setSaving(true); try { const p = await api.reanalyzePersona(selected.chat_id); setSelected((s) => ({ ...s, profile: p })); await refresh(); } finally { setSaving(false); } }}>{t("style.recalculate")}</button>
+          <button className="btn-secondary" disabled={saving} onClick={async () => { setSaving(true); try { await api.deletePersona(selected.chat_id); setSelected(null); await refresh(); } finally { setSaving(false); } }}>{t("common.delete")}</button>
         </div>
       </div>}
     </>}

@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { GripVertical } from "lucide-react";
 import { useTheme } from "../../hooks/useTheme.js";
+import { useLang } from "../../hooks/useLang.js";
 
 export default function ActivityTile({ dragHandleProps, bars = [] }) {
   const { isDark } = useTheme();
+  const { t } = useLang();
   const [hovered, setHovered] = useState(null);
   const max = Math.max(1, ...bars.map((b) => b.value));
   const activeIndex = bars.length - 1;
@@ -20,7 +22,7 @@ export default function ActivityTile({ dragHandleProps, bars = [] }) {
   return (
     <div className="tile flex flex-col">
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
-        <span className="tile-label mb-0">Активность · 24 дня</span>
+        <span className="tile-label mb-0">{t("tiles.activity24")}</span>
         <span
           {...dragHandleProps}
           className="cursor-grab active:cursor-grabbing text-zinc-300
@@ -50,7 +52,7 @@ export default function ActivityTile({ dragHandleProps, bars = [] }) {
                 {hoveredBar.label}
               </div>
               <div className="text-xs font-semibold text-zinc-800 dark:text-slate-200">
-                {hoveredBar.value} сообщений
+                {t("tiles.messagesCount", { count: hoveredBar.value })}
               </div>
             </div>
           </div>
@@ -93,7 +95,7 @@ export default function ActivityTile({ dragHandleProps, bars = [] }) {
 
       <div className="flex justify-between mt-2 flex-shrink-0 text-[10px] text-zinc-400 dark:text-slate-500">
         <span>{bars[0]?.label || ""}</span>
-        <span>сегодня</span>
+        <span>{t("tiles.today")}</span>
       </div>
     </div>
   );

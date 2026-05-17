@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
+import { useLang } from "../hooks/useLang.js";
 
 export default function QuickReplies() {
+  const { t } = useLang();
   const [items, setItems] = useState([]);
   const [newText, setNewText] = useState("");
 
@@ -34,7 +36,7 @@ export default function QuickReplies() {
   return (
     <div className="space-y-4">
       <div className="card">
-        <div className="label">Быстрые ответы</div>
+        <div className="label">{t("quick.title")}</div>
         <div className="grid gap-2 mt-3">
           {items.map((it) => (
             <QuickRow key={it.id} item={it} onSave={saveItem} onDelete={removeItem} />
@@ -45,9 +47,9 @@ export default function QuickReplies() {
             className="input"
             value={newText}
             onChange={(e) => setNewText(e.target.value)}
-            placeholder="Новый быстрый ответ"
+            placeholder={t("quick.placeholder")}
           />
-          <button className="btn-primary" type="submit">Добавить</button>
+          <button className="btn-primary" type="submit">{t("quick.add")}</button>
         </form>
       </div>
     </div>
@@ -55,13 +57,14 @@ export default function QuickReplies() {
 }
 
 function QuickRow({ item, onSave, onDelete }) {
+  const { t } = useLang();
   const [text, setText] = useState(item.text);
   return (
     <div className="flex items-center gap-2 border border-line rounded-md p-2">
       <span className="text-xs px-2 py-1 rounded-full bg-surface">{item.usage_count}</span>
       <input className="input" value={text} onChange={(e) => setText(e.target.value)} />
-      <button className="btn-secondary" onClick={() => onSave(item.id, text)}>Сохранить</button>
-      <button className="btn-secondary text-bad" onClick={() => onDelete(item.id)}>Удалить</button>
+      <button className="btn-secondary" onClick={() => onSave(item.id, text)}>{t("common.save")}</button>
+      <button className="btn-secondary text-bad" onClick={() => onDelete(item.id)}>{t("common.delete")}</button>
     </div>
   );
 }

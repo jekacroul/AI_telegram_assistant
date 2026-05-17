@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useNavigate } from "react-router-dom";
+import { useLang } from "../hooks/useLang.js";
 
 function formatDuration(seconds) {
   if (!seconds || seconds < 0) return "0:00";
@@ -11,6 +12,7 @@ function formatDuration(seconds) {
 }
 
 export default function ReplyModal({ message, onClose, onSent }) {
+  const { t } = useLang();
   const isVoice = !!message.is_voice;
   const initialTranscription = message.transcription || "";
   const autoGenerateOnOpen = !isVoice || initialTranscription.trim().length > 0;
@@ -99,10 +101,14 @@ export default function ReplyModal({ message, onClose, onSent }) {
       <div className="card w-full max-w-2xl">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="label">Сообщение от {message.sender_name}</div>
+            <div className="label">
+              {t("modal.messageFrom", { name: message.sender_name })}
+            </div>
             {isVoice ? (
               <div className="text-sm mt-1 text-muted">
-                🎤 Голосовое · {formatDuration(message.voice_duration)}
+                {t("modal.voiceMsg", {
+                  duration: formatDuration(message.voice_duration),
+                })}
               </div>
             ) : (
               <div className="text-sm mt-1 whitespace-pre-wrap">{message.text}</div>
@@ -115,17 +121,17 @@ export default function ReplyModal({ message, onClose, onSent }) {
 
         {isVoice && (
           <div className="mt-2">
-            <div className="label">Транскрипция (можно отредактировать)</div>
+            <div className="label">{t("modal.transcription")}</div>
             {message.transcription_low_confidence && (
               <div className="text-xs text-bad mt-1">
-                ⚠️ Низкая уверенность — проверь текст перед генерацией
+                {t("modal.lowConfidence")}
               </div>
             )}
             <textarea
               className="input mt-2 min-h-[80px]"
               value={transcription}
               onChange={(e) => setTranscription(e.target.value)}
-              placeholder="Транскрипция голосового сообщения"
+              placeholder={t("modal.transcriptionPlaceholder")}
             />
             <div className="flex gap-2 mt-2">
               <button
@@ -134,10 +140,10 @@ export default function ReplyModal({ message, onClose, onSent }) {
                 onClick={() => generate(transcription)}
               >
                 {loading
-                  ? "Генерирую..."
+                  ? t("modal.generating")
                   : generated
-                  ? "Перегенерировать ответ"
-                  : "Сгенерировать ответ"}
+                  ? t("modal.regenerate")
+                  : t("modal.generate")}
               </button>
             </div>
           </div>
@@ -145,8 +151,10 @@ export default function ReplyModal({ message, onClose, onSent }) {
 
         {(generated || loading) && (
           <>
-            <div className="label mt-4">Варианты ответа</div>
-            {loading && <div className="text-sm text-muted">Генерирую...</div>}
+            <div className="label mt-4">{t("modal.replyVariants")}</div>
+            {loading && (
+              <div className="text-sm text-muted">{t("modal.generating")}</div>
+            )}
             {!loading && (
               <div className="grid gap-2 mt-2">
                 {variants.map((v, i) => (
@@ -171,7 +179,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
                   className="text-xs text-accent"
                   onClick={() => setRagOpen((v) => !v)}
                 >
-                  🧠 Контекст из истории ({ragContext.length}){" "}
+                  {t("modal.historyContext", { count: ragContext.length })}{" "}
                   {ragOpen ? "▲" : "▼"}
                 </button>
                 {ragOpen && (
@@ -197,9 +205,9 @@ export default function ReplyModal({ message, onClose, onSent }) {
               </div>
             )}
 
-            <div className="label mt-4">Текст ответа (можно отредактировать)</div>
+            <div className="label mt-4">{t("modal.replyText")}</div>
             <div className="mt-2">
-              <div className="label">Быстрые ответы</div>
+              <div className="label">{t("modal.quickReplies")}</div>
               <div className="flex flex-wrap gap-2 mt-2">
                 {quickReplies.map((q) => (
                   <button
@@ -214,7 +222,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
                   className="input max-w-[220px]"
                   value={newQuickText}
                   onChange={(e) => setNewQuickText(e.target.value)}
-                  placeholder="+ новый"
+                  placeholder={t("modal.newQuick")}
                 />
                 <button className="btn-secondary" onClick={addQuickReply}>
                   +
@@ -223,7 +231,7 @@ export default function ReplyModal({ message, onClose, onSent }) {
                   className="btn-secondary"
                   onClick={() => navigate("/quick-replies")}
                 >
-                  Управление
+                  {t("modal.manage")}
                 </button>
               </div>
             </div>
@@ -239,14 +247,14 @@ export default function ReplyModal({ message, onClose, onSent }) {
 
         <div className="flex justify-end gap-2 mt-4">
           <button className="btn-secondary" onClick={onClose}>
-            Отмена
+            {t("common.cancel")}
           </button>
           <button
             className="btn-primary"
             onClick={send}
             disabled={sending || !text.trim() || !generated}
           >
-            {sending ? "Отправляю..." : "Отправить"}
+            {sending ? t("modal.sending") : t("modal.send")}
           </button>
         </div>
       </div>

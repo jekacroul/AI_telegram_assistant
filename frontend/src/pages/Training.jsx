@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
+import { useLang } from "../hooks/useLang.js";
 
 function formatEta(seconds) {
   if (!seconds || seconds <= 0) return "—";
@@ -8,16 +9,12 @@ function formatEta(seconds) {
   return `${m}m ${s}s`;
 }
 
-const RU_MONTHS = [
-  "янв", "фев", "мар", "апр", "май", "июн",
-  "июл", "авг", "сен", "окт", "ноя", "дек",
-];
-
-function formatExportDate(d) {
+function formatExportDate(d, t) {
   if (!d) return "—";
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return d;
-  return `${RU_MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+  const months = t("training.months");
+  return `${months[dt.getMonth()]} ${dt.getFullYear()}`;
 }
 
 function computeCombined(botCount, exportCount, botW, expW, totalMax) {
@@ -45,29 +42,13 @@ function computeCombined(botCount, exportCount, botW, expW, totalMax) {
   };
 }
 
-const PHASE_LABELS = {
-  starting: "запуск...",
-  stopping_llama_server: "выгрузка llama-server",
-  loading_tokenizer: "загрузка токенизатора",
-  loading_model: "загрузка модели",
-  model_loaded: "модель загружена",
-  preparing_trainer: "подготовка тренера",
-  training: "обучение",
-  merging_and_exporting_gguf: "экспорт GGUF",
-  loading_base: "загрузка fp16 базы",
-  loading_adapter: "загрузка адаптера",
-  merging: "слияние весов",
-  saving_merged: "сохранение модели",
-  converting_to_gguf: "конвертация в GGUF",
-  quantizing: "квантизация",
-  converting_lora_to_gguf: "конвертация LoRA в GGUF",
-  copying_to_lm_studio: "копирование в LM Studio",
-  done: "успех",
-  error: "ошибка",
-  cancelled: "отменено",
-};
+function phaseLabel(phase, t) {
+  const text = t(`training.phases.${phase}`);
+  return text === `training.phases.${phase}` ? phase : text;
+}
 
 export default function Training() {
+  const { t } = useLang();
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [progress, setProgress] = useState(null);
@@ -160,7 +141,7 @@ export default function Training() {
     try {
       const res = await api.ragIndexAll();
       if (!res.started) {
-        setError(res.reason || "не удалось запустить индексацию");
+        setError(res.reason || t("training.failedIndex"));
         return;
       }
       // Optimistically flip the UI into "running" so the progress bar
@@ -241,7 +222,7 @@ export default function Training() {
       if (!v.valid) {
         updateExportItem(item.id, {
           status: "error",
-          error: v.error || "Невалидный файл",
+          error: v.error || t("training.invalidFile"),
         });
         return;
       }
@@ -284,7 +265,7 @@ export default function Training() {
     setError("");
     try {
       const res = await api.startTraining(trainSource);
-      if (!res.started) setError(res.reason || "не удалось запустить");
+      if (!res.started) setError(res.reason || t("training.failedStart"));
       refresh();
     } catch (e) {
       setError(e.message);
@@ -312,7 +293,7 @@ export default function Training() {
     try {
       const res = await api.exportGguf(run.id);
       if (!res.started) {
-        setError(res.reason || "не удалось запустить конвертацию");
+        setError(res.reason || t("training.failedConvert"));
         return;
       }
       refresh();
@@ -326,7 +307,7 @@ export default function Training() {
     try {
       const res = await api.exportLoraGguf(run.id);
       if (!res.started) {
-        setError(res.reason || "не удалось запустить конвертацию");
+        setError(res.reason || t("training.failedConvert"));
         return;
       }
       refresh();
@@ -336,7 +317,7 @@ export default function Training() {
   }
 
   async function removeRun(run) {
-    const confirmed = window.confirm(`Удалить v${run.version} из истории?`);
+    const confirmed = window.confirm(t("training.confirmDeleteRun", { version: run.version }));
     if (!confirmed) return;
     setError("");
     try {
@@ -395,10 +376,16 @@ export default function Training() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat title="Сообщений" value={status?.messages_collected ?? "—"} />
-        <Stat title="Пар для обучения" value={status?.training_pairs ?? "—"} />
         <Stat
-          title="Последний запуск"
+          title={t("training.messages")}
+          value={status?.messages_collected ?? "—"}
+        />
+        <Stat
+          title={t("training.trainingPairs")}
+          value={status?.training_pairs ?? "—"}
+        />
+        <Stat
+          title={t("training.lastRun")}
           value={
             status?.last_run?.finished_at
               ? new Date(status.last_run.finished_at).toLocaleString()
@@ -406,29 +393,37 @@ export default function Training() {
           }
         />
         <Stat
-          title="Активный адаптер"
+          title={t("training.activeAdapter")}
           value={status?.active_adapter ? `v${status.active_adapter.version}` : "—"}
         />
       </div>
 
       {voiceStats && (
         <div className="card">
-          <div className="label">Голосовые сообщения</div>
+          <div className="label">{t("training.voiceMessages")}</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2 text-sm">
             <div>
-              <div className="text-muted text-xs">Получено</div>
+              <div className="text-muted text-xs">
+                {t("training.voiceReceived")}
+              </div>
               <div className="text-lg font-semibold">{voiceStats.voice_received}</div>
             </div>
             <div>
-              <div className="text-muted text-xs">Транскрибировано</div>
+              <div className="text-muted text-xs">
+                {t("training.voiceTranscribed")}
+              </div>
               <div className="text-lg font-semibold">{voiceStats.voice_transcribed}</div>
             </div>
             <div>
-              <div className="text-muted text-xs">Низкая уверенность</div>
+              <div className="text-muted text-xs">
+                {t("training.voiceLowConfidence")}
+              </div>
               <div className="text-lg font-semibold">{voiceStats.voice_low_confidence}</div>
             </div>
             <div>
-              <div className="text-muted text-xs">Средняя уверенность</div>
+              <div className="text-muted text-xs">
+                {t("training.voiceAvgConfidence")}
+              </div>
               <div className="text-lg font-semibold">
                 {voiceStats.avg_confidence != null
                   ? `${Math.round((voiceStats.avg_confidence || 0) * 100)}%`
@@ -442,13 +437,15 @@ export default function Training() {
       {ragStatus && (
         <div className="card">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="label">Векторная память</div>
+            <div className="label">{t("training.vectorMemory")}</div>
             <span
               className={`text-sm ${
                 ragStatus.enabled ? "text-good" : "text-muted"
               }`}
             >
-              {ragStatus.enabled ? "✅ Активна" : "❌ Выключена"}
+              {ragStatus.enabled
+                ? t("training.ragActive")
+                : t("training.ragDisabled")}
             </span>
             {ragStatus.available && (
               <span className="text-xs text-muted">
@@ -459,25 +456,27 @@ export default function Training() {
 
           {ragStatus.last_error && !ragStatus.available && (
             <div className="text-bad text-xs mt-2">
-              Ошибка: {ragStatus.last_error}
+              {t("training.errorPrefix", { msg: ragStatus.last_error })}
             </div>
           )}
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3 text-sm">
             <div>
-              <div className="text-muted text-xs">Проиндексировано</div>
+              <div className="text-muted text-xs">{t("training.indexed")}</div>
               <div className="text-lg font-semibold">
-                {(ragStatus.total_indexed ?? 0).toLocaleString("ru-RU")}
+                {(ragStatus.total_indexed ?? 0).toLocaleString()}
               </div>
             </div>
             <div>
-              <div className="text-muted text-xs">Размер</div>
+              <div className="text-muted text-xs">{t("training.size")}</div>
               <div className="text-lg font-semibold">
                 {ragStatus.collection_size_mb ?? 0} MB
               </div>
             </div>
             <div>
-              <div className="text-muted text-xs">Последняя индексация</div>
+              <div className="text-muted text-xs">
+                {t("training.lastIndexing")}
+              </div>
               <div className="text-lg font-semibold">
                 {ragStatus.last_indexed_at
                   ? new Date(ragStatus.last_indexed_at).toLocaleString()
@@ -490,8 +489,10 @@ export default function Training() {
             <div className="mt-3">
               <div className="flex flex-wrap justify-between gap-2 text-xs text-muted">
                 <span>
-                  Индексирую сообщения: {ragStatus.indexing.indexed}/
-                  {ragStatus.indexing.total || "—"}
+                  {t("training.indexingMessages", {
+                    indexed: ragStatus.indexing.indexed,
+                    total: ragStatus.indexing.total || "—",
+                  })}
                 </span>
                 <span>
                   {ragStatus.indexing.eta_seconds > 0 && (
@@ -521,7 +522,7 @@ export default function Training() {
               onClick={reindexRag}
               disabled={!ragStatus.available || ragStatus.indexing?.running}
             >
-              Переиндексировать всё
+              {t("training.reindexAll")}
             </button>
             <button
               className="btn-secondary"
@@ -530,7 +531,9 @@ export default function Training() {
               }
               disabled={!ragStatus.available}
             >
-              {ragSearch.open ? "Скрыть тест поиска" : "Тест поиска"}
+              {ragSearch.open
+                ? t("training.hideSearchTest")
+                : t("training.searchTest")}
             </button>
           </div>
 
@@ -539,7 +542,7 @@ export default function Training() {
               <div className="flex gap-2">
                 <input
                   className="input flex-1"
-                  placeholder="Введите фразу для поиска"
+                  placeholder={t("training.searchPlaceholder")}
                   value={ragSearch.query}
                   onChange={(e) =>
                     setRagSearch((s) => ({ ...s, query: e.target.value }))
@@ -553,7 +556,7 @@ export default function Training() {
                   onClick={runRagSearch}
                   disabled={ragSearch.busy}
                 >
-                  {ragSearch.busy ? "..." : "Найти"}
+                  {ragSearch.busy ? "..." : t("training.find")}
                 </button>
               </div>
               {ragSearch.error && (
@@ -561,7 +564,7 @@ export default function Training() {
               )}
               {ragSearch.results && ragSearch.results.length === 0 && (
                 <div className="text-muted text-sm mt-2">
-                  Ничего не найдено.
+                  {t("training.nothingFound")}
                 </div>
               )}
               {ragSearch.results && ragSearch.results.length > 0 && (
@@ -593,10 +596,13 @@ export default function Training() {
       )}
 
       <div className="card">
-        <div className="label">Отклонено фильтром качества</div>
+        <div className="label">{t("training.rejectedByQuality")}</div>
         <div className="text-xl font-semibold mt-1">
           {qualityStats
-            ? `${qualityStats.total_rejected} из ${qualityStats.total_generated}`
+            ? t("training.rejectedOf", {
+                rejected: qualityStats.total_rejected,
+                generated: qualityStats.total_generated,
+              })
             : "—"}
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-sm">
@@ -606,38 +612,39 @@ export default function Training() {
                 key={item.reason}
                 className="rounded-full bg-surface px-3 py-1 text-muted"
               >
-                {reasonLabel(item.reason)}: {item.count}
+                {reasonLabel(item.reason, t)}: {item.count}
               </span>
             ))
           ) : (
-            <span className="text-muted">Нет отклонений</span>
+            <span className="text-muted">{t("training.noRejections")}</span>
           )}
         </div>
       </div>
 
       <div className="card space-y-4">
-        <div className="label">Источники данных</div>
+        <div className="label">{t("training.dataSources")}</div>
 
         <div className="rounded-lg border border-line p-3 space-y-2">
           <div className="flex items-center gap-3">
-            <span className="font-semibold">🤖 Пары из бота</span>
+            <span className="font-semibold">{t("training.botPairs")}</span>
             <label className="flex items-center gap-2 text-sm text-muted ml-auto select-none">
               <input
                 type="checkbox"
                 checked={botEnabled}
                 onChange={(e) => setBotEnabled(e.target.checked)}
               />
-              включить
+              {t("training.enable")}
             </label>
           </div>
           <div className="text-sm text-muted">
-            {(status?.training_pairs || 0).toLocaleString("ru-RU")} пар собрано
-            ботом
+            {t("training.botPairsCollected", {
+              count: (status?.training_pairs || 0).toLocaleString(),
+            })}
           </div>
           {botEnabled && (
             <div>
               <div className="flex justify-between text-xs text-muted">
-                <span>Вес</span>
+                <span>{t("training.weight")}</span>
                 <span>{botWeight}%</span>
               </div>
               <input
@@ -653,14 +660,9 @@ export default function Training() {
         </div>
 
         <div className="rounded-lg border border-line p-3 space-y-3">
-          <div className="font-semibold">📱 Экспорт Telegram</div>
+          <div className="font-semibold">{t("training.telegramExport")}</div>
           <div className="text-xs text-muted whitespace-pre-line bg-bg rounded p-2">
-            {`Как экспортировать историю:
- 1. Открой Telegram Desktop
- 2. Настройки → Конфиденциальность и безопасность
- 3. Экспорт данных Telegram
- 4. Выбери: ☑ Личные сообщения, формат JSON
- 5. Нажми Экспорт`}
+            {t("training.exportInstructions")}
           </div>
 
           {exportItems.map((item) => (
@@ -668,7 +670,7 @@ export default function Training() {
               <div className="flex gap-2">
                 <input
                   className="input flex-1"
-                  placeholder="Путь к result.json"
+                  placeholder={t("training.resultJsonPath")}
                   value={item.path}
                   onChange={(e) =>
                     updateExportItem(item.id, { path: e.target.value })
@@ -679,7 +681,9 @@ export default function Training() {
                   onClick={() => checkExport(item)}
                   disabled={item.status === "checking" || !item.path.trim()}
                 >
-                  {item.status === "checking" ? "..." : "Проверить файл"}
+                  {item.status === "checking"
+                    ? "..."
+                    : t("training.checkFile")}
                 </button>
                 {exportItems.length > 1 && (
                   <button
@@ -695,26 +699,40 @@ export default function Training() {
               )}
               {item.status === "ok" && item.preview && (
                 <div className="rounded-lg border border-good/40 bg-good/5 p-3 text-sm space-y-1">
-                  <div className="text-good">✅ Файл успешно проверен</div>
+                  <div className="text-good">{t("training.fileValid")}</div>
                   <div>
-                    📊 Найдено:{" "}
-                    {(item.preview.total_pairs || 0).toLocaleString("ru-RU")} пар
+                    {t("training.foundPairs", {
+                      count: (item.preview.total_pairs || 0).toLocaleString(),
+                    })}
                   </div>
                   <div>
-                    📅 Период:{" "}
-                    {formatExportDate(item.preview.date_range?.from)}–
-                    {formatExportDate(item.preview.date_range?.to)}
+                    {t("training.period", {
+                      from: formatExportDate(item.preview.date_range?.from, t),
+                      to: formatExportDate(item.preview.date_range?.to, t),
+                    })}
                   </div>
-                  <div>💬 Чатов: {item.preview.chats_count}</div>
                   <div>
-                    📝 Средний ответ: {item.preview.avg_reply_length} слов
+                    {t("training.chatsCount", {
+                      count: item.preview.chats_count,
+                    })}
+                  </div>
+                  <div>
+                    {t("training.avgReply", {
+                      count: item.preview.avg_reply_length,
+                    })}
                   </div>
                   {item.preview.top_chats?.length > 0 && (
                     <div className="pt-1">
-                      <div className="text-muted">Топ чаты:</div>
+                      <div className="text-muted">
+                        {t("training.topChats")}
+                      </div>
                       {item.preview.top_chats.map((c, i) => (
                         <div key={i}>
-                          • {c.name} — {c.pairs} пар
+                          •{" "}
+                          {t("training.topChatRow", {
+                            name: c.name,
+                            pairs: c.pairs,
+                          })}
                         </div>
                       ))}
                     </div>
@@ -725,12 +743,12 @@ export default function Training() {
           ))}
 
           <button className="btn-secondary" onClick={addExportItem}>
-            + Добавить файл
+            {t("training.addFile")}
           </button>
 
           <div>
             <div className="flex justify-between text-xs text-muted">
-              <span>Вес экспорта</span>
+              <span>{t("training.exportWeight")}</span>
               <span>{exportWeight}%</span>
             </div>
             <input
@@ -745,7 +763,7 @@ export default function Training() {
 
           {cachedExports.length > 0 && (
             <div className="text-xs text-muted">
-              Ранее проверенные:
+              {t("training.previouslyChecked")}
               <div className="flex flex-wrap gap-2 mt-1">
                 {cachedExports.map((c, i) => (
                   <button
@@ -763,7 +781,9 @@ export default function Training() {
         </div>
 
         <div className="rounded-lg border border-line p-3 space-y-2">
-          <div className="text-sm text-muted">Итого будет использовано:</div>
+          <div className="text-sm text-muted">
+            {t("training.totalWillUse")}
+          </div>
           <div className="space-y-1 text-sm">
             <div className="flex items-center gap-2">
               <div className="flex-1 h-3 bg-surface rounded overflow-hidden">
@@ -773,7 +793,10 @@ export default function Training() {
                 />
               </div>
               <span className="w-48 text-right">
-                Из бота: {combined.bot} пар ({combined.botPct}%)
+                {t("training.fromBot", {
+                  count: combined.bot,
+                  pct: combined.botPct,
+                })}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -784,21 +807,23 @@ export default function Training() {
                 />
               </div>
               <span className="w-48 text-right">
-                Экспорт: {combined.export} пар ({combined.exportPct}%)
+                {t("training.fromExport", {
+                  count: combined.export,
+                  pct: combined.exportPct,
+                })}
               </span>
             </div>
           </div>
           <div className="border-t border-line pt-2 font-semibold">
-            Всего: ~{combined.total.toLocaleString("ru-RU")} пар
+            {t("training.grandTotal", {
+              count: combined.total.toLocaleString(),
+            })}
           </div>
           {lowBotShare && (
-            <div className="text-bad text-sm">
-              ⚠️ Мало пар из бота — твой текущий стиль может быть
-              недопредставлен
-            </div>
+            <div className="text-bad text-sm">{t("training.lowBotShare")}</div>
           )}
           <label className="flex items-center gap-2 text-xs text-muted">
-            <span>Максимум примеров:</span>
+            <span>{t("training.maxSamples")}</span>
             <input
               type="number"
               min="100"
@@ -814,44 +839,53 @@ export default function Training() {
       <div className="card flex flex-wrap gap-2 items-center">
         <button className="btn-secondary" onClick={build} disabled={busy}>
           {busy
-            ? "Сборка..."
-            : `Собрать датасет (${combined.total.toLocaleString("ru-RU")} пар)`}
+            ? t("training.building")
+            : t("training.buildDataset", {
+                count: combined.total.toLocaleString(),
+              })}
         </button>
         <select
           className="input"
           value={trainSource}
           onChange={(e) => setTrainSource(e.target.value)}
           disabled={status?.running}
-          title="Какие данные использовать для обучения"
+          title={t("training.trainSourceTitle")}
         >
-          <option value="auto">Обучать на: последняя сборка</option>
-          <option value="bot">Обучать на: только пары бота</option>
+          <option value="auto">{t("training.trainOnAuto")}</option>
+          <option value="bot">{t("training.trainOnBot")}</option>
         </select>
         <button
           className="btn-primary"
           disabled={!canTrain || busy}
           onClick={start}
-          title={!canTrain ? "Нужно минимум 50 пар" : ""}
+          title={!canTrain ? t("training.needPairs") : ""}
         >
-          {status?.running ? "Идёт обучение..." : "Запустить fine-tuning"}
+          {status?.running
+            ? t("training.trainingRunning")
+            : t("training.startTraining")}
         </button>
         {status?.running && (
           <button className="btn-danger" onClick={cancel}>
-            Отменить
+            {t("training.cancel")}
           </button>
         )}
         {status?.active_adapter && (
           <button className="btn-secondary" onClick={deactivate}>
-            Деактивировать адаптер
+            {t("training.deactivateAdapter")}
           </button>
         )}
         {datasetInfo && datasetInfo.total_pairs > 0 && (
           <span className="text-sm text-muted ml-2">
-            Датасет: {datasetInfo.total_pairs} пар
+            {t("training.datasetInfo", { count: datasetInfo.total_pairs })}
             {datasetInfo.breakdown
-              ? ` (бот ${datasetInfo.breakdown.bot}, экспорт ${datasetInfo.breakdown.export})`
+              ? t("training.datasetBreakdown", {
+                  bot: datasetInfo.breakdown.bot,
+                  export: datasetInfo.breakdown.export,
+                })
               : datasetInfo.avg_output_len
-                ? `, средняя длина ответа ${datasetInfo.avg_output_len}`
+                ? t("training.datasetAvgLen", {
+                    len: datasetInfo.avg_output_len,
+                  })
                 : ""}
           </span>
         )}
@@ -884,46 +918,68 @@ export default function Training() {
         <div className="card">
           <div className="flex flex-wrap gap-4 text-sm items-center">
             <span>
-              Этап:{" "}
-              <b>{PHASE_LABELS[progress.phase] || progress.phase}</b>
+              {t("training.phaseLabel")}
+              <b>{phaseLabel(progress.phase, t)}</b>
             </span>
             {progress.phase === "training" && (
               <>
-                <span>Эпоха: {progress.epoch?.toFixed?.(2) ?? "—"}</span>
                 <span>
-                  Шаг: {progress.step ?? "—"} / {progress.max_steps ?? "—"}
+                  {t("training.epoch", {
+                    value: progress.epoch?.toFixed?.(2) ?? "—",
+                  })}
                 </span>
-                <span>Loss: {progress.loss?.toFixed?.(4) ?? "—"}</span>
-                <span>ETA: {formatEta(progress.eta_seconds)}</span>
+                <span>
+                  {t("training.step", {
+                    step: progress.step ?? "—",
+                    max: progress.max_steps ?? "—",
+                  })}
+                </span>
+                <span>
+                  {t("training.loss", {
+                    value: progress.loss?.toFixed?.(4) ?? "—",
+                  })}
+                </span>
+                <span>
+                  {t("training.eta", { value: formatEta(progress.eta_seconds) })}
+                </span>
                 {percent != null && <span>{percent.toFixed(1)}%</span>}
               </>
             )}
             {progress.phase === "done" && progress.final_loss != null && (
-              <span>Итоговый loss: <b>{progress.final_loss.toFixed(4)}</b></span>
+              <span>
+                {t("training.finalLoss")}
+                <b>{progress.final_loss.toFixed(4)}</b>
+              </span>
             )}
             {progress.phase === "done" && progress.gguf_path && (
               <span className="text-good">
                 GGUF: <code className="text-xs">{progress.gguf_path}</code>
                 {progress.gguf_path.toLowerCase().includes(".lora.") && (
                   <span className="text-muted ml-2">
-                    (LoRA-адаптер — в LM Studio подключай поверх базы через
-                    Advanced → LoRA Adapters, не загружай как отдельную модель)
+                    {t("training.ggufLoraNote")}
                   </span>
                 )}
               </span>
             )}
             {progress.phase === "done" && progress.gguf_path === null && (
               <span className="text-bad">
-                GGUF не сконвертирован: {progress.gguf_skip_reason || "настрой LLAMA_CPP_PATH в .env"}
+                {t("training.ggufNotConverted", {
+                  reason:
+                    progress.gguf_skip_reason || t("training.ggufConfigHint"),
+                })}
               </span>
             )}
             {progress.phase === "error" && (
               <span className="text-bad">
-                Ошибка: {progress.error || "неизвестная ошибка"}
+                {t("training.errorPrefix", {
+                  msg: progress.error || t("training.unknownError"),
+                })}
               </span>
             )}
             {progress.phase === "cancelled" && (
-              <span className="text-muted">Отменено пользователем</span>
+              <span className="text-muted">
+                {t("training.cancelledByUser")}
+              </span>
             )}
           </div>
           {percent != null && (
@@ -942,15 +998,17 @@ export default function Training() {
       })()}
 
       <div className="card">
-        <div className="text-sm text-muted mb-2">История адаптеров</div>
+        <div className="text-sm text-muted mb-2">
+          {t("training.adapterHistory")}
+        </div>
         <table className="w-full text-sm">
           <thead className="text-muted">
             <tr className="text-left">
-              <th className="py-1">Версия</th>
-              <th>Дата</th>
-              <th>Пар</th>
-              <th>Loss</th>
-              <th>Статус</th>
+              <th className="py-1">{t("training.thVersion")}</th>
+              <th>{t("training.thDate")}</th>
+              <th>{t("training.thPairs")}</th>
+              <th>{t("training.thLoss")}</th>
+              <th>{t("training.thStatus")}</th>
               <th></th>
             </tr>
           </thead>
@@ -958,7 +1016,7 @@ export default function Training() {
             {runs.length === 0 && (
               <tr>
                 <td colSpan="6" className="text-muted py-3">
-                  Запусков ещё не было.
+                  {t("training.noRuns")}
                 </td>
               </tr>
             )}
@@ -973,7 +1031,7 @@ export default function Training() {
                   <td>{r.final_loss?.toFixed?.(4) ?? "—"}</td>
                   <td>
                     {r.is_active ? (
-                      <span className="text-good">активный</span>
+                      <span className="text-good">{t("training.active")}</span>
                     ) : (
                       r.status
                     )}
@@ -985,12 +1043,12 @@ export default function Training() {
                           className="btn-secondary"
                           onClick={() => activate(r.id)}
                         >
-                          Активировать
+                          {t("training.activate")}
                         </button>
                       )}
                       {r.is_active && (
                         <button className="btn-secondary" onClick={deactivate}>
-                          Деактивировать
+                          {t("training.deactivate")}
                         </button>
                       )}
                       {r.status === "done" && (
@@ -1000,8 +1058,8 @@ export default function Training() {
                           onClick={() => exportLoraGguf(r)}
                           title={
                             status?.running
-                              ? "Дождись окончания текущего процесса"
-                              : "Сконвертировать LoRA в отдельный GGUF (~50-200 МБ). В LM Studio открой базовую модель → Load → Advanced → LoRA Adapters → добавь этот файл. Как самостоятельная модель НЕ загружается."
+                              ? t("training.waitProcess")
+                              : t("training.loraGgufTitle")
                           }
                         >
                           LoRA → GGUF
@@ -1014,8 +1072,8 @@ export default function Training() {
                           onClick={() => exportGguf(r)}
                           title={
                             status?.running
-                              ? "Дождись окончания текущего процесса"
-                              : "Слить адаптер с базой fp16 и собрать единый GGUF (~12 ГБ, требует ~26 ГБ свободной RAM)"
+                              ? t("training.waitProcess")
+                              : t("training.mergeGgufTitle")
                           }
                         >
                           Merge → GGUF
@@ -1027,10 +1085,10 @@ export default function Training() {
                           onClick={() => toggleLog(r)}
                         >
                           {loadingLogId === r.id
-                            ? "Загрузка..."
+                            ? t("training.loadingLog")
                             : runLogs[r.id]?.open
-                              ? "Скрыть лог"
-                              : "Лог"}
+                              ? t("training.hideLog")
+                              : t("training.log")}
                         </button>
                       )}
                       {(r.status === "failed" || r.status === "cancelled") &&
@@ -1039,7 +1097,7 @@ export default function Training() {
                           className="btn-danger"
                           onClick={() => removeRun(r)}
                         >
-                          Удалить
+                          {t("common.delete")}
                         </button>
                       )}
                     </div>
@@ -1050,7 +1108,7 @@ export default function Training() {
                     <td colSpan="6" className="pb-3">
                       <div className="mt-2 rounded-lg border border-line bg-bg p-3">
                         <div className="flex flex-wrap gap-2 items-center text-xs text-muted mb-2">
-                          <span>Лог запуска v{r.version}</span>
+                          <span>{t("training.runLog", { version: r.version })}</span>
                           {runLogs[r.id].data?.log_path && (
                             <code className="break-all">{runLogs[r.id].data.log_path}</code>
                           )}
@@ -1061,7 +1119,9 @@ export default function Training() {
                               r.status === "failed" ? "text-bad" : "text-muted"
                             }`}
                           >
-                            {r.status === "failed" ? "Ошибка: " : "Последняя строка: "}
+                            {r.status === "failed"
+                              ? t("training.errorPrefix", { msg: "" })
+                              : t("training.lastLine")}
                             {runLogs[r.id].data.error}
                           </div>
                         )}
@@ -1071,7 +1131,7 @@ export default function Training() {
                           </pre>
                         ) : (
                           <div className="text-muted text-sm">
-                            Не удалось найти лог запуска.
+                            {t("training.logNotFound")}
                           </div>
                         )}
                       </div>
@@ -1087,16 +1147,9 @@ export default function Training() {
   );
 }
 
-function reasonLabel(reason) {
-  const labels = {
-    too_short: "Слишком короткий ответ",
-    language_mismatch: "Другой язык",
-    identical_to_incoming: "Повтор входящего",
-    ai_phrase: "AI-фраза",
-    emoji_only: "Только emoji",
-    no_variants: "Нет вариантов",
-  };
-  return labels[reason] || reason;
+function reasonLabel(reason, t) {
+  const text = t(`training.reasons.${reason}`);
+  return text === `training.reasons.${reason}` ? reason : text;
 }
 
 function Stat({ title, value }) {
