@@ -128,8 +128,11 @@ export default function ReplyPanelTile({
                 </div>
                 <div className="mt-0.5">
                   {m.is_voice ? (
-                    <span className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400">
-                      <Mic size={11} /> {t("tiles.voice")}
+                    <span className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400 min-w-0">
+                      <Mic size={11} className="flex-shrink-0" />
+                      <span className="truncate">
+                        {m.transcription || t("tiles.voice")}
+                      </span>
                     </span>
                   ) : (
                     <span className="text-[11px] text-zinc-500 dark:text-slate-400 truncate block">
