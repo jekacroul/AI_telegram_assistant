@@ -114,7 +114,6 @@ export default function ModelStatusTile({ dragHandleProps }) {
 
   const services = status
     ? [
-        { name: t("tiles.lmStudio"), ok: !!status.llm },
         { name: t("tiles.telegramBot"), ok: !!status.bot },
         { name: t("tiles.database"), ok: !!status.db },
       ]
