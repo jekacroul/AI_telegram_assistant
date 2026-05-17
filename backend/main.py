@@ -300,7 +300,11 @@ app.add_middleware(
 
 @app.get("/api/status")
 async def status() -> dict:
-    llm_ok = await get_client().health()
+    # The "LM Studio" indicator reflects an external OpenAI-compatible
+    # server only. The managed llama-server answers on the same port, so
+    # exclude that case to keep it independent of the llama-server tile.
+    llama_running = bool((await llama_server.status_async()).get("running"))
+    llm_ok = (not llama_running) and await get_client().health()
     bot_ok = telegram_service.is_configured
     db_ok = True
     try:
