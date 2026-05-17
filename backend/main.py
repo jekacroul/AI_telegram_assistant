@@ -222,6 +222,7 @@ async def lifespan(app: FastAPI):
             log.exception("bot setup failed at startup")
     else:
         log.warning("TELEGRAM_BOT_TOKEN is not set; bot will be inactive")
+    await _startup_reconcile_queue()
     dialog_backup_scheduler.start()
     replication_scheduler.start()
     if settings.llama_server_auto_start and settings.llama_base_model_gguf:
@@ -241,6 +242,60 @@ async def _auto_start_llama_server() -> None:
             log.warning("auto-start llama-server failed: %s", result.get("reason"))
     except Exception:
         log.exception("auto-start llama-server crashed")
+
+
+async def _reconcile_pending_queue(session: AsyncSession) -> int:
+    """Mark incoming messages as replied when a later owner message exists.
+
+    Covers replies sent manually in Telegram, which the bot records as
+    ``is_mine`` messages but never marks the original incoming as replied.
+    Returns the number of messages cleared from the queue.
+    """
+    last_mine = (
+        select(
+            Message.chat_id.label("chat_id"),
+            func.max(Message.id).label("last_mine_id"),
+        )
+        .where(Message.is_mine == True)  # noqa: E712
+        .group_by(Message.chat_id)
+        .subquery()
+    )
+    result = await session.execute(
+        select(Message)
+        .join(last_mine, Message.chat_id == last_mine.c.chat_id)
+        .where(
+            Message.is_mine == False,  # noqa: E712
+            Message.replied == False,  # noqa: E712
+            Message.id < last_mine.c.last_mine_id,
+        )
+    )
+    rows = result.scalars().all()
+    for m in rows:
+        m.replied = True
+        m.pending_reason = None
+    await session.commit()
+    return len(rows)
+
+
+async def _startup_reconcile_queue() -> None:
+    """Run the smart queue cleanup at startup when the setting is enabled."""
+    try:
+        async with SessionLocal() as session:
+            enabled = (
+                await get_setting(session, "auto_reconcile_queue", "1")
+            ) in ("1", "true", "True")
+            if not enabled:
+                return
+            cleared = await _reconcile_pending_queue(session)
+        if cleared:
+            log.info(
+                "queue reconcile on startup cleared %s message(s)", cleared
+            )
+            await message_bus.publish(
+                "queue_cleared", {"reconciled": cleared}
+            )
+    except Exception:  # noqa: BLE001
+        log.exception("startup queue reconcile failed")
 
 
 async def _startup_rag_index() -> None:
@@ -365,6 +420,7 @@ class SettingsIn(BaseModel):
     persona_mode: Optional[str] = None
     group_reply_mode: Optional[str] = None
     quality_filter_enabled: Optional[bool] = None
+    auto_reconcile_queue: Optional[bool] = None
 
 
 class QuickReplyIn(BaseModel):
@@ -482,6 +538,12 @@ async def save_settings(
             "quality_filter_enabled",
             "1" if payload.quality_filter_enabled else "0",
         )
+    if payload.auto_reconcile_queue is not None:
+        await set_setting(
+            session,
+            "auto_reconcile_queue",
+            "1" if payload.auto_reconcile_queue else "0",
+        )
     return {"ok": True}
 
 
@@ -498,6 +560,9 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
     quality_filter_enabled = (
         await get_setting(session, "quality_filter_enabled", "1")
     ) in ("1", "true", "True")
+    auto_reconcile_queue = (
+        await get_setting(session, "auto_reconcile_queue", "1")
+    ) in ("1", "true", "True")
     return {
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
@@ -505,6 +570,7 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
         "persona_mode": persona_mode,
         "group_reply_mode": group_reply_mode,
         "quality_filter_enabled": quality_filter_enabled,
+        "auto_reconcile_queue": auto_reconcile_queue,
     }
 
 
@@ -1020,30 +1086,7 @@ async def reconcile_queue(session: AsyncSession = Depends(get_session)) -> dict:
     exists in the same chat — covering replies sent manually in Telegram,
     which the bot records but never marks the original as replied.
     """
-    last_mine = (
-        select(
-            Message.chat_id.label("chat_id"),
-            func.max(Message.id).label("last_mine_id"),
-        )
-        .where(Message.is_mine == True)  # noqa: E712
-        .group_by(Message.chat_id)
-        .subquery()
-    )
-    result = await session.execute(
-        select(Message)
-        .join(last_mine, Message.chat_id == last_mine.c.chat_id)
-        .where(
-            Message.is_mine == False,  # noqa: E712
-            Message.replied == False,  # noqa: E712
-            Message.id < last_mine.c.last_mine_id,
-        )
-    )
-    rows = result.scalars().all()
-    for m in rows:
-        m.replied = True
-        m.pending_reason = None
-    await session.commit()
-    cleared = len(rows)
+    cleared = await _reconcile_pending_queue(session)
     if cleared:
         await message_bus.publish("queue_cleared", {"reconciled": cleared})
     remaining = await session.scalar(
