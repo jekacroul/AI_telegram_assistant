@@ -7,6 +7,7 @@ import MetricTile from "../components/tiles/MetricTile.jsx";
 import ActivityTile from "../components/tiles/ActivityTile.jsx";
 import ModelStatusTile from "../components/tiles/ModelStatusTile.jsx";
 import LlamaServerTile from "../components/tiles/LlamaServerTile.jsx";
+import VectorMemoryTile from "../components/tiles/VectorMemoryTile.jsx";
 import MessageFeedTile from "../components/tiles/MessageFeedTile.jsx";
 import ReplyPanelTile from "../components/tiles/ReplyPanelTile.jsx";
 import ReplyModal from "../components/ReplyModal.jsx";
@@ -82,7 +83,8 @@ export default function Dashboard() {
   const rag = data.rag || {};
   const status = data.status || {};
   const messages = Array.isArray(data.messages) ? data.messages : [];
-  const pending = Array.isArray(data.pending) ? data.pending : [];
+  const pending = Array.isArray(data.pending?.messages) ? data.pending.messages : [];
+  const pendingCount = data.pending?.count ?? pending.length;
 
   const recvToday = recv14[recv14.length - 1] || 0;
   const sentToday = sent14[sent14.length - 1] || 0;
@@ -232,6 +234,8 @@ export default function Dashboard() {
         return <ModelStatusTile dragHandleProps={dragHandleProps} />;
       case "llama-server":
         return <LlamaServerTile dragHandleProps={dragHandleProps} />;
+      case "vector-memory":
+        return <VectorMemoryTile dragHandleProps={dragHandleProps} />;
       case "message-feed":
         return (
           <MessageFeedTile
@@ -246,6 +250,7 @@ export default function Dashboard() {
             dragHandleProps={dragHandleProps}
             status={status}
             messages={pending}
+            count={pendingCount}
             onSelect={setActive}
             onToggleAuto={toggleAuto}
           />
