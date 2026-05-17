@@ -7,6 +7,7 @@ import MetricTile from "../components/tiles/MetricTile.jsx";
 import ActivityTile from "../components/tiles/ActivityTile.jsx";
 import ModelStatusTile from "../components/tiles/ModelStatusTile.jsx";
 import LlamaServerTile from "../components/tiles/LlamaServerTile.jsx";
+import VectorMemoryTile from "../components/tiles/VectorMemoryTile.jsx";
 import MessageFeedTile from "../components/tiles/MessageFeedTile.jsx";
 import ReplyPanelTile from "../components/tiles/ReplyPanelTile.jsx";
 import ReplyModal from "../components/ReplyModal.jsx";
@@ -233,6 +234,8 @@ export default function Dashboard() {
         return <ModelStatusTile dragHandleProps={dragHandleProps} />;
       case "llama-server":
         return <LlamaServerTile dragHandleProps={dragHandleProps} />;
+      case "vector-memory":
+        return <VectorMemoryTile dragHandleProps={dragHandleProps} />;
       case "message-feed":
         return (
           <MessageFeedTile

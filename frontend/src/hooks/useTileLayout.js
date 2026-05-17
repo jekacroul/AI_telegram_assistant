@@ -11,6 +11,7 @@ export const DEFAULT_ORDER = [
   "activity-chart",
   "model-status",
   "llama-server",
+  "vector-memory",
   "message-feed",
   "reply-panel",
 ];
@@ -23,6 +24,7 @@ export const DEFAULT_SIZES = {
   "activity-chart": { w: 688, h: 250 },
   "model-status": { w: 688, h: 470 },
   "llama-server": { w: 336, h: 250 },
+  "vector-memory": { w: 688, h: 360 },
   "message-feed": { w: 688, h: 440 },
   "reply-panel": { w: 688, h: 440 },
 };
