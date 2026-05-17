@@ -31,6 +31,7 @@ export default function Settings() {
     llm_model: "",
     group_reply_mode: "mention",
     quality_filter_enabled: true,
+    auto_reconcile_queue: true,
   });
   const [chats, setChats] = useState([]);
   const [models, setModels] = useState([]);
@@ -111,6 +112,7 @@ export default function Settings() {
       llm_model: st.llm_model || "",
       group_reply_mode: st.group_reply_mode || "mention",
       quality_filter_enabled: st.quality_filter_enabled !== false,
+      auto_reconcile_queue: st.auto_reconcile_queue !== false,
     }));
     setSchedule((prev) => ({
       ...prev,
@@ -456,6 +458,27 @@ export default function Settings() {
             </div>
             <div className="text-xs text-muted">
               {t("settings.qualityFilterDesc")}
+            </div>
+          </div>
+        </label>
+      </div>
+
+      <div className="card">
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={s.auto_reconcile_queue}
+            onChange={(e) =>
+              setS({ ...s, auto_reconcile_queue: e.target.checked })
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">
+              {t("settings.autoReconcile")}
+            </div>
+            <div className="text-xs text-muted">
+              {t("settings.autoReconcileDesc")}
             </div>
           </div>
         </label>

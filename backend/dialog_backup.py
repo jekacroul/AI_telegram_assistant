@@ -289,5 +289,10 @@ async def mark_messages_deleted(
         rows = list(result.scalars().all())
         for row in rows:
             row.deleted = True
+            # A deleted incoming message can no longer be answered — drop it
+            # from the pending queue and treat it as handled.
+            if not row.is_mine and not row.replied:
+                row.replied = True
+                row.pending_reason = None
         await session.commit()
         return len(rows)

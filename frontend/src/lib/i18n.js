@@ -412,6 +412,9 @@ export const translations = {
       qualityFilter: "Фильтр качества",
       qualityFilterDesc:
         "Отбраковывает неудачные варианты ответа модели. Если выключить — бот отправит первый сгенерированный вариант без проверки.",
+      autoReconcile: "Авто-очистка очереди",
+      autoReconcileDesc:
+        "При запуске приложения автоматически убирать из очереди диалоги, на которые ты уже ответил вручную в Telegram.",
       groupReplies: "Ответы в группах",
       groupRepliesDesc: "Как бот реагирует на сообщения в групповых чатах.",
       groupMention:
@@ -570,6 +573,11 @@ export const translations = {
       waitingReply: "ждут ответа",
       autoReply: "Авто-ответ",
       queueEmpty: "Очередь пуста — все сообщения обработаны",
+      clearQueue: "Очистить отвеченные",
+      clearQueueHint:
+        "Убрать из очереди диалоги, на которые ты уже ответил вручную",
+      clearQueueDone: "Очищено сообщений: ",
+      clearQueueEmpty: "Нечего очищать — отвеченных сообщений в очереди нет",
       inChat: "в ",
       expand: "Развернуть",
       collapse: "Свернуть",
@@ -972,6 +980,9 @@ export const translations = {
       qualityFilter: "Quality filter",
       qualityFilterDesc:
         "Rejects poor reply variants from the model. If disabled — the bot sends the first generated variant without checking.",
+      autoReconcile: "Auto queue cleanup",
+      autoReconcileDesc:
+        "On app startup, automatically remove chats from the queue that you already answered manually in Telegram.",
       groupReplies: "Group replies",
       groupRepliesDesc: "How the bot reacts to messages in group chats.",
       groupMention:
@@ -1130,6 +1141,11 @@ export const translations = {
       waitingReply: "awaiting reply",
       autoReply: "Auto-reply",
       queueEmpty: "Queue is empty — all messages handled",
+      clearQueue: "Clear answered",
+      clearQueueHint:
+        "Remove chats from the queue that you already answered manually",
+      clearQueueDone: "Messages cleared: ",
+      clearQueueEmpty: "Nothing to clear — no answered messages in the queue",
       inChat: "in ",
       expand: "Expand",
       collapse: "Collapse",

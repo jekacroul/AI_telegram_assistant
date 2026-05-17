@@ -29,7 +29,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from . import admin_bot
 from .config import settings
@@ -724,6 +724,9 @@ class TelegramService:
                     business_connection_id,
                     owner_id,
                 )
+                await self._clear_queue_after_manual_reply(
+                    chat_id, msg_id, content_text
+                )
                 await self._maybe_reanalyze(chat_id=chat_id)
                 return
 
@@ -987,6 +990,43 @@ class TelegramService:
             {"id": msg_id, "reason": "quality_filter", "quality_reason": reason},
         )
         await admin_bot.notify_pending(msg_id)
+
+    async def _clear_queue_after_manual_reply(
+        self, chat_id: int, owner_msg_id: int, owner_text: str
+    ) -> None:
+        """Mark earlier unanswered incoming messages as handled.
+
+        When the owner replies manually in Telegram, the bot sees the message
+        as ``is_mine`` but never sent it itself. Without this, those incoming
+        messages stay in the pending queue forever even though they were
+        already answered.
+        """
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Message.id).where(
+                    Message.chat_id == chat_id,
+                    Message.is_mine == False,  # noqa: E712
+                    Message.replied == False,  # noqa: E712
+                    Message.id < owner_msg_id,
+                )
+            )
+            ids = [row[0] for row in result.all()]
+            if not ids:
+                return
+            await session.execute(
+                update(Message)
+                .where(Message.id.in_(ids))
+                .values(replied=True, pending_reason=None, reply_text=owner_text)
+            )
+            await session.commit()
+        log.info(
+            "manual reply cleared %s queued message(s) in chat %s",
+            len(ids),
+            chat_id,
+        )
+        await message_bus.publish(
+            "queue_cleared", {"chat_id": chat_id, "ids": ids}
+        )
 
     async def _record_reply(
         self,
