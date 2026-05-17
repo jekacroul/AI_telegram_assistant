@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
+import { useLang } from "../hooks/useLang.js";
 
 function formatDate(iso) {
   if (!iso) return "";
@@ -19,6 +20,7 @@ function isMediaPlaceholder(text) {
 }
 
 export default function Dialogs() {
+  const { t } = useLang();
   const [chats, setChats] = useState([]);
   const [settings, setSettings] = useState({
     excluded_chats: [],
@@ -132,7 +134,7 @@ export default function Dialogs() {
   async function saveInterval() {
     const parsed = parseInt(intervalDraft, 10);
     if (!Number.isFinite(parsed) || parsed < 1) {
-      setError("Интервал должен быть целым числом ≥ 1");
+      setError(t("dialogs.intervalInvalid"));
       return;
     }
     setSavingInterval(true);
@@ -153,8 +155,8 @@ export default function Dialogs() {
   async function deleteSelectedBackup() {
     if (!selectedBackup) return;
     const version = versions.find((v) => v.id === selectedBackup);
-    const label = version ? `v${version.version}` : "выбранную версию";
-    if (!window.confirm(`Удалить ${label} резервной копии?`)) return;
+    const label = version ? `v${version.version}` : t("dialogs.selectedVersion");
+    if (!window.confirm(t("dialogs.confirmDeleteBackup", { label }))) return;
     setBusy(true);
     setError("");
     try {
@@ -171,11 +173,7 @@ export default function Dialogs() {
   async function deleteChatHistory() {
     if (selectedChatId == null || !selectedChat) return;
     const name = selectedChat.chat_name || `chat ${selectedChat.chat_id}`;
-    if (
-      !window.confirm(
-        `Удалить всю историю и чат «${name}»? Будут удалены все сообщения и резервные копии. Это действие нельзя отменить.`
-      )
-    ) {
+    if (!window.confirm(t("dialogs.confirmDeleteHistory", { name }))) {
       return;
     }
     setBusy(true);
@@ -209,14 +207,16 @@ export default function Dialogs() {
     <div className="space-y-4">
       <div className="card flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <div className="text-sm">
-            Резервные копии диалогов — снэпшоты по версиям.
-          </div>
+          <div className="text-sm">{t("dialogs.intro")}</div>
           <div className="text-xs text-muted">
-            Последний запуск: {formatDate(settings.last_run_at) || "—"}
+            {t("dialogs.lastRun", {
+              date: formatDate(settings.last_run_at) || t("common.dash"),
+            })}
           </div>
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-muted">Интервал, мин:</span>
+            <span className="text-xs text-muted">
+              {t("dialogs.intervalMin")}
+            </span>
             <input
               type="number"
               min={1}
@@ -232,13 +232,15 @@ export default function Dialogs() {
               onClick={saveInterval}
               disabled={!intervalDirty || savingInterval}
             >
-              {savingInterval ? "Сохраняю…" : "Сохранить"}
+              {savingInterval ? t("common.saving") : t("common.save")}
             </button>
             {intervalSaved && (
-              <span className="text-xs text-good">Сохранено</span>
+              <span className="text-xs text-good">{t("common.saved")}</span>
             )}
             {intervalDirty && !savingInterval && !intervalSaved && (
-              <span className="text-xs text-muted">не сохранено</span>
+              <span className="text-xs text-muted">
+                {t("dialogs.notSaved")}
+              </span>
             )}
           </div>
         </div>
@@ -248,7 +250,7 @@ export default function Dialogs() {
             disabled={busy}
             className="btn-primary disabled:opacity-50"
           >
-            {busy ? "Идёт бэкап…" : "Создать копии сейчас"}
+            {busy ? t("dialogs.backupRunning") : t("dialogs.runBackup")}
           </button>
         </div>
       </div>
@@ -260,11 +262,11 @@ export default function Dialogs() {
       <div className="grid grid-cols-12 gap-3 h-[70vh]">
         <div className="col-span-4 card overflow-y-auto p-0">
           <div className="px-3 py-2 text-xs text-muted border-b border-line sticky top-0 bg-panel">
-            Чаты ({chats.length})
+            {t("dialogs.chatsCount", { count: chats.length })}
           </div>
           {chats.length === 0 && (
             <div className="p-4 text-sm text-muted">
-              Сообщений ещё нет — собирай чаты через бота.
+              {t("dialogs.noMessages")}
             </div>
           )}
           {chats.map((c) => {
@@ -283,10 +285,13 @@ export default function Dialogs() {
                     {c.chat_name || `chat ${c.chat_id}`}
                   </div>
                   <div className="text-xs text-muted truncate">
-                    {c.message_count} сообщ. ·{" "}
+                    {t("dialogs.msgsAbbr", { count: c.message_count })} ·{" "}
                     {c.versions > 0
-                      ? `v${c.latest_version} (${c.versions} верс.)`
-                      : "нет копий"}
+                      ? t("dialogs.versionsInfo", {
+                          latest: c.latest_version,
+                          count: c.versions,
+                        })
+                      : t("dialogs.noBackups")}
                   </div>
                 </div>
                 <button
@@ -301,11 +306,11 @@ export default function Dialogs() {
                   }}
                   title={
                     isExcluded
-                      ? "Чат в исключениях — не бэкапить"
-                      : "Исключить из бэкапа"
+                      ? t("dialogs.excludedTitle")
+                      : t("dialogs.excludeTitle")
                   }
                 >
-                  {isExcluded ? "искл." : "вкл."}
+                  {isExcluded ? t("dialogs.excluded") : t("dialogs.included")}
                 </button>
               </div>
             );
@@ -325,7 +330,9 @@ export default function Dialogs() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-muted">Версия</label>
+                  <label className="text-xs text-muted">
+                    {t("dialogs.version")}
+                  </label>
                   <select
                     className="input flex-none py-1 text-sm"
                     style={{ width: "5rem" }}
@@ -337,7 +344,7 @@ export default function Dialogs() {
                     }
                   >
                     {versions.length === 0 && (
-                      <option value="">нет копий</option>
+                      <option value="">{t("dialogs.noBackups")}</option>
                     )}
                     {versions.map((v) => (
                       <option key={v.id} value={v.id}>
@@ -350,39 +357,40 @@ export default function Dialogs() {
                     onClick={exportSelectedBackup}
                     disabled={!selectedBackup || busy}
                   >
-                    Скачать TXT
+                    {t("dialogs.downloadTxt")}
                   </button>
                   <button
                     className="btn-secondary disabled:opacity-50"
                     onClick={deleteSelectedBackup}
                     disabled={!selectedBackup || busy}
-                    title="Удалить выбранную версию резервной копии"
+                    title={t("dialogs.deleteVersionTitle")}
                   >
-                    Удалить версию
+                    {t("dialogs.deleteVersion")}
                   </button>
                   <button
                     className="btn-secondary text-bad disabled:opacity-50"
                     onClick={deleteChatHistory}
                     disabled={busy}
-                    title="Удалить все сообщения и все версии резервных копий этого чата"
+                    title={t("dialogs.deleteHistoryTitle")}
                   >
-                    Удалить историю
+                    {t("dialogs.deleteHistory")}
                   </button>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1 bg-bg/50">
                 {loading && (
-                  <div className="text-xs text-muted">Загрузка…</div>
+                  <div className="text-xs text-muted">
+                    {t("common.loading")}
+                  </div>
                 )}
                 {!loading && backupData && backupData.messages.length === 0 && (
                   <div className="text-xs text-muted">
-                    В этой копии нет сообщений.
+                    {t("dialogs.emptyBackup")}
                   </div>
                 )}
                 {!loading && !backupData && versions.length === 0 && (
                   <div className="text-xs text-muted">
-                    Для этого чата ещё нет резервных копий. Нажми «Создать копии
-                    сейчас».
+                    {t("dialogs.noBackupsHint")}
                   </div>
                 )}
                 {backupData &&
@@ -402,7 +410,7 @@ export default function Dialogs() {
                       >
                         {!m.is_mine && (
                           <div className="text-[10px] text-muted mb-0.5">
-                            {m.sender_name || "собеседник"}
+                            {m.sender_name || t("dialogs.interlocutor")}
                           </div>
                         )}
                         {m.text && !(m.media_path && isMediaPlaceholder(m.text)) && (
@@ -430,7 +438,12 @@ export default function Dialogs() {
                           )}
                         {m.media_private && !m.media_path && (
                           <div className="mt-2 text-[11px] text-fg/70">
-                            Приватное {m.media_type === "photo" ? "фото" : "видео"} (одноразовое)
+                            {t("dialogs.privateMedia", {
+                              kind:
+                                m.media_type === "photo"
+                                  ? t("dialogs.photo")
+                                  : t("dialogs.video"),
+                            })}
                           </div>
                         )}
                         <div
@@ -447,7 +460,7 @@ export default function Dialogs() {
             </>
           ) : (
             <div className="p-6 text-sm text-muted">
-              Выбери чат слева, чтобы увидеть его резервную копию.
+              {t("dialogs.selectChat")}
             </div>
           )}
         </div>

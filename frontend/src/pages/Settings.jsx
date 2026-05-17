@@ -1,15 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
+import { useLang } from "../hooks/useLang.js";
+import { useTheme } from "../hooks/useTheme.js";
+import { LANGUAGES } from "../lib/i18n.js";
 
-const dayOptions = [
-  { value: 0, label: "Пн" },
-  { value: 1, label: "Вт" },
-  { value: 2, label: "Ср" },
-  { value: 3, label: "Чт" },
-  { value: 4, label: "Пт" },
-  { value: 5, label: "Сб" },
-  { value: 6, label: "Вс" },
-];
+const dayValues = [0, 1, 2, 3, 4, 5, 6];
 
 const timezoneOptions = [
   "Europe/Moscow",
@@ -28,6 +23,8 @@ function formatDelayPreview(seconds) {
 }
 
 export default function Settings() {
+  const { t, lang, setLang } = useLang();
+  const { theme, isDark, toggle: toggleTheme } = useTheme();
   const [s, setS] = useState({
     auto_reply: false,
     monitored_chats: [],
@@ -136,7 +133,7 @@ export default function Settings() {
       setModelsError("");
     } catch (e) {
       setModels([]);
-      setModelsError(e.message || "не удалось получить список моделей");
+      setModelsError(e.message || t("settings.modelsErrorShort"));
     }
     try {
       const n = await api.getNotifyChat();
@@ -181,7 +178,7 @@ export default function Settings() {
         admin_notify_auto: !!admin.admin_notify_auto,
         admin_notify_pending: !!admin.admin_notify_pending,
       });
-      setAdminMsg("Сохранено");
+      setAdminMsg(t("common.saved"));
     } catch (e) {
       setAdminError(e.message);
     } finally {
@@ -195,7 +192,7 @@ export default function Settings() {
     try {
       const res = await api.detectOwner();
       setAdmin((prev) => ({ ...prev, owner_chat_id: String(res.chat_id || "") }));
-      setAdminMsg("chat_id определён. Не забудь сохранить.");
+      setAdminMsg(t("settings.chatIdDetected"));
     } catch (e) {
       setAdminError(e.message);
     }
@@ -206,7 +203,7 @@ export default function Settings() {
     setAdminMsg("");
     try {
       await api.adminNotifyTest();
-      setAdminMsg("Тестовое уведомление отправлено.");
+      setAdminMsg(t("settings.testNotifySent"));
     } catch (e) {
       setAdminError(e.message);
     }
@@ -224,7 +221,7 @@ export default function Settings() {
         voice_reply_mode: whisper.voice_reply_mode,
         whisper_lazy_load: !!whisper.whisper_lazy_load,
       });
-      setWhisperMsg("Сохранено");
+      setWhisperMsg(t("common.saved"));
     } catch (e) {
       setWhisperErr(e.message);
     } finally {
@@ -244,7 +241,7 @@ export default function Settings() {
         search_cross_chat: !!rag.search_cross_chat,
         cross_chat_min_similarity: Number(rag.cross_chat_min_similarity),
       });
-      setRagMsg("Сохранено");
+      setRagMsg(t("common.saved"));
     } catch (e) {
       setRagErr(e.message);
     } finally {
@@ -287,7 +284,7 @@ export default function Settings() {
   async function runTest() {
     setTest({ loading: true });
     try {
-      const res = await api.testLLM("Привет, как дела?");
+      const res = await api.testLLM(t("settings.testPrompt"));
       setTest({ loading: false, ...res });
     } catch (e) {
       setTest({ loading: false, error: e.message });
@@ -303,7 +300,7 @@ export default function Settings() {
         chat_id: notify.chat_id.trim(),
         enabled: !!notify.enabled,
       });
-      setNotifyMsg("Сохранено");
+      setNotifyMsg(t("common.saved"));
     } catch (e) {
       setNotifyError(e.message);
     } finally {
@@ -317,7 +314,7 @@ export default function Settings() {
     try {
       const res = await api.detectNotifyChat();
       setNotify((prev) => ({ ...prev, chat_id: String(res.chat_id || "") }));
-      setNotifyMsg("chat_id определён. Не забудь сохранить.");
+      setNotifyMsg(t("settings.chatIdDetected"));
     } catch (e) {
       setNotifyError(e.message);
     }
@@ -358,7 +355,50 @@ export default function Settings() {
   return (
     <div className="space-y-4">
       <div className="card">
-        <div className="label">Модель LM Studio</div>
+        <div className="label">{t("settings.appearance")}</div>
+        <div className="grid md:grid-cols-2 gap-3 mt-3">
+          <div>
+            <div className="label">{t("settings.themeLabel")}</div>
+            <div className="flex gap-2 mt-2">
+              {[
+                { v: "light", label: t("settings.themeLight") },
+                { v: "dark", label: t("settings.themeDark") },
+              ].map((opt) => (
+                <button
+                  key={opt.v}
+                  className={`btn-secondary ${
+                    theme === opt.v ? "ring-2 ring-accent" : ""
+                  }`}
+                  onClick={() => {
+                    if ((opt.v === "dark") !== isDark) toggleTheme();
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="label">{t("settings.languageLabel")}</div>
+            <div className="flex gap-2 mt-2">
+              {LANGUAGES.map((code) => (
+                <button
+                  key={code}
+                  className={`btn-secondary ${
+                    lang === code ? "ring-2 ring-accent" : ""
+                  }`}
+                  onClick={() => setLang(code)}
+                >
+                  {t(`language.${code}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="label">{t("settings.lmModel")}</div>
         <select
           className="input mt-2"
           value={s.llm_model}
@@ -372,13 +412,12 @@ export default function Settings() {
         </select>
         {modelsError && (
           <div className="text-xs text-bad mt-1">
-            Не удалось загрузить список моделей: {modelsError}
+            {t("settings.modelsLoadError", { error: modelsError })}
           </div>
         )}
         {!modelsError && models.length === 0 && (
           <div className="text-xs text-muted mt-1">
-            LM Studio не вернул моделей. Загрузи модель в LM Studio и убедись,
-            что локальный сервер запущен на {`{OPENAI_BASE_URL}`}.
+            {t("settings.noModels", { OPENAI_BASE_URL: "{OPENAI_BASE_URL}" })}
           </div>
         )}
       </div>
@@ -392,9 +431,9 @@ export default function Settings() {
             onChange={(e) => setS({ ...s, auto_reply: e.target.checked })}
           />
           <div>
-            <div className="text-sm font-medium">Авто-ответ</div>
+            <div className="text-sm font-medium">{t("settings.autoReply")}</div>
             <div className="text-xs text-muted">
-              ⚠️ Бот будет отвечать без твоего подтверждения
+              {t("settings.autoReplyDesc")}
             </div>
           </div>
         </label>
@@ -412,28 +451,25 @@ export default function Settings() {
             }
           />
           <div>
-            <div className="text-sm font-medium">Фильтр качества</div>
+            <div className="text-sm font-medium">
+              {t("settings.qualityFilter")}
+            </div>
             <div className="text-xs text-muted">
-              Отбраковывает неудачные варианты ответа модели. Если выключить —
-              бот отправит первый сгенерированный вариант без проверки.
+              {t("settings.qualityFilterDesc")}
             </div>
           </div>
         </label>
       </div>
 
       <div className="card">
-        <div className="label">Ответы в группах</div>
+        <div className="label">{t("settings.groupReplies")}</div>
         <div className="text-xs text-muted mt-1">
-          Как бот реагирует на сообщения в групповых чатах.
+          {t("settings.groupRepliesDesc")}
         </div>
         <div className="space-y-1 mt-2">
           {[
-            {
-              v: "mention",
-              label:
-                "Только когда упомянули бота (@) или ответили на его сообщение",
-            },
-            { v: "all", label: "На все сообщения в группе" },
+            { v: "mention", label: t("settings.groupMention") },
+            { v: "all", label: t("settings.groupAll") },
           ].map((opt) => (
             <label key={opt.v} className="flex items-center gap-2 text-sm">
               <input
@@ -451,10 +487,9 @@ export default function Settings() {
       <div className="card">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="label">Расписание</div>
+            <div className="label">{t("settings.schedule")}</div>
             <div className="text-xs text-muted mt-1">
-              Ограничивает только авто-ответы. Вне расписания сообщения
-              попадут в ожидание.
+              {t("settings.scheduleDesc")}
             </div>
           </div>
           <span
@@ -462,7 +497,9 @@ export default function Settings() {
               schedule.active ? "bg-good/15 text-good" : "bg-bad/15 text-bad"
             }`}
           >
-            {schedule.active ? "Сейчас активен 🟢" : "Сейчас не активен 🔴"}
+            {schedule.active
+              ? t("settings.scheduleActive")
+              : t("settings.scheduleInactive")}
           </span>
         </div>
 
@@ -476,16 +513,18 @@ export default function Settings() {
             }
           />
           <div>
-            <div className="text-sm font-medium">Ограничить часы работы</div>
+            <div className="text-sm font-medium">
+              {t("settings.limitHours")}
+            </div>
             <div className="text-xs text-muted">
-              Если выключено — бот отвечает всегда, как раньше.
+              {t("settings.limitHoursDesc")}
             </div>
           </div>
         </label>
 
         <div className="grid md:grid-cols-3 gap-3 mt-4">
           <div>
-            <div className="label">Часовой пояс</div>
+            <div className="label">{t("settings.timezone")}</div>
             <select
               className="input mt-1"
               value={schedule.timezone}
@@ -501,7 +540,7 @@ export default function Settings() {
             </select>
           </div>
           <div>
-            <div className="label">От</div>
+            <div className="label">{t("settings.from")}</div>
             <input
               className="input mt-1"
               type="time"
@@ -512,7 +551,7 @@ export default function Settings() {
             />
           </div>
           <div>
-            <div className="label">До</div>
+            <div className="label">{t("settings.to")}</div>
             <input
               className="input mt-1"
               type="time"
@@ -525,19 +564,19 @@ export default function Settings() {
         </div>
 
         <div className="mt-4">
-          <div className="label">Дни недели</div>
+          <div className="label">{t("settings.weekdays")}</div>
           <div className="flex flex-wrap gap-2 mt-2">
-            {dayOptions.map((d) => (
+            {dayValues.map((d) => (
               <label
-                key={d.value}
+                key={d}
                 className="flex items-center gap-2 text-sm rounded-lg border border-line px-3 py-2"
               >
                 <input
                   type="checkbox"
-                  checked={schedule.days.includes(d.value)}
-                  onChange={() => toggleScheduleDay(d.value)}
+                  checked={schedule.days.includes(d)}
+                  onChange={() => toggleScheduleDay(d)}
                 />
-                {d.label}
+                {t("settings.days")[d]}
               </label>
             ))}
           </div>
@@ -545,13 +584,13 @@ export default function Settings() {
 
         {!schedule.active && schedule.next_active_text && (
           <div className="text-sm text-muted mt-4">
-            Следующий период: {schedule.next_active_text}
+            {t("settings.nextPeriod", { text: schedule.next_active_text })}
           </div>
         )}
       </div>
 
       <div className="card">
-        <div className="label">Задержка ответа</div>
+        <div className="label">{t("settings.replyDelay")}</div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -563,11 +602,10 @@ export default function Settings() {
           />
           <div>
             <div className="text-sm font-medium">
-              Имитировать время обдумывания
+              {t("settings.simulateThinking")}
             </div>
             <div className="text-xs text-muted">
-              Если за это время придёт новое сообщение из того же чата, старый
-              ответ отменится и бот подготовит новый по полной истории.
+              {t("settings.simulateThinkingDesc")}
             </div>
           </div>
         </label>
@@ -575,7 +613,9 @@ export default function Settings() {
         <div className="grid md:grid-cols-2 gap-4 mt-4">
           <div>
             <div className="flex justify-between text-sm">
-              <span>От {delay.delay_min_seconds} сек</span>
+              <span>
+                {t("settings.fromSec", { value: delay.delay_min_seconds })}
+              </span>
               <span className="text-muted">{delayBounds.min}–{delayBounds.max}</span>
             </div>
             <input
@@ -592,7 +632,9 @@ export default function Settings() {
           </div>
           <div>
             <div className="flex justify-between text-sm">
-              <span>До {delay.delay_max_seconds} сек</span>
+              <span>
+                {t("settings.toSec", { value: delay.delay_max_seconds })}
+              </span>
               <span className="text-muted">{delayBounds.min}–{delayBounds.max}</span>
             </div>
             <input
@@ -610,20 +652,22 @@ export default function Settings() {
         </div>
 
         <div className="text-sm text-muted mt-3">
-          Бот будет отвечать через {formatDelayPreview(delay.delay_min_seconds)}–
-          {formatDelayPreview(delay.delay_max_seconds)} минуты
+          {t("settings.delayPreview", {
+            min: formatDelayPreview(delay.delay_min_seconds),
+            max: formatDelayPreview(delay.delay_max_seconds),
+          })}
         </div>
       </div>
 
 
       <div className="card">
-        <div className="label">Чаты под наблюдением</div>
+        <div className="label">{t("settings.monitoredChats")}</div>
         <div className="text-xs text-muted mt-1">
-          Если ничего не выбрано — отвечает во всех чатах.
+          {t("settings.monitoredChatsDesc")}
         </div>
         <div className="mt-2 space-y-1 max-h-72 overflow-auto">
           {chats.length === 0 && (
-            <div className="text-sm text-muted">Чатов ещё не было.</div>
+            <div className="text-sm text-muted">{t("settings.noChats")}</div>
           )}
           {chats.map((c) => (
             <label key={c.chat_id} className="flex items-center gap-2 text-sm">
@@ -634,7 +678,7 @@ export default function Settings() {
               />
               <span>{c.chat_name || c.chat_id}</span>
               <span className="text-muted text-xs ml-auto">
-                {c.count} сообщ.
+                {t("settings.msgsAbbr", { count: c.count })}
               </span>
             </label>
           ))}
@@ -643,16 +687,16 @@ export default function Settings() {
 
       <div className="flex gap-2">
         <button className="btn-primary" onClick={save} disabled={saving}>
-          Сохранить
+          {t("common.save")}
         </button>
         <button className="btn-secondary" onClick={runTest}>
-          Test model
+          {t("settings.testModel")}
         </button>
         {error && <span className="text-bad text-sm self-center">{error}</span>}
       </div>
 
       <div className="card">
-        <div className="label">Уведомления</div>
+        <div className="label">{t("settings.notifications")}</div>
         <label className="flex items-start gap-3 mt-2">
           <input
             type="checkbox"
@@ -664,31 +708,31 @@ export default function Settings() {
           />
           <div>
             <div className="text-sm font-medium">
-              Уведомлять когда бот отвечает
+              {t("settings.notifyOnReply")}
             </div>
             <div className="text-xs text-muted">
-              Бот пришлёт сообщение в указанный чат после каждого авто-ответа.
+              {t("settings.notifyOnReplyDesc")}
             </div>
           </div>
         </label>
 
         <div className="mt-3">
-          <div className="label">Ваш chat_id</div>
+          <div className="label">{t("settings.yourChatId")}</div>
           <div className="flex gap-2 mt-1">
             <input
               className="input flex-1"
-              placeholder="например, 123456789"
+              placeholder={t("settings.chatIdPlaceholder")}
               value={notify.chat_id}
               onChange={(e) =>
                 setNotify((prev) => ({ ...prev, chat_id: e.target.value }))
               }
             />
             <button className="btn-secondary" onClick={detectNotify}>
-              Определить автоматически
+              {t("settings.detectAuto")}
             </button>
           </div>
           <div className="text-xs text-muted mt-1">
-            Напишите боту /start в личку, затем нажмите «Определить автоматически».
+            {t("settings.detectHint")}
           </div>
         </div>
 
@@ -698,7 +742,7 @@ export default function Settings() {
             onClick={saveNotify}
             disabled={notifySaving}
           >
-            Сохранить уведомления
+            {t("settings.saveNotifications")}
           </button>
           {notifyMsg && (
             <span className="text-good text-sm">{notifyMsg}</span>
@@ -710,10 +754,9 @@ export default function Settings() {
       </div>
 
       <div className="card">
-        <div className="label">Admin Panel</div>
+        <div className="label">{t("settings.adminPanel")}</div>
         <div className="text-xs text-muted mt-1">
-          Бот принимает админ-команды только из указанного чата. Напишите
-          /start боту в личку для активации.
+          {t("settings.adminPanelDesc")}
         </div>
 
         <div className="mt-3">
@@ -721,14 +764,14 @@ export default function Settings() {
           <div className="flex gap-2 mt-1">
             <input
               className="input flex-1"
-              placeholder="например, 123456789"
+              placeholder={t("settings.chatIdPlaceholder")}
               value={admin.owner_chat_id}
               onChange={(e) =>
                 setAdmin((prev) => ({ ...prev, owner_chat_id: e.target.value }))
               }
             />
             <button className="btn-secondary" onClick={detectOwner}>
-              Определить автоматически
+              {t("settings.detectAuto")}
             </button>
           </div>
         </div>
@@ -747,11 +790,10 @@ export default function Settings() {
           />
           <div>
             <div className="text-sm font-medium">
-              Уведомления об авто-ответах
+              {t("settings.adminNotifyAuto")}
             </div>
             <div className="text-xs text-muted">
-              Бот пришлёт уведомление с кнопками оценки после каждого
-              авто-ответа.
+              {t("settings.adminNotifyAutoDesc")}
             </div>
           </div>
         </label>
@@ -770,10 +812,10 @@ export default function Settings() {
           />
           <div>
             <div className="text-sm font-medium">
-              Уведомления о новых сообщениях
+              {t("settings.adminNotifyPending")}
             </div>
             <div className="text-xs text-muted">
-              Бот сообщит о сообщениях, попавших в очередь на ручной ответ.
+              {t("settings.adminNotifyPendingDesc")}
             </div>
           </div>
         </label>
@@ -784,10 +826,10 @@ export default function Settings() {
             onClick={saveAdmin}
             disabled={adminSaving}
           >
-            Сохранить
+            {t("common.save")}
           </button>
           <button className="btn-secondary" onClick={testAdminNotify}>
-            Отправить тестовое уведомление
+            {t("settings.sendTestNotify")}
           </button>
           {adminMsg && <span className="text-good text-sm">{adminMsg}</span>}
           {adminError && (
@@ -798,7 +840,7 @@ export default function Settings() {
 
       <div className="card">
         <div className="flex items-center justify-between gap-3">
-          <div className="label">Голосовые сообщения</div>
+          <div className="label">{t("settings.voiceMessages")}</div>
           <span
             className={`px-2 py-0.5 rounded-full text-xs ${
               whisper.device === "cuda"
@@ -807,14 +849,14 @@ export default function Settings() {
             }`}
           >
             {whisper.device === "cuda"
-              ? "Whisper использует: CUDA ✅"
-              : "CPU ⚠️ (медленно)"}
+              ? t("settings.whisperCuda")
+              : t("settings.whisperCpu")}
           </span>
         </div>
 
         {!whisper.ffmpeg_available && (
           <div className="text-xs text-bad mt-2">
-            ⚠️ ffmpeg не установлен или не в PATH. Установи: <code>winget install ffmpeg</code> и перезапусти терминал.
+            {t("settings.ffmpegWarning")}
           </div>
         )}
 
@@ -831,9 +873,11 @@ export default function Settings() {
             }
           />
           <div>
-            <div className="text-sm font-medium">Транскрибировать голосовые</div>
+            <div className="text-sm font-medium">
+              {t("settings.transcribeVoice")}
+            </div>
             <div className="text-xs text-muted">
-              Использует локальную модель Whisper для перевода речи в текст.
+              {t("settings.transcribeVoiceDesc")}
             </div>
           </div>
         </label>
@@ -842,7 +886,7 @@ export default function Settings() {
           <>
             <div className="grid md:grid-cols-2 gap-3 mt-4">
               <div>
-                <div className="label">Модель</div>
+                <div className="label">{t("settings.modelLabel")}</div>
                 <select
                   className="input mt-1"
                   value={whisper.whisper_model}
@@ -861,7 +905,9 @@ export default function Settings() {
                 </select>
               </div>
               <div>
-                <div className="label">Язык</div>
+                <div className="label">
+                  {t("settings.languageLabelVoice")}
+                </div>
                 <select
                   className="input mt-1"
                   value={whisper.whisper_language}
@@ -872,9 +918,9 @@ export default function Settings() {
                     }))
                   }
                 >
-                  <option value="ru">Русский</option>
-                  <option value="en">English</option>
-                  <option value="auto">Автоопределение</option>
+                  <option value="ru">{t("settings.langRu")}</option>
+                  <option value="en">{t("settings.langEn")}</option>
+                  <option value="auto">{t("settings.langAuto")}</option>
                 </select>
               </div>
             </div>
@@ -893,25 +939,21 @@ export default function Settings() {
               />
               <div>
                 <div className="text-sm font-medium">
-                  Освобождать VRAM после транскрипции (lazy_load)
+                  {t("settings.lazyLoad")}
                 </div>
                 <div className="text-xs text-muted">
-                  Whisper загружается перед обработкой и выгружается сразу
-                  после. Полезно если 12GB VRAM делит с крупной LLM.
+                  {t("settings.lazyLoadDesc")}
                 </div>
               </div>
             </label>
 
             <div className="mt-4">
-              <div className="label">Реакция на голосовые</div>
+              <div className="label">{t("settings.voiceReaction")}</div>
               <div className="space-y-1 mt-2">
                 {[
-                  { v: "text", label: "Отвечать текстом автоматически" },
-                  {
-                    v: "pending",
-                    label: "Добавлять в очередь для ручного ответа",
-                  },
-                  { v: "skip", label: "Игнорировать голосовые" },
+                  { v: "text", label: t("settings.voiceText") },
+                  { v: "pending", label: t("settings.voicePending") },
+                  { v: "skip", label: t("settings.voiceSkip") },
                 ].map((opt) => (
                   <label
                     key={opt.v}
@@ -942,11 +984,11 @@ export default function Settings() {
             onClick={saveWhisper}
             disabled={whisperSaving}
           >
-            Сохранить
+            {t("common.save")}
           </button>
           {whisper.model_loaded && (
             <button className="btn-secondary" onClick={unloadWhisper}>
-              Выгрузить Whisper из VRAM
+              {t("settings.unloadWhisper")}
             </button>
           )}
           {whisperMsg && (
@@ -959,7 +1001,7 @@ export default function Settings() {
       </div>
 
       <div className="card">
-        <div className="label">Векторная память (RAG)</div>
+        <div className="label">{t("settings.ragMemory")}</div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -971,11 +1013,10 @@ export default function Settings() {
           />
           <div>
             <div className="text-sm font-medium">
-              Искать контекст по всей истории
+              {t("settings.ragSearchAll")}
             </div>
             <div className="text-xs text-muted">
-              Бот находит релевантные сообщения из всей переписки, а не только
-              последние 8.
+              {t("settings.ragSearchAllDesc")}
             </div>
           </div>
         </label>
@@ -985,7 +1026,9 @@ export default function Settings() {
             <div className="mt-4">
               <div className="flex justify-between text-sm">
                 <span>
-                  Минимальная схожесть: {Number(rag.min_similarity).toFixed(2)}
+                  {t("settings.minSimilarity", {
+                    value: Number(rag.min_similarity).toFixed(2),
+                  })}
                 </span>
                 <span className="text-muted">0.40–0.90</span>
               </div>
@@ -1004,12 +1047,12 @@ export default function Settings() {
                 }
               />
               <div className="text-xs text-muted mt-1">
-                Ниже = больше результатов, но менее точные.
+                {t("settings.minSimilarityDesc")}
               </div>
             </div>
 
             <div className="mt-4">
-              <div className="label">Максимум результатов</div>
+              <div className="label">{t("settings.maxResults")}</div>
               <input
                 className="input mt-1 w-32"
                 type="number"
@@ -1038,9 +1081,11 @@ export default function Settings() {
                 }
               />
               <div>
-                <div className="text-sm font-medium">Искать по всем чатам</div>
+                <div className="text-sm font-medium">
+                  {t("settings.searchCrossChat")}
+                </div>
                 <div className="text-xs text-muted">
-                  Находит повторяющиеся темы у разных собеседников.
+                  {t("settings.searchCrossChatDesc")}
                 </div>
               </div>
             </label>
@@ -1049,8 +1094,11 @@ export default function Settings() {
               <div className="mt-4">
                 <div className="flex justify-between text-sm">
                   <span>
-                    Порог для других чатов:{" "}
-                    {Number(rag.cross_chat_min_similarity).toFixed(2)}
+                    {t("settings.crossChatThreshold", {
+                      value: Number(
+                        rag.cross_chat_min_similarity
+                      ).toFixed(2),
+                    })}
                   </span>
                   <span className="text-muted">0.50–0.95</span>
                 </div>
@@ -1079,7 +1127,7 @@ export default function Settings() {
             onClick={saveRag}
             disabled={ragSaving}
           >
-            Сохранить
+            {t("common.save")}
           </button>
           {ragMsg && <span className="text-good text-sm">{ragMsg}</span>}
           {ragErr && <span className="text-bad text-sm">{ragErr}</span>}
@@ -1088,7 +1136,7 @@ export default function Settings() {
 
       {test && (
         <div className="card">
-          <div className="label">Результат теста</div>
+          <div className="label">{t("settings.testResult")}</div>
           {test.loading && <div className="text-sm text-muted">...</div>}
           {test.error && <div className="text-bad text-sm">{test.error}</div>}
           {test.variants && (

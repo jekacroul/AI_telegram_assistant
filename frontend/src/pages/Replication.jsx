@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
+import { useLang } from "../hooks/useLang.js";
 
-function formatBytes(bytes) {
-  if (!bytes || bytes <= 0) return "0 Б";
-  const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+function formatBytes(bytes, t) {
+  if (!bytes || bytes <= 0) return t("replication.zeroBytes");
+  const units = t("replication.bytes");
   let value = bytes;
   let i = 0;
   while (value >= 1024 && i < units.length - 1) {
@@ -13,33 +14,39 @@ function formatBytes(bytes) {
   return `${value.toFixed(value < 10 ? 2 : 1)} ${units[i]}`;
 }
 
-function formatDuration(ms) {
+function formatDuration(ms, t) {
   if (!ms || ms <= 0) return "—";
-  if (ms < 1000) return `${ms} мс`;
+  if (ms < 1000) return t("replication.ms", { value: ms });
   const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)} с`;
+  if (s < 60) return t("replication.sec", { value: s.toFixed(1) });
   const m = Math.floor(s / 60);
   const rem = Math.floor(s % 60);
-  return `${m}м ${rem}с`;
+  return t("replication.minSec", { m, s: rem });
 }
 
-const STATUS_LABELS = {
-  running: { text: "идёт", cls: "text-accent" },
-  done: { text: "успех", cls: "text-good" },
-  error: { text: "ошибка", cls: "text-bad" },
-  cancelled: { text: "отменено", cls: "text-muted" },
-  deleted: { text: "удалён", cls: "text-bad" },
+const STATUS_CLS = {
+  running: "text-accent",
+  done: "text-good",
+  error: "text-bad",
+  cancelled: "text-muted",
+  deleted: "text-bad",
 };
 
-const PHASE_LABELS = {
-  starting: "запуск...",
-  copying: "копирование",
-  done: "успех",
-  error: "ошибка",
-  cancelled: "отменено",
-};
+function statusLabel(status, t) {
+  const text = t(`replication.statuses.${status}`);
+  return {
+    text: text === `replication.statuses.${status}` ? status : text,
+    cls: STATUS_CLS[status] || "text-muted",
+  };
+}
+
+function phaseLabel(phase, t) {
+  const text = t(`replication.phases.${phase}`);
+  return text === `replication.phases.${phase}` ? phase : text;
+}
 
 export default function Replication() {
+  const { t } = useLang();
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [progress, setProgress] = useState(null);
@@ -116,7 +123,7 @@ export default function Replication() {
         delete_protection: form.delete_protection,
         list_limit: Number(form.list_limit),
       });
-      setSavedMsg("Сохранено");
+      setSavedMsg(t("common.saved"));
       setTimeout(() => setSavedMsg(""), 2000);
       refresh();
     } catch (err) {
@@ -132,7 +139,7 @@ export default function Replication() {
     setProgress(null);
     try {
       const res = await api.runReplication();
-      if (!res.started) setError(res.reason || "не удалось запустить");
+      if (!res.started) setError(res.reason || t("replication.failedStart"));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -175,9 +182,11 @@ export default function Replication() {
   async function removeRun(run) {
     const isProtected = run.protected && form.delete_protection;
     if (isProtected) {
-      const confirmText = `Включена защита от случайных удалений.\n\nУдалить реплику от ${
-        run.started_at ? new Date(run.started_at).toLocaleString() : "—"
-      }?\nФайл будет удалён безвозвратно.`;
+      const confirmText = t("replication.confirmDelete", {
+        date: run.started_at
+          ? new Date(run.started_at).toLocaleString()
+          : "—",
+      });
       if (!window.confirm(confirmText)) return;
     }
     setError("");
@@ -206,17 +215,17 @@ export default function Replication() {
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat
-          title="Исходная БД"
-          value={formatBytes(status?.source_bytes || 0)}
+          title={t("replication.sourceDb")}
+          value={formatBytes(status?.source_bytes || 0, t)}
           hint={status?.source_path}
         />
         <Stat
-          title="Реплик хранится"
+          title={t("replication.replicasStored")}
           value={runs.filter((r) => r.exists).length}
-          hint={`всего записей: ${runs.length}`}
+          hint={t("replication.totalRecords", { count: runs.length })}
         />
         <Stat
-          title="Последняя репликация"
+          title={t("replication.lastReplication")}
           value={
             status?.last_run?.finished_at
               ? new Date(status.last_run.finished_at).toLocaleString()
@@ -224,19 +233,27 @@ export default function Replication() {
           }
           hint={
             status?.last_run?.status
-              ? STATUS_LABELS[status.last_run.status]?.text
+              ? statusLabel(status.last_run.status, t).text
               : ""
           }
         />
         <Stat
-          title="Защита от удаления"
-          value={form.delete_protection ? "включена" : "выключена"}
-          hint={form.delete_protection ? "подтверждение обязательно" : "выкл"}
+          title={t("replication.deleteProtection")}
+          value={
+            form.delete_protection
+              ? t("replication.enabled")
+              : t("replication.disabled")
+          }
+          hint={
+            form.delete_protection
+              ? t("replication.confirmRequired")
+              : t("replication.off")
+          }
         />
       </div>
 
       <form className="card space-y-4" onSubmit={saveSettings}>
-        <div className="label">Настройки репликации</div>
+        <div className="label">{t("replication.settings")}</div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex items-center gap-2 text-sm">
@@ -247,7 +264,7 @@ export default function Replication() {
                 setForm({ ...form, enabled: e.target.checked })
               }
             />
-            <span>Автоматическая репликация по расписанию</span>
+            <span>{t("replication.autoSchedule")}</span>
           </label>
 
           <label className="flex items-center gap-2 text-sm">
@@ -258,11 +275,13 @@ export default function Replication() {
                 setForm({ ...form, delete_protection: e.target.checked })
               }
             />
-            <span>Защита от случайных удалений реплик</span>
+            <span>{t("replication.protectReplicas")}</span>
           </label>
 
           <label className="text-sm space-y-1">
-            <div className="text-muted text-xs">Интервал (минут)</div>
+            <div className="text-muted text-xs">
+              {t("replication.intervalMinutes")}
+            </div>
             <input
               type="number"
               min="1"
@@ -277,7 +296,7 @@ export default function Replication() {
 
           <label className="text-sm space-y-1">
             <div className="text-muted text-xs">
-              Сколько копий хранить (старые удаляются автоматически)
+              {t("replication.retentionLabel")}
             </div>
             <input
               type="number"
@@ -293,7 +312,7 @@ export default function Replication() {
 
           <label className="text-sm space-y-1">
             <div className="text-muted text-xs">
-              Сколько записей показывать в истории
+              {t("replication.listLimitLabel")}
             </div>
             <input
               type="number"
@@ -309,7 +328,7 @@ export default function Replication() {
 
           <label className="text-sm space-y-1 md:col-span-2">
             <div className="text-muted text-xs">
-              Папка для реплик (относительно корня проекта или абсолютный путь)
+              {t("replication.targetDirLabel")}
             </div>
             <input
               type="text"
@@ -329,7 +348,7 @@ export default function Replication() {
             className="btn-primary"
             disabled={saving}
           >
-            {saving ? "Сохраняю..." : "Сохранить настройки"}
+            {saving ? t("common.saving") : t("replication.saveSettings")}
           </button>
           <button
             type="button"
@@ -337,7 +356,9 @@ export default function Replication() {
             onClick={runNow}
             disabled={busy || isRunning}
           >
-            {isRunning ? "Идёт репликация..." : "Запустить сейчас"}
+            {isRunning
+              ? t("replication.replicationRunning")
+              : t("replication.runNow")}
           </button>
           {isRunning && (
             <button
@@ -345,7 +366,7 @@ export default function Replication() {
               className="btn-danger"
               onClick={cancel}
             >
-              Отменить
+              {t("replication.cancel")}
             </button>
           )}
           {savedMsg && (
@@ -361,19 +382,22 @@ export default function Replication() {
         <div className="card">
           <div className="flex flex-wrap gap-4 text-sm items-center">
             <span>
-              Этап:{" "}
-              <b>{PHASE_LABELS[progress.phase] || progress.phase}</b>
+              {t("replication.phaseLabel")}
+              <b>{phaseLabel(progress.phase, t)}</b>
             </span>
             {progress.phase === "copying" && (
               <>
                 <span>
-                  Скопировано:{" "}
-                  {formatBytes(progress.copied_bytes || 0)} /{" "}
-                  {formatBytes(progress.total_bytes || 0)}
+                  {t("replication.copied", {
+                    copied: formatBytes(progress.copied_bytes || 0, t),
+                    total: formatBytes(progress.total_bytes || 0, t),
+                  })}
                 </span>
                 <span>
-                  Страниц: {progress.copied_pages || 0} /{" "}
-                  {progress.total_pages || 0}
+                  {t("replication.pages", {
+                    copied: progress.copied_pages || 0,
+                    total: progress.total_pages || 0,
+                  })}
                 </span>
                 {percent != null && <span>{percent.toFixed(1)}%</span>}
               </>
@@ -381,25 +405,36 @@ export default function Replication() {
             {progress.phase === "done" && (
               <>
                 <span className="text-good">
-                  Реплика создана:{" "}
+                  {t("replication.replicaCreated")}
                   <code className="text-xs">{progress.target}</code>
                 </span>
-                <span>Размер: {formatBytes(progress.copied_bytes || 0)}</span>
-                <span>Время: {formatDuration(progress.duration_ms)}</span>
+                <span>
+                  {t("replication.sizeLabel", {
+                    value: formatBytes(progress.copied_bytes || 0, t),
+                  })}
+                </span>
+                <span>
+                  {t("replication.timeLabel", {
+                    value: formatDuration(progress.duration_ms, t),
+                  })}
+                </span>
                 {progress.pruned > 0 && (
                   <span className="text-muted">
-                    удалено старых: {progress.pruned}
+                    {t("replication.prunedOld", { count: progress.pruned })}
                   </span>
                 )}
               </>
             )}
             {progress.phase === "error" && (
               <span className="text-bad">
-                Ошибка: {progress.error || "неизвестная ошибка"}
+                {t("replication.errorPrefix")}
+                {progress.error || t("replication.unknownError")}
               </span>
             )}
             {progress.phase === "cancelled" && (
-              <span className="text-muted">Отменено пользователем</span>
+              <span className="text-muted">
+                {t("replication.cancelledByUser")}
+              </span>
             )}
           </div>
           {progress.phase === "copying" && percent != null && (
@@ -414,16 +449,18 @@ export default function Replication() {
       )}
 
       <div className="card">
-        <div className="text-sm text-muted mb-2">История репликаций</div>
+        <div className="text-sm text-muted mb-2">
+          {t("replication.history")}
+        </div>
         <table className="w-full text-sm">
           <thead className="text-muted">
             <tr className="text-left">
-              <th className="py-1">Начало</th>
-              <th>Длительность</th>
-              <th>Размер</th>
-              <th>Триггер</th>
-              <th>Статус</th>
-              <th>Файл</th>
+              <th className="py-1">{t("replication.thStart")}</th>
+              <th>{t("replication.thDuration")}</th>
+              <th>{t("replication.thSize")}</th>
+              <th>{t("replication.thTrigger")}</th>
+              <th>{t("replication.thStatus")}</th>
+              <th>{t("replication.thFile")}</th>
               <th></th>
             </tr>
           </thead>
@@ -431,15 +468,12 @@ export default function Replication() {
             {runs.length === 0 && (
               <tr>
                 <td colSpan="7" className="text-muted py-3">
-                  Репликаций ещё не было.
+                  {t("replication.noRuns")}
                 </td>
               </tr>
             )}
             {runs.map((r) => {
-              const st = STATUS_LABELS[r.status] || {
-                text: r.status,
-                cls: "text-muted",
-              };
+              const st = statusLabel(r.status, t);
               const logState = runLogs[r.id];
               return (
                 <React.Fragment key={r.id}>
@@ -449,10 +483,12 @@ export default function Replication() {
                         ? new Date(r.started_at).toLocaleString()
                         : "—"}
                     </td>
-                    <td>{formatDuration(r.duration_ms)}</td>
-                    <td>{formatBytes(r.copied_bytes || 0)}</td>
+                    <td>{formatDuration(r.duration_ms, t)}</td>
+                    <td>{formatBytes(r.copied_bytes || 0, t)}</td>
                     <td className="text-muted">
-                      {r.trigger === "schedule" ? "по расписанию" : "вручную"}
+                      {r.trigger === "schedule"
+                        ? t("replication.bySchedule")
+                        : t("replication.manual")}
                     </td>
                     <td>
                       <span className={st.cls}>{st.text}</span>
@@ -466,11 +502,13 @@ export default function Replication() {
                       <code className="break-all">{r.target_path}</code>
                       {!r.exists && r.status === "done" && (
                         <div className="text-muted text-xs mt-1">
-                          файл отсутствует
+                          {t("replication.fileMissing")}
                         </div>
                       )}
                       {r.protected && (
-                        <div className="text-muted text-xs mt-1">защищена</div>
+                        <div className="text-muted text-xs mt-1">
+                          {t("replication.protectedLabel")}
+                        </div>
                       )}
                     </td>
                     <td className="text-right">
@@ -481,10 +519,10 @@ export default function Replication() {
                             onClick={() => toggleLog(r)}
                           >
                             {loadingLogId === r.id
-                              ? "Загрузка..."
+                              ? t("replication.loadingLog")
                               : logState?.open
-                                ? "Скрыть лог"
-                                : "Лог"}
+                                ? t("replication.hideLog")
+                                : t("replication.log")}
                           </button>
                         )}
                         {r.status !== "running" && (
@@ -492,7 +530,7 @@ export default function Replication() {
                             className="btn-danger"
                             onClick={() => removeRun(r)}
                           >
-                            Удалить
+                            {t("common.delete")}
                           </button>
                         )}
                       </div>
@@ -503,7 +541,7 @@ export default function Replication() {
                       <td colSpan="7" className="pb-3">
                         <div className="mt-2 rounded-lg border border-line bg-bg p-3">
                           <div className="flex flex-wrap gap-2 items-center text-xs text-muted mb-2">
-                            <span>Лог репликации #{r.id}</span>
+                            <span>{t("replication.runLog", { id: r.id })}</span>
                             {logState.data?.log_path && (
                               <code className="break-all">
                                 {logState.data.log_path}
@@ -519,8 +557,8 @@ export default function Replication() {
                               }`}
                             >
                               {r.status === "error"
-                                ? "Ошибка: "
-                                : "Резюме: "}
+                                ? t("replication.errorPrefix")
+                                : t("replication.summary")}
                               {logState.data.error}
                             </div>
                           )}
@@ -530,7 +568,7 @@ export default function Replication() {
                             </pre>
                           ) : (
                             <div className="text-muted text-sm">
-                              Записи в логе не найдены.
+                              {t("replication.noLog")}
                             </div>
                           )}
                         </div>

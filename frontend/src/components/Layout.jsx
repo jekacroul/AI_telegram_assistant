@@ -10,30 +10,37 @@ import Settings from "../pages/Settings.jsx";
 import Stats from "../pages/Stats.jsx";
 import QuickReplies from "../pages/QuickReplies.jsx";
 import Replication from "../pages/Replication.jsx";
+import { useLang } from "../hooks/useLang.js";
 
 const PAGE_META = {
-  "/": { title: "Дашборд", subtitle: "Обзор ассистента" },
-  "/dialogs": { title: "Диалоги", subtitle: "Резервные копии переписок" },
-  "/training": { title: "Обучение", subtitle: "Датасеты и fine-tuning" },
-  "/style": { title: "Стиль", subtitle: "Профиль общения и персоны" },
-  "/stats": { title: "Статистика", subtitle: "Активность и качество" },
-  "/quick-replies": { title: "Быстрые ответы", subtitle: "Шаблоны ответов" },
-  "/replication": { title: "Репликация", subtitle: "Резервное копирование базы" },
-  "/settings": { title: "Настройки", subtitle: "Конфигурация ассистента" },
+  "/": { titleKey: "nav.dashboard", subtitleKey: "subtitle.dashboard" },
+  "/dialogs": { titleKey: "nav.dialogs", subtitleKey: "subtitle.dialogs" },
+  "/training": { titleKey: "nav.training", subtitleKey: "subtitle.training" },
+  "/style": { titleKey: "nav.style", subtitleKey: "subtitle.style" },
+  "/stats": { titleKey: "nav.stats", subtitleKey: "subtitle.stats" },
+  "/quick-replies": {
+    titleKey: "nav.quickReplies",
+    subtitleKey: "subtitle.quickReplies",
+  },
+  "/replication": {
+    titleKey: "nav.replication",
+    subtitleKey: "subtitle.replication",
+  },
+  "/settings": { titleKey: "nav.settings", subtitleKey: "subtitle.settings" },
 };
 
 export default function Layout() {
   const location = useLocation();
-  const meta = PAGE_META[location.pathname] || {
-    title: "Telegram AI",
-    subtitle: "",
-  };
+  const { t } = useLang();
+  const meta = PAGE_META[location.pathname];
+  const title = meta ? t(meta.titleKey) : t("appTitle");
+  const subtitle = meta ? t(meta.subtitleKey) : "";
 
   return (
     <div className="flex h-screen overflow-hidden bg-light-bg dark:bg-dark-bg">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header title={meta.title} subtitle={meta.subtitle} />
+        <Header title={title} subtitle={subtitle} />
         <main className="flex-1 overflow-auto p-6">
           <div className="max-w-[1400px] mx-auto animate-fade-in">
             <Routes>

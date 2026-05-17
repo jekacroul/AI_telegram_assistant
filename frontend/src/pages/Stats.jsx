@@ -15,6 +15,7 @@ import MetricCard from "../components/MetricCard.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import { BarChart2 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme.js";
+import { useLang } from "../hooks/useLang.js";
 import { chartColors } from "../lib/colors.js";
 
 function useChartColors() {
@@ -37,15 +38,15 @@ function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function formatDuration(seconds) {
+function formatDuration(seconds, t) {
   if (seconds == null || Number.isNaN(seconds)) return "—";
-  if (seconds < 60) return `${Math.round(seconds)} с`;
+  if (seconds < 60) return t("stats.durSeconds", { value: Math.round(seconds) });
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
-  if (m < 60) return `${m} мин ${s} с`;
+  if (m < 60) return t("stats.durMinutes", { m, s });
   const h = Math.floor(m / 60);
   const mm = m % 60;
-  return `${h} ч ${mm} мин`;
+  return t("stats.durHours", { h, m: mm });
 }
 
 function shortDay(day) {
@@ -63,6 +64,7 @@ const TH =
   "px-4 py-3 text-2xs font-medium uppercase tracking-wider text-muted";
 
 export default function Stats() {
+  const { t } = useLang();
   const colors = useChartColors();
   const [overview, setOverview] = useState(null);
   const [activity, setActivity] = useState([]);
@@ -113,8 +115,12 @@ export default function Stats() {
     return (
       <div style={tooltipStyle} className="px-3 py-2 text-xs">
         <div className="font-medium text-fg">{item.name}</div>
-        <div className="text-muted">Ник: {formatUsername(item.username)}</div>
-        <div className="text-muted">Сообщений: {item.count}</div>
+        <div className="text-muted">
+          {t("stats.username", { value: formatUsername(item.username) })}
+        </div>
+        <div className="text-muted">
+          {t("stats.messagesCount", { count: item.count })}
+        </div>
       </div>
     );
   }
@@ -143,29 +149,31 @@ export default function Stats() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
-          label="Получено"
+          label={t("stats.received")}
           value={overview?.received ?? "—"}
-          hint="входящих сообщений"
+          hint={t("stats.receivedHint")}
         />
         <MetricCard
-          label="Отправлено"
+          label={t("stats.sent")}
           value={overview?.sent ?? "—"}
-          hint={`отвечено: ${overview?.replied ?? 0}`}
+          hint={t("stats.sentHint", { count: overview?.replied ?? 0 })}
         />
         <MetricCard
-          label="Одобрено вручную"
+          label={t("stats.approvedManual")}
           value={overview?.approved_manual ?? "—"}
-          hint={`approval rate: ${formatPercent(overview?.approval_rate)}`}
+          hint={t("stats.approvalHint", {
+            rate: formatPercent(overview?.approval_rate),
+          })}
         />
         <MetricCard
-          label="Отклонено фильтром"
+          label={t("stats.rejected")}
           value={overview?.rejected ?? "—"}
-          hint="плохой фидбек"
+          hint={t("stats.rejectedHint")}
         />
       </div>
 
       <div className="card">
-        <p className="section-label">Активность за 30 дней</p>
+        <p className="section-label">{t("stats.activity30")}</p>
         <div className="h-64">
           <ResponsiveContainer>
             <LineChart data={activityChartData}>
@@ -186,7 +194,7 @@ export default function Stats() {
               <Line
                 type="monotone"
                 dataKey="received"
-                name="Получено"
+                name={t("stats.received")}
                 stroke={colors.line1}
                 strokeWidth={2}
                 dot={false}
@@ -195,7 +203,7 @@ export default function Stats() {
               <Line
                 type="monotone"
                 dataKey="sent"
-                name="Отправлено"
+                name={t("stats.sent")}
                 stroke={colors.line2}
                 strokeWidth={2}
                 dot={false}
@@ -207,12 +215,12 @@ export default function Stats() {
       </div>
 
       <div className="card">
-        <p className="section-label">Топ чатов по числу сообщений</p>
+        <p className="section-label">{t("stats.topChats")}</p>
         {topChatsData.length === 0 ? (
           <EmptyState
             icon={BarChart2}
-            title="Нет данных"
-            description="Статистика появится после первых сообщений"
+            title={t("stats.noData")}
+            description={t("stats.noDataDesc")}
           />
         ) : (
           <div className="h-64">
@@ -252,24 +260,26 @@ export default function Stats() {
       </div>
 
       <div className="card overflow-hidden p-0">
-        <p className="section-label px-4 pt-4">Качество по версиям модели</p>
+        <p className="section-label px-4 pt-4">
+          {t("stats.qualityByVersion")}
+        </p>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">
-              <th className={TH}>Версия</th>
-              <th className={TH}>Завершено</th>
-              <th className={TH}>Одобрено</th>
-              <th className={TH}>Отклонено</th>
-              <th className={TH}>Approval</th>
-              <th className={TH}>Rejection</th>
-              <th className={TH}>Статус</th>
+              <th className={TH}>{t("stats.thVersion")}</th>
+              <th className={TH}>{t("stats.thFinished")}</th>
+              <th className={TH}>{t("stats.thApproved")}</th>
+              <th className={TH}>{t("stats.thRejected")}</th>
+              <th className={TH}>{t("stats.thApproval")}</th>
+              <th className={TH}>{t("stats.thRejection")}</th>
+              <th className={TH}>{t("stats.thStatus")}</th>
             </tr>
           </thead>
           <tbody>
             {modelQuality.length === 0 && (
               <tr>
                 <td colSpan="7" className="text-muted px-4 py-4">
-                  Данных пока нет.
+                  {t("stats.noRows")}
                 </td>
               </tr>
             )}
@@ -290,7 +300,9 @@ export default function Stats() {
                 <td className="px-4 py-3">{formatPercent(m.rejection_rate)}</td>
                 <td className="px-4 py-3">
                   {m.is_active ? (
-                    <span className="badge badge-green">активный</span>
+                    <span className="badge badge-green">
+                      {t("stats.active")}
+                    </span>
                   ) : (
                     <span className="text-muted">{m.status}</span>
                   )}
@@ -303,21 +315,21 @@ export default function Stats() {
 
       <div className="card overflow-hidden p-0">
         <p className="section-label px-4 pt-4">
-          Среднее время ответа по чатам
+          {t("stats.avgResponseTime")}
         </p>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">
-              <th className={TH}>Чат</th>
-              <th className={TH}>Среднее время</th>
-              <th className={TH}>Ответов</th>
+              <th className={TH}>{t("stats.thChat")}</th>
+              <th className={TH}>{t("stats.thAvgTime")}</th>
+              <th className={TH}>{t("stats.thReplies")}</th>
             </tr>
           </thead>
           <tbody>
             {responseTime.length === 0 && (
               <tr>
                 <td colSpan="3" className="text-muted px-4 py-4">
-                  Данных пока нет.
+                  {t("stats.noRows")}
                 </td>
               </tr>
             )}
@@ -329,7 +341,7 @@ export default function Stats() {
                 <td className="px-4 py-3">
                   {r.chat_name || `chat ${r.chat_id}`}
                 </td>
-                <td className="px-4 py-3">{formatDuration(r.avg_seconds)}</td>
+                <td className="px-4 py-3">{formatDuration(r.avg_seconds, t)}</td>
                 <td className="px-4 py-3">{r.replies}</td>
               </tr>
             ))}

@@ -7,6 +7,7 @@ import {
   Check,
   Hourglass,
 } from "lucide-react";
+import { useLang } from "../../hooks/useLang.js";
 
 const AVATARS = [
   "bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400",
@@ -17,12 +18,12 @@ const AVATARS = [
 
 const STATUS = {
   sent: {
-    text: "Отправлено",
+    textKey: "tiles.sent",
     Icon: Check,
     cls: "bg-emerald-500 text-emerald-950 shadow-sm shadow-emerald-500/30",
   },
   pending: {
-    text: "Ожидает",
+    textKey: "tiles.pending",
     Icon: Hourglass,
     cls: "bg-amber-500 text-amber-950 shadow-sm shadow-amber-500/30",
   },
@@ -54,20 +55,21 @@ function isPlaceholder(text) {
   return MEDIA_PLACEHOLDERS.includes((text || "").trim().toLowerCase());
 }
 
-function mediaLabel(m) {
-  if (m.media_type === "photo") return "Фото";
-  if (m.media_type === "video_note") return "Видео-кружок";
-  if (m.media_type === "video") return "Видео";
-  return "Медиа";
+function mediaLabel(m, t) {
+  if (m.media_type === "photo") return t("tiles.photo");
+  if (m.media_type === "video_note") return t("tiles.videoNote");
+  if (m.media_type === "video") return t("tiles.video");
+  return t("tiles.media");
 }
 
 export default function MessageFeedTile({ dragHandleProps, messages = [], onSelect }) {
+  const { t } = useLang();
   const [preview, setPreview] = useState(null);
 
   return (
     <div className="tile flex flex-col">
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
-        <span className="tile-label mb-0">Лента сообщений</span>
+        <span className="tile-label mb-0">{t("tiles.messageFeed")}</span>
         <span
           {...dragHandleProps}
           className="cursor-grab active:cursor-grabbing text-zinc-300
@@ -81,7 +83,7 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
       <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
         {messages.length === 0 && (
           <div className="text-xs text-zinc-400 dark:text-slate-500 py-6 text-center">
-            Сообщений пока нет
+            {t("tiles.noMessagesYet")}
           </div>
         )}
         {messages.map((m) => {
@@ -126,7 +128,7 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                   </span>
                   {chatLabel && (
                     <span className="text-[10px] text-zinc-400 dark:text-slate-500 truncate">
-                      {m.is_mine ? "→ " : "в "}
+                      {m.is_mine ? "→ " : t("tiles.inChat")}
                       {chatLabel}
                     </span>
                   )}
@@ -137,12 +139,12 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                 <div className="flex items-center gap-2 mt-0.5">
                   {m.is_voice ? (
                     <span className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400">
-                      <Mic size={11} /> голосовое
+                      <Mic size={11} /> {t("tiles.voice")}
                     </span>
                   ) : hasMedia ? (
                     <span className="flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400">
                       {isVideo ? <Video size={11} /> : <ImageIcon size={11} />}
-                      {showText ? m.text : mediaLabel(m)}
+                      {showText ? m.text : mediaLabel(m, t)}
                     </span>
                   ) : (
                     <span className="text-[11px] text-zinc-500 dark:text-slate-400 truncate">
@@ -180,7 +182,7 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
               )}
               {hasMedia && !m.media_path && m.media_private && (
                 <span className="text-[10px] text-zinc-400 dark:text-slate-500 flex-shrink-0">
-                  приватное
+                  {t("tiles.private")}
                 </span>
               )}
 
@@ -190,7 +192,7 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                     text-[10px] font-semibold flex-shrink-0 self-center ${status.cls}`}
                 >
                   <status.Icon size={11} strokeWidth={2.5} />
-                  {status.text}
+                  {t(status.textKey)}
                 </span>
               )}
             </div>

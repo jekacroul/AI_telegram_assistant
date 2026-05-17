@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { GripVertical, Cpu, Thermometer } from "lucide-react";
 import { api } from "../../lib/api.js";
 import MemoryCard from "../MemoryCard.jsx";
+import { useLang } from "../../hooks/useLang.js";
 
 const DOT = {
   emerald: "bg-emerald-400 dark:bg-emerald-300",
@@ -75,6 +76,7 @@ function GroupLabel({ children }) {
 }
 
 export default function ModelStatusTile({ dragHandleProps }) {
+  const { t } = useLang();
   const [res, setRes] = useState(null);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(false);
@@ -112,16 +114,16 @@ export default function ModelStatusTile({ dragHandleProps }) {
 
   const services = status
     ? [
-        { name: "LM Studio", ok: !!status.llm },
-        { name: "Telegram-бот", ok: !!status.bot },
-        { name: "База данных", ok: !!status.db },
+        { name: t("tiles.lmStudio"), ok: !!status.llm },
+        { name: t("tiles.telegramBot"), ok: !!status.bot },
+        { name: t("tiles.database"), ok: !!status.db },
       ]
     : [];
 
   return (
     <div className="tile flex flex-col">
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
-        <span className="tile-label mb-0">Статус системы</span>
+        <span className="tile-label mb-0">{t("tiles.systemStatus")}</span>
         <span
           {...dragHandleProps}
           className="cursor-grab active:cursor-grabbing text-zinc-300
@@ -135,47 +137,59 @@ export default function ModelStatusTile({ dragHandleProps }) {
       <div className="grid grid-cols-2 gap-2 flex-shrink-0">
         {vram ? (
           <MemoryCard
-            label="VRAM"
+            label={t("tiles.vram")}
             color="amber"
             value={`${vram.used_gb} GB`}
-            sub={`из ${vram.total_gb} GB · ${vram.percent}%`}
+            sub={t("tiles.memOf", {
+              total: vram.total_gb,
+              percent: vram.percent,
+            })}
             percent={vram.percent}
           />
         ) : (
-          <EmptyCard label="VRAM" hint="GPU не обнаружен" />
+          <EmptyCard label={t("tiles.vram")} hint={t("tiles.noGpu")} />
         )}
         {ram ? (
           <MemoryCard
-            label="RAM"
+            label={t("tiles.ram")}
             color="emerald"
             value={`${ram.used_gb} GB`}
-            sub={`из ${ram.total_gb} GB · ${ram.percent}%`}
+            sub={t("tiles.memOf", {
+              total: ram.total_gb,
+              percent: ram.percent,
+            })}
             percent={ram.percent}
           />
         ) : (
-          <EmptyCard label="RAM" hint={error ? "нет данных" : "загрузка…"} />
+          <EmptyCard
+            label={t("tiles.ram")}
+            hint={error ? t("tiles.noDataShort") : t("tiles.loadingShort")}
+          />
         )}
         {cpu ? (
           <MemoryCard
-            label="CPU"
+            label={t("tiles.cpu")}
             color="sky"
             value={`${cpu.percent}%`}
-            sub={`${cpu.cores} ядер`}
+            sub={t("tiles.cores", { count: cpu.cores })}
             percent={cpu.percent}
           />
         ) : (
-          <EmptyCard label="CPU" hint="—" />
+          <EmptyCard label={t("tiles.cpu")} hint="—" />
         )}
         {disk ? (
           <MemoryCard
-            label="Диск"
+            label={t("tiles.disk")}
             color="violet"
             value={`${disk.used_gb} GB`}
-            sub={`из ${disk.total_gb} GB · ${disk.percent}%`}
+            sub={t("tiles.memOf", {
+              total: disk.total_gb,
+              percent: disk.percent,
+            })}
             percent={disk.percent}
           />
         ) : (
-          <EmptyCard label="Диск" hint="—" />
+          <EmptyCard label={t("tiles.disk")} hint="—" />
         )}
       </div>
 
@@ -184,7 +198,7 @@ export default function ModelStatusTile({ dragHandleProps }) {
           {vram.util_percent != null && (
             <span className="flex items-center gap-1.5 text-zinc-500 dark:text-slate-400">
               <Cpu size={13} className="text-amber-500 dark:text-amber-300" />
-              Нагрузка GPU:{" "}
+              {t("tiles.gpuLoad")}
               <span className="font-semibold text-zinc-700 dark:text-slate-200">
                 {vram.util_percent}%
               </span>
@@ -205,23 +219,25 @@ export default function ModelStatusTile({ dragHandleProps }) {
       )}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <GroupLabel>Сервисы</GroupLabel>
+        <GroupLabel>{t("tiles.services")}</GroupLabel>
         {services.length === 0 && (
-          <div className="stat-label text-xs py-2">Загрузка…</div>
+          <div className="stat-label text-xs py-2">
+            {t("tiles.loadingShort")}
+          </div>
         )}
         {services.map((s) => (
           <StatusRow
             key={s.name}
             name={s.name}
             color={s.ok ? "emerald" : "rose"}
-            status={s.ok ? "онлайн" : "офлайн"}
+            status={s.ok ? t("tiles.online") : t("tiles.offline")}
           />
         ))}
 
-        <GroupLabel>Модели</GroupLabel>
+        <GroupLabel>{t("tiles.models")}</GroupLabel>
         {models.length === 0 && (
           <div className="stat-label text-xs py-2">
-            {error ? "Не удалось получить статус" : "Загрузка…"}
+            {error ? t("tiles.statusFailed") : t("tiles.loadingShort")}
           </div>
         )}
         {models.map((m, i) => (

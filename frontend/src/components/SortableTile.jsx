@@ -2,8 +2,10 @@ import React, { useRef } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { MIN_SIZE } from "../hooks/useTileLayout.js";
+import { useLang } from "../hooks/useLang.js";
 
 export default function SortableTile({ id, size, expanded, onResize, children }) {
+  const { t } = useLang();
   const {
     attributes,
     listeners,
@@ -95,7 +97,7 @@ export default function SortableTile({ id, size, expanded, onResize, children })
             onPointerDown={(e) => startResize(e, "x")}
             onPointerMove={moveResize}
             onPointerUp={endResize}
-            title="Ширина"
+            title={t("tiles.width")}
             className={`${handleBase} top-3 bottom-6 right-0 w-1.5
                         cursor-ew-resize flex items-center justify-center`}
           >
@@ -108,7 +110,7 @@ export default function SortableTile({ id, size, expanded, onResize, children })
                 onPointerDown={(e) => startResize(e, "y")}
                 onPointerMove={moveResize}
                 onPointerUp={endResize}
-                title="Высота"
+                title={t("tiles.height")}
                 className={`${handleBase} left-3 right-6 bottom-0 h-1.5
                             cursor-ns-resize flex items-center justify-center`}
               >
@@ -119,7 +121,7 @@ export default function SortableTile({ id, size, expanded, onResize, children })
                 onPointerDown={(e) => startResize(e, "xy")}
                 onPointerMove={moveResize}
                 onPointerUp={endResize}
-                title="Размер"
+                title={t("tiles.resize")}
                 className={`${handleBase} bottom-0 right-0 w-5 h-5
                             cursor-nwse-resize flex items-end justify-end p-1`}
               >

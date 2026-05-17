@@ -10,15 +10,7 @@ import LlamaServerTile from "../components/tiles/LlamaServerTile.jsx";
 import MessageFeedTile from "../components/tiles/MessageFeedTile.jsx";
 import ReplyPanelTile from "../components/tiles/ReplyPanelTile.jsx";
 import ReplyModal from "../components/ReplyModal.jsx";
-
-const REASON_LABELS = {
-  too_short: "Слишком короткий",
-  language_mismatch: "Не тот язык",
-  identical_to_incoming: "Повтор входящего",
-  ai_phrase: "AI-фраза",
-  emoji_only: "Только emoji",
-  no_variants: "Нет вариантов",
-};
+import { useLang } from "../hooks/useLang.js";
 
 function shortDay(day) {
   if (!day) return "";
@@ -31,6 +23,7 @@ function mean(arr) {
 }
 
 export default function Dashboard() {
+  const { t } = useLang();
   const { order, reorder, sizes, setSize, reset } = useTileLayout();
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [data, setData] = useState({});
@@ -102,7 +95,7 @@ export default function Dashboard() {
         return (
           <MetricTile
             dragHandleProps={dragHandleProps}
-            label="Сегодня получено"
+            label={t("dashboard.receivedToday")}
             value={recvToday}
             accent="sky"
             series={recv14}
@@ -111,15 +104,15 @@ export default function Dashboard() {
           >
             <div>
               <div className="stat-row">
-                <span className="stat-label">Макс за день</span>
+                <span className="stat-label">{t("dashboard.maxPerDay")}</span>
                 <span className="stat-value">{Math.max(0, ...recv14)}</span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Среднее за 14 дней</span>
+                <span className="stat-label">{t("dashboard.avg14")}</span>
                 <span className="stat-value">{mean(recv14).toFixed(1)}</span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Всего за неделю</span>
+                <span className="stat-label">{t("dashboard.weekTotal")}</span>
                 <span className="stat-value">
                   {recv14.slice(-7).reduce((a, b) => a + b, 0)}
                 </span>
@@ -131,7 +124,7 @@ export default function Dashboard() {
         return (
           <MetricTile
             dragHandleProps={dragHandleProps}
-            label="Отправлено ответов"
+            label={t("dashboard.repliesSent")}
             value={sentToday}
             accent="emerald"
             series={sent14}
@@ -140,17 +133,21 @@ export default function Dashboard() {
           >
             <div>
               <div className="stat-row">
-                <span className="stat-label">Всего отправлено</span>
+                <span className="stat-label">{t("dashboard.totalSent")}</span>
                 <span className="stat-value">{overview.sent ?? "—"}</span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Одобрено вручную</span>
+                <span className="stat-label">
+                  {t("dashboard.approvedManual")}
+                </span>
                 <span className="stat-value">
                   {overview.approved_manual ?? "—"}
                 </span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Отвечено сообщений</span>
+                <span className="stat-label">
+                  {t("dashboard.messagesReplied")}
+                </span>
                 <span className="stat-value">{overview.replied ?? "—"}</span>
               </div>
             </div>
@@ -160,7 +157,7 @@ export default function Dashboard() {
         return (
           <MetricTile
             dragHandleProps={dragHandleProps}
-            label="Качество ответов"
+            label={t("dashboard.replyQuality")}
             value={approvalPct}
             format={(v) => `${Math.round(v)}%`}
             accent="violet"
@@ -169,13 +166,15 @@ export default function Dashboard() {
           >
             <div>
               <div className="stat-row">
-                <span className="stat-label">Сгенерировано</span>
+                <span className="stat-label">{t("dashboard.generated")}</span>
                 <span className="stat-value">
                   {quality.total_generated ?? "—"}
                 </span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Отклонено фильтром</span>
+                <span className="stat-label">
+                  {t("dashboard.rejectedByFilter")}
+                </span>
                 <span className="stat-value">
                   {quality.total_rejected ?? "—"}
                 </span>
@@ -183,7 +182,7 @@ export default function Dashboard() {
               {(quality.reasons || []).map((r) => (
                 <div className="stat-row" key={r.reason}>
                   <span className="stat-label">
-                    {REASON_LABELS[r.reason] || r.reason}
+                    {t(`dashboard.reasons.${r.reason}`)}
                   </span>
                   <span className="stat-value">{r.count}</span>
                 </div>
@@ -195,7 +194,7 @@ export default function Dashboard() {
         return (
           <MetricTile
             dragHandleProps={dragHandleProps}
-            label="RAG индексировано"
+            label={t("dashboard.ragIndexed")}
             value={rag.total_indexed || 0}
             accent="indigo"
             expanded={expandedIds.has(id)}
@@ -203,19 +202,21 @@ export default function Dashboard() {
           >
             <div>
               <div className="stat-row">
-                <span className="stat-label">Размер базы</span>
+                <span className="stat-label">{t("dashboard.dbSize")}</span>
                 <span className="stat-value">
                   {rag.collection_size_mb ?? 0} MB
                 </span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Модель</span>
+                <span className="stat-label">{t("dashboard.model")}</span>
                 <span className="stat-value truncate ml-2">
                   {rag.model || "—"}
                 </span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Последняя индексация</span>
+                <span className="stat-label">
+                  {t("dashboard.lastIndexing")}
+                </span>
                 <span className="stat-value">
                   {rag.last_indexed_at
                     ? new Date(rag.last_indexed_at).toLocaleDateString()
@@ -258,11 +259,15 @@ export default function Dashboard() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-zinc-400 dark:text-slate-500">
-          Перетаскивай за иконку, тяни края и угол — меняй размер
+          {t("dashboard.hint")}
         </p>
-        <button className="btn-ghost" onClick={reset} title="Сбросить раскладку">
+        <button
+          className="btn-ghost"
+          onClick={reset}
+          title={t("dashboard.resetLayout")}
+        >
           <RotateCcw size={14} />
-          Сбросить раскладку
+          {t("dashboard.resetLayout")}
         </button>
       </div>
 
