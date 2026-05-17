@@ -1,7 +1,33 @@
 import React, { useState } from "react";
-import { GripVertical, Mic, Inbox, CheckCheck } from "lucide-react";
+import {
+  GripVertical,
+  Mic,
+  Inbox,
+  CheckCheck,
+  Image as ImageIcon,
+  Video,
+} from "lucide-react";
 import Toggle from "../Toggle.jsx";
 import { useLang } from "../../hooks/useLang.js";
+
+const MEDIA_PLACEHOLDERS = [
+  "(фото)",
+  "(видео)",
+  "(кружок)",
+  "(photo)",
+  "(video)",
+];
+
+function isPlaceholder(text) {
+  return MEDIA_PLACEHOLDERS.includes((text || "").trim().toLowerCase());
+}
+
+function mediaLabel(m, t) {
+  if (m.media_type === "photo") return t("tiles.photo");
+  if (m.media_type === "video_note") return t("tiles.videoNote");
+  if (m.media_type === "video") return t("tiles.video");
+  return t("tiles.media");
+}
 
 const AVATARS = [
   "bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400",
@@ -44,6 +70,7 @@ export default function ReplyPanelTile({
   const total = count ?? pending.length;
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState("");
+  const [preview, setPreview] = useState(null);
 
   async function handleClear() {
     if (clearing || !onClearQueue) return;
@@ -130,6 +157,11 @@ export default function ReplyPanelTile({
           </div>
         )}
         {pending.map((m) => {
+          const hasMedia = !!m.media_type && m.media_type !== "voice";
+          const isVideo =
+            m.media_type === "video" || m.media_type === "video_note";
+          const showText =
+            m.text && !(hasMedia && isPlaceholder(m.text)) && !m.is_voice;
           const uname = (m.chat_username || "").trim();
           let chatLabel = "";
           if (m.chat_name && m.chat_name !== m.sender_name) {
@@ -172,6 +204,11 @@ export default function ReplyPanelTile({
                     <span className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400">
                       <Mic size={11} /> {t("tiles.voice")}
                     </span>
+                  ) : hasMedia ? (
+                    <span className="flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400 truncate">
+                      {isVideo ? <Video size={11} /> : <ImageIcon size={11} />}
+                      {showText ? m.text : mediaLabel(m, t)}
+                    </span>
                   ) : (
                     <span className="text-[11px] text-zinc-500 dark:text-slate-400 truncate block">
                       {m.text || "—"}
@@ -179,10 +216,64 @@ export default function ReplyPanelTile({
                   )}
                 </div>
               </div>
+
+              {hasMedia && m.media_path && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPreview(m);
+                  }}
+                  className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0
+                             border border-light-border dark:border-dark-border
+                             bg-light-card2 dark:bg-dark-card2"
+                >
+                  {isVideo ? (
+                    <video
+                      src={m.media_path}
+                      className="w-full h-full object-cover"
+                      muted
+                    />
+                  ) : (
+                    <img
+                      src={m.media_path}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </button>
+              )}
+              {hasMedia && !m.media_path && m.media_private && (
+                <span className="text-[10px] text-zinc-400 dark:text-slate-500 flex-shrink-0 self-center">
+                  {t("tiles.private")}
+                </span>
+              )}
             </div>
           );
         })}
       </div>
+
+      {preview?.media_path && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setPreview(null)}
+        >
+          {preview.media_type === "photo" ? (
+            <img
+              src={preview.media_path}
+              alt=""
+              className="max-w-full max-h-full object-contain rounded-lg"
+            />
+          ) : (
+            <video
+              src={preview.media_path}
+              controls
+              autoPlay
+              className="max-w-full max-h-full rounded-lg"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1064,7 +1064,11 @@ async def admin_notify_test() -> dict:
 
 @app.get("/api/messages/pending")
 async def pending(session: AsyncSession = Depends(get_session)) -> dict:
-    where = (Message.is_mine == False, Message.replied == False)  # noqa: E712
+    where = (
+        Message.is_mine == False,  # noqa: E712
+        Message.replied == False,  # noqa: E712
+        Message.deleted == False,  # noqa: E712
+    )
     result = await session.execute(
         select(Message)
         .where(*where)
@@ -1093,6 +1097,7 @@ async def reconcile_queue(session: AsyncSession = Depends(get_session)) -> dict:
         select(func.count(Message.id)).where(
             Message.is_mine == False,  # noqa: E712
             Message.replied == False,  # noqa: E712
+            Message.deleted == False,  # noqa: E712
         )
     )
     return {"cleared": cleared, "remaining": remaining or 0}

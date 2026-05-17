@@ -344,6 +344,7 @@ async def build_status_text() -> str:
                 select(func.count(DbMessage.id)).where(
                     DbMessage.is_mine == False,  # noqa: E712
                     DbMessage.replied == False,  # noqa: E712
+                    DbMessage.deleted == False,  # noqa: E712
                 )
             )
         ).scalar() or 0
@@ -583,6 +584,7 @@ async def _send_pending_queue(target: Message) -> None:
                 .where(
                     DbMessage.is_mine == False,  # noqa: E712
                     DbMessage.replied == False,  # noqa: E712
+                    DbMessage.deleted == False,  # noqa: E712
                 )
                 .order_by(DbMessage.timestamp.desc())
                 .limit(10)
@@ -1292,6 +1294,7 @@ async def notify_schedule_pause() -> None:
                 select(func.count(DbMessage.id)).where(
                     DbMessage.is_mine == False,  # noqa: E712
                     DbMessage.replied == False,  # noqa: E712
+                    DbMessage.deleted == False,  # noqa: E712
                 )
             )
         ).scalar() or 0
