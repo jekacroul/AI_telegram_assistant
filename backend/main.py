@@ -1012,6 +1012,49 @@ async def pending(session: AsyncSession = Depends(get_session)) -> dict:
     return {"count": total or 0, "messages": messages}
 
 
+@app.post("/api/messages/reconcile-queue")
+async def reconcile_queue(session: AsyncSession = Depends(get_session)) -> dict:
+    """Clear stale entries from the pending queue.
+
+    An incoming message counts as answered if a later message from the owner
+    exists in the same chat — covering replies sent manually in Telegram,
+    which the bot records but never marks the original as replied.
+    """
+    last_mine = (
+        select(
+            Message.chat_id.label("chat_id"),
+            func.max(Message.id).label("last_mine_id"),
+        )
+        .where(Message.is_mine == True)  # noqa: E712
+        .group_by(Message.chat_id)
+        .subquery()
+    )
+    result = await session.execute(
+        select(Message)
+        .join(last_mine, Message.chat_id == last_mine.c.chat_id)
+        .where(
+            Message.is_mine == False,  # noqa: E712
+            Message.replied == False,  # noqa: E712
+            Message.id < last_mine.c.last_mine_id,
+        )
+    )
+    rows = result.scalars().all()
+    for m in rows:
+        m.replied = True
+        m.pending_reason = None
+    await session.commit()
+    cleared = len(rows)
+    if cleared:
+        await message_bus.publish("queue_cleared", {"reconciled": cleared})
+    remaining = await session.scalar(
+        select(func.count(Message.id)).where(
+            Message.is_mine == False,  # noqa: E712
+            Message.replied == False,  # noqa: E712
+        )
+    )
+    return {"cleared": cleared, "remaining": remaining or 0}
+
+
 @app.get("/api/messages/recent")
 async def recent(
     limit: int = 100, session: AsyncSession = Depends(get_session)

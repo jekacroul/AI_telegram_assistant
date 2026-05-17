@@ -1,5 +1,5 @@
-import React from "react";
-import { GripVertical, Mic, Inbox } from "lucide-react";
+import React, { useState } from "react";
+import { GripVertical, Mic, Inbox, CheckCheck } from "lucide-react";
 import Toggle from "../Toggle.jsx";
 import { useLang } from "../../hooks/useLang.js";
 
@@ -37,10 +37,32 @@ export default function ReplyPanelTile({
   count,
   onSelect,
   onToggleAuto,
+  onClearQueue,
 }) {
   const { t } = useLang();
   const pending = messages || [];
   const total = count ?? pending.length;
+  const [clearing, setClearing] = useState(false);
+  const [clearMsg, setClearMsg] = useState("");
+
+  async function handleClear() {
+    if (clearing || !onClearQueue) return;
+    setClearing(true);
+    setClearMsg("");
+    try {
+      const res = await onClearQueue();
+      const cleared = res?.cleared ?? 0;
+      setClearMsg(
+        cleared > 0
+          ? t("tiles.clearQueueDone") + cleared
+          : t("tiles.clearQueueEmpty"),
+      );
+    } catch (e) {
+      setClearMsg(e.message || "error");
+    } finally {
+      setClearing(false);
+    }
+  }
 
   return (
     <div className="tile flex flex-col">
@@ -81,6 +103,25 @@ export default function ReplyPanelTile({
           <Toggle checked={!!status.auto_reply} onChange={onToggleAuto} />
         </div>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
+          <button
+            className="btn-ghost text-[11px]"
+            onClick={handleClear}
+            disabled={clearing}
+            title={t("tiles.clearQueueHint")}
+          >
+            <CheckCheck size={13} />
+            {t("tiles.clearQueue")}
+          </button>
+          {clearMsg && (
+            <span className="text-[10px] text-zinc-400 dark:text-slate-500 truncate">
+              {clearMsg}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
         {pending.length === 0 && (

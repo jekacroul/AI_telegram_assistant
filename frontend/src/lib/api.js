@@ -36,6 +36,8 @@ export const api = {
   saveSettings: (data) =>
     request("/api/settings", { method: "POST", body: JSON.stringify(data) }),
   pending: () => request("/api/messages/pending"),
+  reconcileQueue: () =>
+    request("/api/messages/reconcile-queue", { method: "POST" }),
   recent: (limit = 100) => request(`/api/messages/recent?limit=${limit}`),
   generateReply: (message_id, transcription_override) =>
     request("/api/reply/generate", {
