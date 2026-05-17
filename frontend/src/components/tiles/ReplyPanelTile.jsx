@@ -34,11 +34,13 @@ export default function ReplyPanelTile({
   dragHandleProps,
   status = {},
   messages = [],
+  count,
   onSelect,
   onToggleAuto,
 }) {
   const { t } = useLang();
   const pending = messages || [];
+  const total = count ?? pending.length;
 
   return (
     <div className="tile flex flex-col">
@@ -65,7 +67,7 @@ export default function ReplyPanelTile({
           </div>
           <div>
             <div className="text-2xl font-bold leading-none text-zinc-900 dark:text-slate-100">
-              {pending.length}
+              {total}
             </div>
             <div className="text-xs text-zinc-400 dark:text-slate-500 mt-0.5">
               {t("tiles.waitingReply")}

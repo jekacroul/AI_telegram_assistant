@@ -993,14 +993,19 @@ async def admin_notify_test() -> dict:
 
 
 @app.get("/api/messages/pending")
-async def pending(session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def pending(session: AsyncSession = Depends(get_session)) -> dict:
+    where = (Message.is_mine == False, Message.replied == False)  # noqa: E712
     result = await session.execute(
         select(Message)
-        .where(Message.is_mine == False, Message.replied == False)  # noqa: E712
+        .where(*where)
         .order_by(desc(Message.timestamp))
         .limit(100)
     )
-    return [_message_to_dict(m) for m in result.scalars().all()]
+    messages = [_message_to_dict(m) for m in result.scalars().all()]
+    total = await session.scalar(
+        select(func.count(Message.id)).where(*where)
+    )
+    return {"count": total or 0, "messages": messages}
 
 
 @app.get("/api/messages/recent")

@@ -82,7 +82,8 @@ export default function Dashboard() {
   const rag = data.rag || {};
   const status = data.status || {};
   const messages = Array.isArray(data.messages) ? data.messages : [];
-  const pending = Array.isArray(data.pending) ? data.pending : [];
+  const pending = Array.isArray(data.pending?.messages) ? data.pending.messages : [];
+  const pendingCount = data.pending?.count ?? pending.length;
 
   const recvToday = recv14[recv14.length - 1] || 0;
   const sentToday = sent14[sent14.length - 1] || 0;
@@ -246,6 +247,7 @@ export default function Dashboard() {
             dragHandleProps={dragHandleProps}
             status={status}
             messages={pending}
+            count={pendingCount}
             onSelect={setActive}
             onToggleAuto={toggleAuto}
           />
