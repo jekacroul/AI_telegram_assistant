@@ -23,11 +23,24 @@ function mean(arr) {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
+// Persists last-loaded data across navigations so returning to the
+// dashboard renders instantly instead of showing empty placeholders.
+const KEYS = [
+  "status",
+  "messages",
+  "overview",
+  "quality",
+  "rag",
+  "activity",
+  "pending",
+];
+let cachedData = {};
+
 export default function Dashboard() {
   const { t } = useLang();
   const { order, reorder, sizes, setSize, reset } = useTileLayout();
   const [expandedIds, setExpandedIds] = useState(() => new Set());
-  const [data, setData] = useState({});
+  const [data, setData] = useState(cachedData);
   const [active, setActive] = useState(null);
 
   const refresh = useCallback(async () => {
@@ -42,8 +55,11 @@ export default function Dashboard() {
     ];
     const results = await Promise.allSettled(calls);
     const [status, messages, overview, quality, rag, activity, pending] =
-      results.map((r) => (r.status === "fulfilled" ? r.value : null));
-    setData({ status, messages, overview, quality, rag, activity, pending });
+      results.map((r, i) =>
+        r.status === "fulfilled" ? r.value : cachedData[KEYS[i]] ?? null,
+      );
+    cachedData = { status, messages, overview, quality, rag, activity, pending };
+    setData(cachedData);
   }, []);
 
   useEffect(() => {

@@ -75,10 +75,15 @@ function GroupLabel({ children }) {
   );
 }
 
+// Keeps last-known values across navigations so the tile renders
+// instantly on return instead of flashing loading placeholders.
+let cachedRes = null;
+let cachedStatus = null;
+
 export default function ModelStatusTile({ dragHandleProps }) {
   const { t } = useLang();
-  const [res, setRes] = useState(null);
-  const [status, setStatus] = useState(null);
+  const [res, setRes] = useState(cachedRes);
+  const [status, setStatus] = useState(cachedStatus);
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -90,12 +95,16 @@ export default function ModelStatusTile({ dragHandleProps }) {
       ]);
       if (cancelled) return;
       if (r.status === "fulfilled") {
+        cachedRes = r.value;
         setRes(r.value);
         setError(false);
       } else {
         setError(true);
       }
-      if (s.status === "fulfilled") setStatus(s.value);
+      if (s.status === "fulfilled") {
+        cachedStatus = s.value;
+        setStatus(s.value);
+      }
     };
     load();
     const id = setInterval(load, 15000);
