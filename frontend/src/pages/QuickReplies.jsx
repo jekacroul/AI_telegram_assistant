@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
+import Page from "../components/Page.jsx";
 
 export default function QuickReplies() {
   const { t } = useLang();
@@ -34,9 +35,9 @@ export default function QuickReplies() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="card">
-        <div className="label">{t("quick.title")}</div>
+    <Page>
+      <div className="tile">
+        <div className="tile-label">{t("quick.title")}</div>
         <div className="grid gap-2 mt-3">
           {items.map((it) => (
             <QuickRow key={it.id} item={it} onSave={saveItem} onDelete={removeItem} />
@@ -52,7 +53,7 @@ export default function QuickReplies() {
           <button className="btn-primary" type="submit">{t("quick.add")}</button>
         </form>
       </div>
-    </div>
+    </Page>
   );
 }
 

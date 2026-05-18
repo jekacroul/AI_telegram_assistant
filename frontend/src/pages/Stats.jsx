@@ -17,6 +17,7 @@ import { BarChart2 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme.js";
 import { useLang } from "../hooks/useLang.js";
 import { chartColors } from "../lib/colors.js";
+import Page from "../components/Page.jsx";
 
 function useChartColors() {
   const { isDark } = useTheme();
@@ -142,9 +143,9 @@ export default function Stats() {
   );
 
   return (
-    <div className="space-y-6">
+    <Page className="space-y-6">
       {error && (
-        <div className="card border-bad/40 text-sm text-bad">{error}</div>
+        <div className="tile border-bad/40 text-sm text-bad">{error}</div>
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -172,8 +173,8 @@ export default function Stats() {
         />
       </div>
 
-      <div className="card">
-        <p className="section-label">{t("stats.activity30")}</p>
+      <div className="tile">
+        <p className="tile-label">{t("stats.activity30")}</p>
         <div className="h-64">
           <ResponsiveContainer>
             <LineChart data={activityChartData}>
@@ -214,8 +215,8 @@ export default function Stats() {
         </div>
       </div>
 
-      <div className="card">
-        <p className="section-label">{t("stats.topChats")}</p>
+      <div className="tile">
+        <p className="tile-label">{t("stats.topChats")}</p>
         {topChatsData.length === 0 ? (
           <EmptyState
             icon={BarChart2}
@@ -259,8 +260,8 @@ export default function Stats() {
         )}
       </div>
 
-      <div className="card overflow-hidden p-0">
-        <p className="section-label px-4 pt-4">
+      <div className="tile overflow-hidden p-0">
+        <p className="tile-label px-4 pt-4">
           {t("stats.qualityByVersion")}
         </p>
         <table className="w-full text-sm">
@@ -313,8 +314,8 @@ export default function Stats() {
         </table>
       </div>
 
-      <div className="card overflow-hidden p-0">
-        <p className="section-label px-4 pt-4">
+      <div className="tile overflow-hidden p-0">
+        <p className="tile-label px-4 pt-4">
           {t("stats.avgResponseTime")}
         </p>
         <table className="w-full text-sm">
@@ -348,6 +349,6 @@ export default function Stats() {
           </tbody>
         </table>
       </div>
-    </div>
+    </Page>
   );
 }

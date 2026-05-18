@@ -3,6 +3,7 @@ import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
 import { useTheme } from "../hooks/useTheme.js";
 import { LANGUAGES } from "../lib/i18n.js";
+import Page from "../components/Page.jsx";
 
 const dayValues = [0, 1, 2, 3, 4, 5, 6];
 
@@ -355,12 +356,12 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="card">
-        <div className="label">{t("settings.appearance")}</div>
+    <Page>
+      <div className="tile">
+        <div className="tile-label">{t("settings.appearance")}</div>
         <div className="grid md:grid-cols-2 gap-3 mt-3">
           <div>
-            <div className="label">{t("settings.themeLabel")}</div>
+            <div className="tile-label">{t("settings.themeLabel")}</div>
             <div className="flex gap-2 mt-2">
               {[
                 { v: "light", label: t("settings.themeLight") },
@@ -381,7 +382,7 @@ export default function Settings() {
             </div>
           </div>
           <div>
-            <div className="label">{t("settings.languageLabel")}</div>
+            <div className="tile-label">{t("settings.languageLabel")}</div>
             <div className="flex gap-2 mt-2">
               {LANGUAGES.map((code) => (
                 <button
@@ -399,8 +400,8 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.lmModel")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("settings.lmModel")}</div>
         <select
           className="input mt-2"
           value={s.llm_model}
@@ -424,7 +425,7 @@ export default function Settings() {
         )}
       </div>
 
-      <div className="card">
+      <div className="tile">
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
@@ -442,7 +443,7 @@ export default function Settings() {
       </div>
 
 
-      <div className="card">
+      <div className="tile">
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
@@ -463,7 +464,7 @@ export default function Settings() {
         </label>
       </div>
 
-      <div className="card">
+      <div className="tile">
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
@@ -484,8 +485,8 @@ export default function Settings() {
         </label>
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.groupReplies")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("settings.groupReplies")}</div>
         <div className="text-xs text-muted mt-1">
           {t("settings.groupRepliesDesc")}
         </div>
@@ -507,10 +508,10 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="tile">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="label">{t("settings.schedule")}</div>
+            <div className="tile-label">{t("settings.schedule")}</div>
             <div className="text-xs text-muted mt-1">
               {t("settings.scheduleDesc")}
             </div>
@@ -547,7 +548,7 @@ export default function Settings() {
 
         <div className="grid md:grid-cols-3 gap-3 mt-4">
           <div>
-            <div className="label">{t("settings.timezone")}</div>
+            <div className="tile-label">{t("settings.timezone")}</div>
             <select
               className="input mt-1"
               value={schedule.timezone}
@@ -563,7 +564,7 @@ export default function Settings() {
             </select>
           </div>
           <div>
-            <div className="label">{t("settings.from")}</div>
+            <div className="tile-label">{t("settings.from")}</div>
             <input
               className="input mt-1"
               type="time"
@@ -574,7 +575,7 @@ export default function Settings() {
             />
           </div>
           <div>
-            <div className="label">{t("settings.to")}</div>
+            <div className="tile-label">{t("settings.to")}</div>
             <input
               className="input mt-1"
               type="time"
@@ -587,7 +588,7 @@ export default function Settings() {
         </div>
 
         <div className="mt-4">
-          <div className="label">{t("settings.weekdays")}</div>
+          <div className="tile-label">{t("settings.weekdays")}</div>
           <div className="flex flex-wrap gap-2 mt-2">
             {dayValues.map((d) => (
               <label
@@ -612,8 +613,8 @@ export default function Settings() {
         )}
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.replyDelay")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("settings.replyDelay")}</div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -683,8 +684,8 @@ export default function Settings() {
       </div>
 
 
-      <div className="card">
-        <div className="label">{t("settings.monitoredChats")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("settings.monitoredChats")}</div>
         <div className="text-xs text-muted mt-1">
           {t("settings.monitoredChatsDesc")}
         </div>
@@ -718,8 +719,8 @@ export default function Settings() {
         {error && <span className="text-bad text-sm self-center">{error}</span>}
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.notifications")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("settings.notifications")}</div>
         <label className="flex items-start gap-3 mt-2">
           <input
             type="checkbox"
@@ -740,7 +741,7 @@ export default function Settings() {
         </label>
 
         <div className="mt-3">
-          <div className="label">{t("settings.yourChatId")}</div>
+          <div className="tile-label">{t("settings.yourChatId")}</div>
           <div className="flex gap-2 mt-1">
             <input
               className="input flex-1"
@@ -776,14 +777,14 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.adminPanel")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("settings.adminPanel")}</div>
         <div className="text-xs text-muted mt-1">
           {t("settings.adminPanelDesc")}
         </div>
 
         <div className="mt-3">
-          <div className="label">OWNER_CHAT_ID</div>
+          <div className="tile-label">OWNER_CHAT_ID</div>
           <div className="flex gap-2 mt-1">
             <input
               className="input flex-1"
@@ -861,9 +862,9 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="tile">
         <div className="flex items-center justify-between gap-3">
-          <div className="label">{t("settings.voiceMessages")}</div>
+          <div className="tile-label">{t("settings.voiceMessages")}</div>
           <span
             className={`px-2 py-0.5 rounded-full text-xs ${
               whisper.device === "cuda"
@@ -909,7 +910,7 @@ export default function Settings() {
           <>
             <div className="grid md:grid-cols-2 gap-3 mt-4">
               <div>
-                <div className="label">{t("settings.modelLabel")}</div>
+                <div className="tile-label">{t("settings.modelLabel")}</div>
                 <select
                   className="input mt-1"
                   value={whisper.whisper_model}
@@ -928,7 +929,7 @@ export default function Settings() {
                 </select>
               </div>
               <div>
-                <div className="label">
+                <div className="tile-label">
                   {t("settings.languageLabelVoice")}
                 </div>
                 <select
@@ -971,7 +972,7 @@ export default function Settings() {
             </label>
 
             <div className="mt-4">
-              <div className="label">{t("settings.voiceReaction")}</div>
+              <div className="tile-label">{t("settings.voiceReaction")}</div>
               <div className="space-y-1 mt-2">
                 {[
                   { v: "text", label: t("settings.voiceText") },
@@ -1023,8 +1024,8 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.ragMemory")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("settings.ragMemory")}</div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -1075,7 +1076,7 @@ export default function Settings() {
             </div>
 
             <div className="mt-4">
-              <div className="label">{t("settings.maxResults")}</div>
+              <div className="tile-label">{t("settings.maxResults")}</div>
               <input
                 className="input mt-1 w-32"
                 type="number"
@@ -1158,8 +1159,8 @@ export default function Settings() {
       </div>
 
       {test && (
-        <div className="card">
-          <div className="label">{t("settings.testResult")}</div>
+        <div className="tile">
+          <div className="tile-label">{t("settings.testResult")}</div>
           {test.loading && <div className="text-sm text-muted">...</div>}
           {test.error && <div className="text-bad text-sm">{test.error}</div>}
           {test.variants && (
@@ -1171,6 +1172,6 @@ export default function Settings() {
           )}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
+import Page from "../components/Page.jsx";
 
 const FIELDS = [
   ["avg_message_length", "number"],
@@ -16,8 +17,8 @@ function ProfileEditor({ profile, setProfile }) {
   const { t } = useLang();
   const updateField = (key, value) => setProfile((p) => ({ ...(p || {}), [key]: value }));
   return <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-    {FIELDS.map(([key, type]) => <div key={key} className="card">
-      <div className="label">{t(`style.fields.${key}`)}</div>
+    {FIELDS.map(([key, type]) => <div key={key} className="tile">
+      <div className="tile-label">{t(`style.fields.${key}`)}</div>
       {type === "bool" ? (
         <label className="flex items-center gap-2 mt-2 text-sm">
           <input type="checkbox" checked={!!profile?.[key]} onChange={(e) => updateField(key, e.target.checked)} />
@@ -87,8 +88,8 @@ export default function StyleProfile() {
     });
   }, [personas, chats]);
 
-  return <div className="space-y-4">
-    <div className="card flex gap-2 items-center">
+  return <Page>
+    <div className="tile flex gap-2 items-center">
       <button className={`btn-secondary ${settings.persona_mode === "global" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("global")} disabled={saving}>{t("style.globalStyle")}</button>
       <button className={`btn-secondary ${settings.persona_mode === "per_chat" ? "ring-2 ring-accent" : ""}`} onClick={() => saveMode("per_chat")} disabled={saving}>{t("style.perChatStyle")}</button>
       {error && <span className="text-bad text-sm">{error}</span>}
@@ -104,16 +105,16 @@ export default function StyleProfile() {
 
     {settings.persona_mode === "per_chat" && <>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {chatCards.map((p) => <div key={p.chat_id} className="card cursor-pointer" onClick={() => setSelected({ ...p, profile: p.profile || { ...globalProfile } })}>
+        {chatCards.map((p) => <div key={p.chat_id} className="tile cursor-pointer" onClick={() => setSelected({ ...p, profile: p.profile || { ...globalProfile } })}>
           <div className="font-medium">{p.chat_name || p.chat_id}</div>
           <div className="text-sm text-muted">{t("style.tone", { value: p.profile?.tone || t("common.dash") })}</div>
           <div className="text-sm text-muted">{t("style.avgLength", { value: p.profile?.avg_message_length || 0 })}</div>
           <div className="text-xs text-muted">{t("style.updated", { value: p.updated_at || t("common.none") })}</div>
         </div>)}
       </div>
-      {!chatCards.length && <div className="card text-muted text-sm">{t("style.noChats")}</div>}
+      {!chatCards.length && <div className="tile text-muted text-sm">{t("style.noChats")}</div>}
       {selected && <div className="space-y-3">
-        <div className="card font-medium">{t("style.editing", { name: selected.chat_name || selected.chat_id })}</div>
+        <div className="tile font-medium">{t("style.editing", { name: selected.chat_name || selected.chat_id })}</div>
         <ProfileEditor profile={selected.profile || {}} setProfile={(updater) => setSelected((prev) => ({ ...prev, profile: typeof updater === "function" ? updater(prev.profile || {}) : updater }))} />
         <div className="flex gap-2">
           <button className="btn-primary" disabled={saving} onClick={async () => { setSaving(true); try { await api.savePersona(selected.chat_id, selected.profile || {}); await refresh(); } finally { setSaving(false); } }}>{t("common.save")}</button>
@@ -122,5 +123,5 @@ export default function StyleProfile() {
         </div>
       </div>}
     </>}
-  </div>;
+  </Page>;
 }

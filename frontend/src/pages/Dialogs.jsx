@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
+import Page from "../components/Page.jsx";
 
 function formatDate(iso) {
   if (!iso) return "";
@@ -204,8 +205,8 @@ export default function Dialogs() {
   const selectedVersion = versions.find((v) => v.id === selectedBackup);
 
   return (
-    <div className="space-y-4">
-      <div className="card flex flex-wrap items-center justify-between gap-3">
+    <Page>
+      <div className="tile flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
           <div className="text-sm">{t("dialogs.intro")}</div>
           <div className="text-xs text-muted">
@@ -256,11 +257,11 @@ export default function Dialogs() {
       </div>
 
       {error && (
-        <div className="card border-bad/40 text-sm text-bad">{error}</div>
+        <div className="tile border-bad/40 text-sm text-bad">{error}</div>
       )}
 
       <div className="grid grid-cols-12 gap-3 h-[70vh]">
-        <div className="col-span-4 card overflow-y-auto p-0">
+        <div className="col-span-4 tile overflow-y-auto p-0">
           <div className="px-3 py-2 text-xs text-muted border-b border-line sticky top-0 bg-panel">
             {t("dialogs.chatsCount", { count: chats.length })}
           </div>
@@ -317,7 +318,7 @@ export default function Dialogs() {
           })}
         </div>
 
-        <div className="col-span-8 card flex flex-col p-0 overflow-hidden">
+        <div className="col-span-8 tile flex flex-col p-0 overflow-hidden">
           {selectedChat ? (
             <>
               <div className="px-4 py-2 border-b border-line flex flex-wrap items-center gap-3">
@@ -486,6 +487,6 @@ export default function Dialogs() {
           )}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

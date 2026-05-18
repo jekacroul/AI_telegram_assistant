@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
+import Page from "../components/Page.jsx";
 
 function formatEta(seconds) {
   if (!seconds || seconds <= 0) return "—";
@@ -303,7 +304,7 @@ export default function Training() {
     botEnabled && combined.total > 0 && combined.bot / combined.total < 0.1;
 
   return (
-    <div className="space-y-4">
+    <Page>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat
           title={t("training.messages")}
@@ -328,8 +329,8 @@ export default function Training() {
       </div>
 
       {voiceStats && (
-        <div className="card">
-          <div className="label">{t("training.voiceMessages")}</div>
+        <div className="tile">
+          <div className="tile-label">{t("training.voiceMessages")}</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2 text-sm">
             <div>
               <div className="text-muted text-xs">
@@ -363,8 +364,8 @@ export default function Training() {
         </div>
       )}
 
-      <div className="card">
-        <div className="label">{t("training.rejectedByQuality")}</div>
+      <div className="tile">
+        <div className="tile-label">{t("training.rejectedByQuality")}</div>
         <div className="text-xl font-semibold mt-1">
           {qualityStats
             ? t("training.rejectedOf", {
@@ -389,8 +390,8 @@ export default function Training() {
         </div>
       </div>
 
-      <div className="card space-y-4">
-        <div className="label">{t("training.dataSources")}</div>
+      <div className="tile space-y-4">
+        <div className="tile-label">{t("training.dataSources")}</div>
 
         <div className="rounded-lg border border-line p-3 space-y-2">
           <div className="flex items-center gap-3">
@@ -604,7 +605,7 @@ export default function Training() {
         </div>
       </div>
 
-      <div className="card flex flex-wrap gap-2 items-center">
+      <div className="tile flex flex-wrap gap-2 items-center">
         <button className="btn-secondary" onClick={build} disabled={busy}>
           {busy
             ? t("training.building")
@@ -683,7 +684,7 @@ export default function Training() {
           progress.phase !== "cancelled";
         const showIndeterminate = isRunningPhase && percent == null;
         return (
-        <div className="card">
+        <div className="tile">
           <div className="flex flex-wrap gap-4 text-sm items-center">
             <span>
               {t("training.phaseLabel")}
@@ -765,7 +766,7 @@ export default function Training() {
         );
       })()}
 
-      <div className="card">
+      <div className="tile">
         <div className="text-sm text-muted mb-2">
           {t("training.adapterHistory")}
         </div>
@@ -911,7 +912,7 @@ export default function Training() {
           </tbody>
         </table>
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -922,8 +923,8 @@ function reasonLabel(reason, t) {
 
 function Stat({ title, value }) {
   return (
-    <div className="card">
-      <div className="label">{title}</div>
+    <div className="tile">
+      <div className="tile-label">{title}</div>
       <div className="text-xl font-semibold mt-1 truncate">{value}</div>
     </div>
   );

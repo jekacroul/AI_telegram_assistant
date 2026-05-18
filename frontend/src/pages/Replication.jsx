@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
+import Page from "../components/Page.jsx";
 
 function formatBytes(bytes, t) {
   if (!bytes || bytes <= 0) return t("replication.zeroBytes");
@@ -212,7 +213,7 @@ export default function Replication() {
       : null;
 
   return (
-    <div className="space-y-4">
+    <Page>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat
           title={t("replication.sourceDb")}
@@ -252,8 +253,8 @@ export default function Replication() {
         />
       </div>
 
-      <form className="card space-y-4" onSubmit={saveSettings}>
-        <div className="label">{t("replication.settings")}</div>
+      <form className="tile space-y-4" onSubmit={saveSettings}>
+        <div className="tile-label">{t("replication.settings")}</div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex items-center gap-2 text-sm">
@@ -379,7 +380,7 @@ export default function Replication() {
       </form>
 
       {progress && (
-        <div className="card">
+        <div className="tile">
           <div className="flex flex-wrap gap-4 text-sm items-center">
             <span>
               {t("replication.phaseLabel")}
@@ -448,7 +449,7 @@ export default function Replication() {
         </div>
       )}
 
-      <div className="card">
+      <div className="tile">
         <div className="text-sm text-muted mb-2">
           {t("replication.history")}
         </div>
@@ -581,14 +582,14 @@ export default function Replication() {
           </tbody>
         </table>
       </div>
-    </div>
+    </Page>
   );
 }
 
 function Stat({ title, value, hint }) {
   return (
-    <div className="card">
-      <div className="label">{title}</div>
+    <div className="tile">
+      <div className="tile-label">{title}</div>
       <div className="text-xl font-semibold mt-1 truncate">{value}</div>
       {hint && (
         <div className="text-muted text-xs mt-1 truncate" title={hint}>

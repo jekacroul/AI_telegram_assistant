@@ -2,7 +2,7 @@ import React from "react";
 
 export default function MetricCard({ label, value, hint, icon: Icon }) {
   return (
-    <div className="card">
+    <div className="tile">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted">{label}</p>
         {Icon && <Icon size={14} className="text-muted" />}
