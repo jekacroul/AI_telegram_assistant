@@ -1128,7 +1128,7 @@ def _message_to_dict(m: Message) -> dict:
         "chat_name": m.chat_name,
         "chat_username": m.chat_username,
         "sender_id": m.sender_id,
-        "sender_name": m.sender_name,
+        "sender_name": settings.display_name if m.is_mine else m.sender_name,
         "is_mine": m.is_mine,
         "text": text,
         "timestamp": _iso_utc(m.timestamp),
@@ -2087,7 +2087,7 @@ async def dialogs_backup_content(
             {
                 "id": m.id,
                 "sender_id": m.sender_id,
-                "sender_name": m.sender_name,
+                "sender_name": settings.display_name if m.is_mine else m.sender_name,
                 "is_mine": m.is_mine,
                 "text": "" if (m.text in MEDIA_PLACEHOLDERS and m.media_path) else m.text,
                 "timestamp": _iso_utc(m.timestamp),
