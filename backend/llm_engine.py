@@ -4,7 +4,7 @@ import json
 import logging
 import random
 import re
-from typing import Iterable, Optional
+from typing import Optional
 
 import httpx
 
@@ -48,13 +48,21 @@ class LLMUnavailableError(RuntimeError):
 
 SYSTEM_TEMPLATE = (
     "Ты — {user_name}. Ты пишешь сообщение в Telegram собеседнику {sender_name}"
-    " от первого лица, как живой человек. Ни в коем случае не пиши своё имя"
-    " ('{user_name}'), не ставь его перед текстом, не оборачивай ответ в JSON,"
+    " от первого лица, как живой человек. Не подписывай ответ своим именем и"
+    " не ставь его перед текстом как префикс, не оборачивай ответ в JSON,"
     " не используй кавычки, двоеточия-разделители, поля sender/text. Просто"
-    " сам текст сообщения, как ты бы написал его в чате.\n"
+    " сам текст сообщения, как ты бы написал его в чате. Если собеседник"
+    " спрашивает, как тебя зовут, назови себя именно так: '{user_name}' —"
+    " пиши имя точно в этом написании, копируй его буква в букву, без"
+    " сокращений, без выдуманных отчеств и без опечаток. Не соглашайся с"
+    " неверными утверждениями о себе: если собеседник приписывает тебе"
+    " чужое имя, отчество или факты — вежливо, но твёрдо поправь его и"
+    " назови верные данные, не подстраивайся под выдумку.\n"
     "Стиль речи: {style_profile}\n"
     "{rag_block}"
-    "История чата:\n{chat_history}\n"
+    "Ниже идёт переписка с собеседником: реплики собеседника — роль user,"
+    " твои собственные ответы — роль assistant. Отвечай на последнее"
+    " сообщение собеседника, опираясь на весь предыдущий диалог.\n"
     "Дай ровно 3 разных варианта ответа. Формат — нумерованный список,"
     " каждый вариант с новой строки:\n"
     "1. <текст первого варианта>\n"
@@ -64,23 +72,10 @@ SYSTEM_TEMPLATE = (
 )
 
 
-def _format_history(chat_history: Iterable[dict] | None) -> str:
-    if not chat_history:
-        return "(нет)"
-    lines = []
-    for msg in chat_history:
-        who = msg.get("sender_name") or ("Я" if msg.get("is_mine") else "Собеседник")
-        text = msg.get("text", "").replace("\n", " ").strip()
-        if text:
-            lines.append(f"{who}: {text}")
-    return "\n".join(lines) if lines else "(нет)"
-
-
 def build_system_prompt(
     user_name: str,
     style_profile: dict | None,
     sender_name: str,
-    chat_history: Iterable[dict] | None,
     is_voice: bool = False,
     transcription: Optional[str] = None,
     rag_context: Optional[str] = None,
@@ -91,7 +86,6 @@ def build_system_prompt(
         user_name=user_name,
         style_profile=style_str,
         sender_name=sender_name or "неизвестно",
-        chat_history=_format_history(chat_history),
         rag_block=rag_block,
     )
     if is_voice:
@@ -103,6 +97,64 @@ def build_system_prompt(
         )
         base = base + voice_note
     return base
+
+
+def build_chat_messages(
+    user_name: str,
+    style_profile: dict | None,
+    sender_name: str,
+    chat_history: list[dict] | None,
+    incoming_text: str,
+    is_voice: bool = False,
+    transcription: Optional[str] = None,
+    rag_context: Optional[str] = None,
+) -> list[dict]:
+    """Build a multi-turn messages array: system + alternating dialogue turns."""
+    system = build_system_prompt(
+        user_name,
+        style_profile,
+        sender_name,
+        is_voice=is_voice,
+        transcription=transcription,
+        rag_context=rag_context,
+    )
+    messages: list[dict] = [{"role": "system", "content": system}]
+
+    history = list(chat_history or [])
+    incoming_clean = (incoming_text or "").strip()
+    if history:
+        last = history[-1]
+        last_text = (last.get("text") or "").strip()
+        if not last.get("is_mine") and last_text == incoming_clean:
+            history = history[:-1]
+
+    for msg in history:
+        text = (msg.get("text") or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        role = "assistant" if msg.get("is_mine") else "user"
+        messages.append({"role": role, "content": text})
+
+    final = (
+        f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"
+        "Ответь как продолжение чата от первого лица."
+        " Дай ровно 3 разных варианта ответа в виде нумерованного списка"
+        " (1., 2., 3.), без своего имени и без JSON."
+    )
+    messages.append({"role": "user", "content": final})
+    return _merge_consecutive_turns(messages)
+
+
+def _merge_consecutive_turns(messages: list[dict]) -> list[dict]:
+    """Collapse adjacent same-role turns so servers that require strict
+    user/assistant alternation still accept the request."""
+    merged: list[dict] = []
+    for msg in messages:
+        if merged and merged[-1]["role"] == msg["role"]:
+            merged[-1]["content"] += "\n" + msg["content"]
+        else:
+            merged.append(dict(msg))
+    return merged
 
 
 _NAME_TEXT_FRAGMENT_RE = re.compile(
@@ -335,6 +387,14 @@ class LLMClient:
     ) -> str:  # pragma: no cover - overridden
         raise NotImplementedError
 
+    async def generate_chat(
+        self,
+        messages: list[dict],
+        temperature: float = 0.8,
+        num_predict: int | None = None,
+    ) -> str:  # pragma: no cover - overridden
+        raise NotImplementedError
+
     async def generate_reply(
         self,
         incoming_text: str,
@@ -346,22 +406,17 @@ class LLMClient:
         rag_context: Optional[str] = None,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
-        system = build_system_prompt(
+        messages = build_chat_messages(
             effective_name,
             style_profile,
             sender_name,
             chat_history,
+            incoming_text,
             is_voice=is_voice,
             transcription=incoming_text if is_voice else None,
             rag_context=rag_context,
         )
-        prompt = (
-            f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"
-            "Ответь как продолжение чата от первого лица."
-            " Дай ровно 3 разных варианта ответа в виде нумерованного списка"
-            " (1., 2., 3.), без своего имени и без JSON."
-        )
-        raw = await self.generate_raw(system, prompt)
+        raw = await self.generate_chat(messages)
         variants = _extract_variants(raw, user_name=effective_name)
         if not variants:
             fallback = _fallback_from_raw(raw, effective_name)
@@ -422,12 +477,11 @@ class OpenAICompatibleClient(LLMClient):
                 "Проверь, что LM Studio / llama.cpp / vLLM запущен."
             )
 
-    async def generate_raw(
+    async def _post_chat(
         self,
-        system: str,
-        prompt: str,
-        temperature: float = 0.8,
-        num_predict: int | None = None,
+        messages: list[dict],
+        temperature: float,
+        num_predict: int | None,
         json_format: bool = False,
     ) -> str:
         await self._ensure_alive()
@@ -435,10 +489,7 @@ class OpenAICompatibleClient(LLMClient):
             num_predict = settings.llm_max_tokens
         payload: dict = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
             "temperature": temperature,
             "max_tokens": num_predict,
             "stream": False,
@@ -458,6 +509,28 @@ class OpenAICompatibleClient(LLMClient):
                 return ""
             message = choices[0].get("message") or {}
             return message.get("content", "") or ""
+
+    async def generate_raw(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float = 0.8,
+        num_predict: int | None = None,
+        json_format: bool = False,
+    ) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        return await self._post_chat(messages, temperature, num_predict, json_format)
+
+    async def generate_chat(
+        self,
+        messages: list[dict],
+        temperature: float = 0.8,
+        num_predict: int | None = None,
+    ) -> str:
+        return await self._post_chat(messages, temperature, num_predict)
 
 
 _default_client: Optional[LLMClient] = None

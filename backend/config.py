@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     logs_path: str = Field(default="./logs/", alias="LOGS_PATH")
     webhook_base_url: Optional[str] = Field(default=None, alias="WEBHOOK_BASE_URL")
     user_name: str = Field(default="Я", alias="USER_NAME")
+    user_display_name: str = Field(default="", alias="USER_DISPLAY_NAME")
     hf_base_model: str = Field(default="mistralai/Mistral-7B-Instruct-v0.2", alias="HF_BASE_MODEL")
     llm_max_tokens: int = Field(default=2048, alias="LLM_MAX_TOKENS")
     llama_cpp_path: Optional[str] = Field(default=None, alias="LLAMA_CPP_PATH")
@@ -59,6 +60,12 @@ class Settings(BaseSettings):
     media_path: str = Field(default="./media/", alias="MEDIA_PATH")
     owner_chat_id: str = Field(default="", alias="OWNER_CHAT_ID")
     admin_bot_enabled: bool = Field(default=True, alias="ADMIN_BOT_ENABLED")
+
+    @property
+    def display_name(self) -> str:
+        """Short name shown in the web UI (Telegram-style). Falls back to the
+        full chat name when USER_DISPLAY_NAME is not set."""
+        return self.user_display_name.strip() or self.user_name
 
     @property
     def db_url(self) -> str:
