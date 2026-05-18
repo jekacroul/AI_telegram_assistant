@@ -147,7 +147,12 @@ def _is_usable_contact_name(name: Optional[str], username: str = "") -> bool:
     if not value:
         return False
     lowered = value.casefold()
-    if lowered in {"unknown", settings.user_name.casefold()}:
+    own_names = {
+        "unknown",
+        settings.user_name.casefold(),
+        settings.display_name.casefold(),
+    }
+    if lowered in own_names:
         return False
     normalized_username = _normalize_username(username).casefold()
     return not normalized_username or lowered != normalized_username
@@ -380,7 +385,7 @@ async def status() -> dict:
         "db": db_ok,
         "auto_reply": auto_reply,
         "llm_model": llm_model,
-        "user_name": settings.user_name,
+        "user_name": settings.display_name,
         "last_update_at": _iso_utc(telegram_service.last_update_at),
         "last_update_kind": telegram_service.last_update_kind,
         "update_count": telegram_service.update_count,
@@ -2112,7 +2117,7 @@ def _format_dialog_backup_text(
     ]
     for message in messages:
         author = (
-            settings.user_name
+            settings.display_name
             if message.is_mine
             else (message.sender_name or "собеседник")
         )
