@@ -189,6 +189,13 @@
            hover:text-zinc-700 dark:hover:text-slate-200
            transition-all duration-100 cursor-pointer;
   }
+  .nav-item-row {
+    @apply w-full h-9 px-2.5 gap-3 rounded-xl flex items-center justify-start
+           text-sm text-zinc-400 dark:text-slate-500
+           hover:bg-light-hover dark:hover:bg-dark-hover
+           hover:text-zinc-700 dark:hover:text-slate-200
+           transition-all duration-100 cursor-pointer;
+  }
   .nav-item-active {
     @apply bg-indigo-50 dark:bg-indigo-950/40
            text-indigo-600 dark:text-indigo-400;
