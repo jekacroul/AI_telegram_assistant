@@ -1219,14 +1219,26 @@ class TelegramService:
         chat_id: int,
         chat_name: str,
     ) -> None:
+        # One reply answers the whole burst: mark every still-unanswered
+        # incoming message up to the one replied to as handled, not just the
+        # last. Otherwise earlier messages of the chain stay "pending".
+        cleared_ids: list[int] = []
         async with SessionLocal() as session:
             result = await session.execute(
-                select(Message).where(Message.id == original_id)
+                select(Message).where(
+                    Message.chat_id == chat_id,
+                    Message.is_mine == False,  # noqa: E712
+                    Message.replied == False,  # noqa: E712
+                    Message.id <= original_id,
+                )
             )
-            original = result.scalar_one_or_none()
-            if original:
-                original.replied = True
-                original.reply_text = reply_text
+            burst = list(result.scalars().all())
+            for m in burst:
+                m.replied = True
+                m.reply_text = reply_text
+                m.pending_reason = None
+                if m.id != original_id:
+                    cleared_ids.append(m.id)
             session.add(
                 Message(
                     chat_id=chat_id,
@@ -1250,6 +1262,10 @@ class TelegramService:
                 "original_id": original_id,
             },
         )
+        if cleared_ids:
+            await message_bus.publish(
+                "queue_cleared", {"chat_id": chat_id, "ids": cleared_ids}
+            )
 
     async def send_reply(
         self,
