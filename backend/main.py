@@ -1987,6 +1987,7 @@ async def dialogs_chats(session: AsyncSession = Depends(get_session)) -> list[di
         select(
             Message.chat_id,
             func.max(Message.chat_name).label("chat_name"),
+            func.max(Message.chat_username).label("chat_username"),
             func.count(Message.id).label("count"),
             func.max(Message.timestamp).label("last"),
         )
@@ -2017,6 +2018,7 @@ async def dialogs_chats(session: AsyncSession = Depends(get_session)) -> list[di
         {
             "chat_id": c.chat_id,
             "chat_name": c.chat_name or "",
+            "chat_username": c.chat_username or "",
             "message_count": c.count,
             "last_message_at": _iso_utc(c.last),
             "excluded": c.chat_id in excluded,

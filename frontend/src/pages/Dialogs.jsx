@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api } from "../lib/api.js";
 import { MessagesSquare } from "lucide-react";
 import { useLang } from "../hooks/useLang.js";
@@ -22,6 +28,55 @@ function isMediaPlaceholder(text) {
   );
 }
 
+const AVATAR_COLORS = [
+  "bg-rose-500",
+  "bg-orange-500",
+  "bg-amber-500",
+  "bg-emerald-500",
+  "bg-teal-500",
+  "bg-sky-500",
+  "bg-indigo-500",
+  "bg-violet-500",
+  "bg-pink-500",
+];
+
+function avatarColor(id) {
+  return AVATAR_COLORS[Math.abs(Number(id) || 0) % AVATAR_COLORS.length];
+}
+
+function initials(name) {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return ((parts[0][0] || "") + (parts[1]?.[0] || "")).toUpperCase();
+}
+
+function sameDay(a, b) {
+  if (!a || !b) return false;
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
+
+function formatDay(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function Avatar({ name, id, size = "w-10 h-10" }) {
+  return (
+    <div
+      className={`${size} ${avatarColor(
+        id
+      )} rounded-full flex items-center justify-center
+         text-white text-sm font-semibold flex-shrink-0 select-none`}
+    >
+      {initials(name)}
+    </div>
+  );
+}
+
 export default function Dialogs() {
   const { t } = useLang();
   const [chats, setChats] = useState([]);
@@ -41,6 +96,7 @@ export default function Dialogs() {
   const [savingInterval, setSavingInterval] = useState(false);
   const [intervalSaved, setIntervalSaved] = useState(false);
   const [mediaPreview, setMediaPreview] = useState(null);
+  const messagesRef = useRef(null);
 
   const excludedSet = useMemo(
     () => new Set((settings.excluded_chats || []).map((x) => Number(x))),
@@ -92,6 +148,11 @@ export default function Dialogs() {
   useEffect(() => {
     loadVersions(selectedChatId);
   }, [selectedChatId, loadVersions]);
+
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el && !loading) el.scrollTop = el.scrollHeight;
+  }, [backupData, loading]);
 
   async function selectBackup(id) {
     setSelectedBackup(id);
@@ -286,32 +347,34 @@ export default function Dialogs() {
           {chats.map((c) => {
             const isExcluded = excludedSet.has(Number(c.chat_id));
             const isActive = c.chat_id === selectedChatId;
+            const name = c.chat_name || `chat ${c.chat_id}`;
             return (
               <div
                 key={c.chat_id}
-                className={`flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-line ${
-                  isActive ? "bg-accent/20" : "hover:bg-surface"
-                }`}
+                className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer
+                  border-b border-line transition-colors ${
+                    isActive ? "bg-accent/20" : "hover:bg-surface"
+                  }`}
                 onClick={() => setSelectedChatId(c.chat_id)}
               >
+                <Avatar name={name} id={c.chat_id} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm truncate">
-                    {c.chat_name || `chat ${c.chat_id}`}
+                  <div className="text-sm font-medium truncate text-fg">
+                    {name}
                   </div>
                   <div className="text-xs text-muted truncate">
-                    {t("dialogs.msgsAbbr", { count: c.message_count })} ·{" "}
-                    {c.versions > 0
-                      ? t("dialogs.versionsInfo", {
-                          latest: c.latest_version,
-                          count: c.versions,
-                        })
-                      : t("dialogs.noBackups")}
+                    {c.chat_username && (
+                      <span className="text-accent">@{c.chat_username}</span>
+                    )}
+                    {c.chat_username ? " · " : ""}
+                    {t("dialogs.msgsAbbr", { count: c.message_count })}
+                    {c.versions > 0 ? ` · v${c.latest_version}` : ""}
                   </div>
                 </div>
                 <button
-                  className={`text-xs px-2 py-1 rounded ${
+                  className={`text-[11px] px-2 py-1 rounded-md flex-shrink-0 ${
                     isExcluded
-                      ? "bg-bad/30 text-bad"
+                      ? "bg-bad/20 text-bad"
                       : "bg-surface text-muted hover:text-fg"
                   }`}
                   onClick={(e) => {
@@ -334,13 +397,22 @@ export default function Dialogs() {
         <div className="col-span-8 tile flex flex-col p-0 overflow-hidden">
           {selectedChat ? (
             <>
-              <div className="px-4 py-2 border-b border-line flex flex-wrap items-center gap-3">
+              <div className="px-4 py-2.5 border-b border-line flex flex-wrap items-center gap-3">
+                <Avatar
+                  name={
+                    selectedChat.chat_name || `chat ${selectedChat.chat_id}`
+                  }
+                  id={selectedChat.chat_id}
+                  size="w-9 h-9"
+                />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm truncate">
+                  <div className="text-sm font-semibold truncate text-fg">
                     {selectedChat.chat_name || `chat ${selectedChat.chat_id}`}
                   </div>
-                  <div className="text-xs text-muted">
-                    chat_id: {selectedChat.chat_id}
+                  <div className="text-xs text-muted truncate">
+                    {selectedChat.chat_username
+                      ? `@${selectedChat.chat_username}`
+                      : `chat_id: ${selectedChat.chat_id}`}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -391,7 +463,11 @@ export default function Dialogs() {
                   </button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1 bg-bg/50">
+              <div
+                ref={messagesRef}
+                className="flex-1 overflow-y-auto px-4 py-3
+                           bg-light-bg dark:bg-dark-bg"
+              >
                 {loading && (
                   <div className="text-xs text-muted">
                     {t("common.loading")}
@@ -407,69 +483,103 @@ export default function Dialogs() {
                     {t("dialogs.noBackupsHint")}
                   </div>
                 )}
-                {backupData &&
-                  backupData.messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`flex ${
-                        m.is_mine ? "justify-end" : "justify-start"
-                      }`}
-                    >
-                      <div
-                        className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
-                          m.is_mine
-                            ? "bg-accent text-accent-fg"
-                            : "bg-surface border border-line text-fg"
-                        }`}
-                      >
-                        {!m.is_mine && (
-                          <div className="text-[10px] text-muted mb-0.5">
-                            {m.sender_name || t("dialogs.interlocutor")}
-                          </div>
-                        )}
-                        {m.text && !(m.media_path && isMediaPlaceholder(m.text)) && (
-                          <div className="whitespace-pre-wrap break-words">
-                            {m.text}
-                          </div>
-                        )}
-                        {m.media_type === "photo" && m.media_path && (
-                          <button className="mt-2 block" onClick={() => setMediaPreview(m)}>
-                            <img
-                              src={m.media_path}
-                              alt="backup photo"
-                              className="max-h-44 rounded-md border border-line object-cover"
-                            />
-                          </button>
-                        )}
-                        {(m.media_type === "video" || m.media_type === "video_note") &&
-                          m.media_path && (
-                            <button className="mt-2 block" onClick={() => setMediaPreview(m)}>
-                              <video
-                                src={m.media_path}
-                                className="max-h-44 rounded-md border border-line"
-                              />
-                            </button>
-                          )}
-                        {m.media_private && !m.media_path && (
-                          <div className="mt-2 text-[11px] text-fg/70">
-                            {t("dialogs.privateMedia", {
-                              kind:
-                                m.media_type === "photo"
-                                  ? t("dialogs.photo")
-                                  : t("dialogs.video"),
-                            })}
+                {!loading &&
+                  backupData &&
+                  backupData.messages.map((m, i) => {
+                    const prev = backupData.messages[i - 1];
+                    const showDay =
+                      !prev || !sameDay(prev.timestamp, m.timestamp);
+                    const grouped =
+                      prev &&
+                      !showDay &&
+                      prev.is_mine === m.is_mine &&
+                      prev.sender_id === m.sender_id;
+                    const hasText =
+                      m.text && !(m.media_path && isMediaPlaceholder(m.text));
+                    return (
+                      <React.Fragment key={m.id}>
+                        {showDay && (
+                          <div className="flex justify-center my-3">
+                            <span
+                              className="px-3 py-0.5 rounded-full text-[11px]
+                                         text-muted bg-surface border border-line"
+                            >
+                              {formatDay(m.timestamp)}
+                            </span>
                           </div>
                         )}
                         <div
-                          className={`text-[10px] mt-1 text-right ${
-                            m.is_mine ? "text-accent-fg/60" : "text-muted"
-                          }`}
+                          className={`flex ${
+                            m.is_mine ? "justify-end" : "justify-start"
+                          } ${grouped ? "mt-0.5" : "mt-2"}`}
                         >
-                          {formatTime(m.timestamp)}
+                          <div
+                            className={`max-w-[72%] rounded-2xl px-3 py-1.5
+                              text-sm shadow-sm ${
+                                m.is_mine
+                                  ? "bg-accent text-accent-fg rounded-br-md"
+                                  : "bg-light-card dark:bg-dark-card border border-line text-fg rounded-bl-md"
+                              }`}
+                          >
+                            {!m.is_mine && !grouped && (
+                              <div className="text-[11px] font-semibold mb-0.5 text-accent">
+                                {m.sender_name || t("dialogs.interlocutor")}
+                              </div>
+                            )}
+                            {hasText && (
+                              <div className="whitespace-pre-wrap break-words">
+                                {m.text}
+                              </div>
+                            )}
+                            {m.media_type === "photo" && m.media_path && (
+                              <button
+                                className="mt-1 block"
+                                onClick={() => setMediaPreview(m)}
+                              >
+                                <img
+                                  src={m.media_path}
+                                  alt="backup photo"
+                                  className="max-h-44 rounded-lg object-cover"
+                                />
+                              </button>
+                            )}
+                            {(m.media_type === "video" ||
+                              m.media_type === "video_note") &&
+                              m.media_path && (
+                                <button
+                                  className="mt-1 block"
+                                  onClick={() => setMediaPreview(m)}
+                                >
+                                  <video
+                                    src={m.media_path}
+                                    className="max-h-44 rounded-lg"
+                                  />
+                                </button>
+                              )}
+                            {m.media_private && !m.media_path && (
+                              <div className="mt-1 text-[11px] opacity-70">
+                                {t("dialogs.privateMedia", {
+                                  kind:
+                                    m.media_type === "photo"
+                                      ? t("dialogs.photo")
+                                      : t("dialogs.video"),
+                                })}
+                              </div>
+                            )}
+                            <div
+                              className={`text-[10px] mt-0.5 text-right ${
+                                m.is_mine
+                                  ? "text-accent-fg/60"
+                                  : "text-muted"
+                              }`}
+                            >
+                              {formatTime(m.timestamp)}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  ))}
+                      </React.Fragment>
+                    );
+                  })}
               </div>
             </>
           ) : (
