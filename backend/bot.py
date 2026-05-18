@@ -811,7 +811,6 @@ class TelegramService:
                     "text": reply_input_text,
                     "sender_name": sender_name,
                     "chat_name": chat_name,
-                    "reply_to": tg_msg.message_id,
                     "business_connection_id": business_connection_id,
                     "is_voice": is_voice,
                 }
@@ -1107,7 +1106,6 @@ class TelegramService:
                 await self.send_reply(
                     chat_id,
                     part,
-                    reply_to=ctx["reply_to"] if idx == 0 else None,
                     business_connection_id=ctx["business_connection_id"],
                 )
                 if idx + 1 < len(parts):
