@@ -2,6 +2,19 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
 import { useTheme } from "../hooks/useTheme.js";
+import {
+  Palette,
+  Cpu,
+  Users,
+  CalendarClock,
+  Timer,
+  MessageSquare,
+  Bell,
+  ShieldCheck,
+  Mic,
+  Database,
+  FlaskConical,
+} from "lucide-react";
 import { LANGUAGES } from "../lib/i18n.js";
 import Page from "../components/Page.jsx";
 
@@ -358,7 +371,10 @@ export default function Settings() {
   return (
     <Page>
       <div className="tile">
-        <div className="tile-label">{t("settings.appearance")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <Palette size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.appearance")}</span>
+        </div>
         <div className="grid md:grid-cols-2 gap-3 mt-3">
           <div>
             <div className="tile-label">{t("settings.themeLabel")}</div>
@@ -401,7 +417,10 @@ export default function Settings() {
       </div>
 
       <div className="tile">
-        <div className="tile-label">{t("settings.lmModel")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <Cpu size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.lmModel")}</span>
+        </div>
         <select
           className="input mt-2"
           value={s.llm_model}
@@ -486,7 +505,10 @@ export default function Settings() {
       </div>
 
       <div className="tile">
-        <div className="tile-label">{t("settings.groupReplies")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <Users size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.groupReplies")}</span>
+        </div>
         <div className="text-xs text-muted mt-1">
           {t("settings.groupRepliesDesc")}
         </div>
@@ -511,7 +533,10 @@ export default function Settings() {
       <div className="tile">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="tile-label">{t("settings.schedule")}</div>
+            <div className="flex items-center gap-2">
+              <CalendarClock size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+              <span className="tile-label mb-0">{t("settings.schedule")}</span>
+            </div>
             <div className="text-xs text-muted mt-1">
               {t("settings.scheduleDesc")}
             </div>
@@ -614,7 +639,10 @@ export default function Settings() {
       </div>
 
       <div className="tile">
-        <div className="tile-label">{t("settings.replyDelay")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <Timer size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.replyDelay")}</span>
+        </div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -685,7 +713,10 @@ export default function Settings() {
 
 
       <div className="tile">
-        <div className="tile-label">{t("settings.monitoredChats")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <MessageSquare size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.monitoredChats")}</span>
+        </div>
         <div className="text-xs text-muted mt-1">
           {t("settings.monitoredChatsDesc")}
         </div>
@@ -720,7 +751,10 @@ export default function Settings() {
       </div>
 
       <div className="tile">
-        <div className="tile-label">{t("settings.notifications")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <Bell size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.notifications")}</span>
+        </div>
         <label className="flex items-start gap-3 mt-2">
           <input
             type="checkbox"
@@ -778,7 +812,10 @@ export default function Settings() {
       </div>
 
       <div className="tile">
-        <div className="tile-label">{t("settings.adminPanel")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.adminPanel")}</span>
+        </div>
         <div className="text-xs text-muted mt-1">
           {t("settings.adminPanelDesc")}
         </div>
@@ -864,7 +901,10 @@ export default function Settings() {
 
       <div className="tile">
         <div className="flex items-center justify-between gap-3">
-          <div className="tile-label">{t("settings.voiceMessages")}</div>
+          <div className="flex items-center gap-2">
+            <Mic size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+            <span className="tile-label mb-0">{t("settings.voiceMessages")}</span>
+          </div>
           <span
             className={`px-2 py-0.5 rounded-full text-xs ${
               whisper.device === "cuda"
@@ -1025,7 +1065,10 @@ export default function Settings() {
       </div>
 
       <div className="tile">
-        <div className="tile-label">{t("settings.ragMemory")}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <Database size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.ragMemory")}</span>
+        </div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -1160,7 +1203,10 @@ export default function Settings() {
 
       {test && (
         <div className="tile">
-          <div className="tile-label">{t("settings.testResult")}</div>
+          <div className="flex items-center gap-2 mb-1">
+            <FlaskConical size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+            <span className="tile-label mb-0">{t("settings.testResult")}</span>
+          </div>
           {test.loading && <div className="text-sm text-muted">...</div>}
           {test.error && <div className="text-bad text-sm">{test.error}</div>}
           {test.variants && (

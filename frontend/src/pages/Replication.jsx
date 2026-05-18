@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
+import { Settings2, History } from "lucide-react";
 import { useLang } from "../hooks/useLang.js";
 import Page from "../components/Page.jsx";
+import Tile from "../components/Tile.jsx";
 
 function formatBytes(bytes, t) {
   if (!bytes || bytes <= 0) return t("replication.zeroBytes");
@@ -254,7 +256,13 @@ export default function Replication() {
       </div>
 
       <form className="tile space-y-4" onSubmit={saveSettings}>
-        <div className="tile-label">{t("replication.settings")}</div>
+        <div className="flex items-center gap-2">
+          <Settings2
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">{t("replication.settings")}</span>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex items-center gap-2 text-sm">
@@ -280,14 +288,14 @@ export default function Replication() {
           </label>
 
           <label className="text-sm space-y-1">
-            <div className="text-muted text-xs">
+            <div className="tile-label">
               {t("replication.intervalMinutes")}
             </div>
             <input
               type="number"
               min="1"
               max="10080"
-              className="w-full bg-bg border border-line rounded px-3 py-2"
+              className="input"
               value={form.interval_minutes}
               onChange={(e) =>
                 setForm({ ...form, interval_minutes: e.target.value })
@@ -296,14 +304,14 @@ export default function Replication() {
           </label>
 
           <label className="text-sm space-y-1">
-            <div className="text-muted text-xs">
+            <div className="tile-label">
               {t("replication.retentionLabel")}
             </div>
             <input
               type="number"
               min="1"
               max="1000"
-              className="w-full bg-bg border border-line rounded px-3 py-2"
+              className="input"
               value={form.retention}
               onChange={(e) =>
                 setForm({ ...form, retention: e.target.value })
@@ -312,14 +320,14 @@ export default function Replication() {
           </label>
 
           <label className="text-sm space-y-1">
-            <div className="text-muted text-xs">
+            <div className="tile-label">
               {t("replication.listLimitLabel")}
             </div>
             <input
               type="number"
               min="1"
               max="1000"
-              className="w-full bg-bg border border-line rounded px-3 py-2"
+              className="input"
               value={form.list_limit}
               onChange={(e) =>
                 setForm({ ...form, list_limit: e.target.value })
@@ -328,13 +336,13 @@ export default function Replication() {
           </label>
 
           <label className="text-sm space-y-1 md:col-span-2">
-            <div className="text-muted text-xs">
+            <div className="tile-label">
               {t("replication.targetDirLabel")}
             </div>
             <input
               type="text"
               placeholder="./replicas"
-              className="w-full bg-bg border border-line rounded px-3 py-2"
+              className="input"
               value={form.target_dir}
               onChange={(e) =>
                 setForm({ ...form, target_dir: e.target.value })
@@ -450,8 +458,12 @@ export default function Replication() {
       )}
 
       <div className="tile">
-        <div className="text-sm text-muted mb-2">
-          {t("replication.history")}
+        <div className="flex items-center gap-2 mb-3">
+          <History
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">{t("replication.history")}</span>
         </div>
         <table className="w-full text-sm">
           <thead className="text-muted">

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
+import { Mic, ShieldX, Layers, History } from "lucide-react";
 import { useLang } from "../hooks/useLang.js";
 import Page from "../components/Page.jsx";
 
@@ -330,8 +331,16 @@ export default function Training() {
 
       {voiceStats && (
         <div className="tile">
-          <div className="tile-label">{t("training.voiceMessages")}</div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2 text-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <Mic
+              size={14}
+              className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+            />
+            <span className="tile-label mb-0">
+              {t("training.voiceMessages")}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
             <div>
               <div className="text-muted text-xs">
                 {t("training.voiceReceived")}
@@ -365,8 +374,16 @@ export default function Training() {
       )}
 
       <div className="tile">
-        <div className="tile-label">{t("training.rejectedByQuality")}</div>
-        <div className="text-xl font-semibold mt-1">
+        <div className="flex items-center gap-2 mb-3">
+          <ShieldX
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("training.rejectedByQuality")}
+          </span>
+        </div>
+        <div className="text-xl font-semibold">
           {qualityStats
             ? t("training.rejectedOf", {
                 rejected: qualityStats.total_rejected,
@@ -391,7 +408,13 @@ export default function Training() {
       </div>
 
       <div className="tile space-y-4">
-        <div className="tile-label">{t("training.dataSources")}</div>
+        <div className="flex items-center gap-2">
+          <Layers
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">{t("training.dataSources")}</span>
+        </div>
 
         <div className="rounded-lg border border-line p-3 space-y-2">
           <div className="flex items-center gap-3">
@@ -767,8 +790,14 @@ export default function Training() {
       })()}
 
       <div className="tile">
-        <div className="text-sm text-muted mb-2">
-          {t("training.adapterHistory")}
+        <div className="flex items-center gap-2 mb-3">
+          <History
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("training.adapterHistory")}
+          </span>
         </div>
         <table className="w-full text-sm">
           <thead className="text-muted">

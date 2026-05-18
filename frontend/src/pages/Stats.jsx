@@ -13,11 +13,21 @@ import {
 import { api } from "../lib/api.js";
 import MetricCard from "../components/MetricCard.jsx";
 import EmptyState from "../components/EmptyState.jsx";
-import { BarChart2 } from "lucide-react";
+import {
+  BarChart2,
+  Activity,
+  Inbox,
+  Send,
+  ThumbsUp,
+  ThumbsDown,
+  Award,
+  Timer,
+} from "lucide-react";
 import { useTheme } from "../hooks/useTheme.js";
 import { useLang } from "../hooks/useLang.js";
 import { chartColors } from "../lib/colors.js";
 import Page from "../components/Page.jsx";
+import Tile from "../components/Tile.jsx";
 
 function useChartColors() {
   const { isDark } = useTheme();
@@ -145,7 +155,13 @@ export default function Stats() {
   return (
     <Page className="space-y-6">
       {error && (
-        <div className="tile border-bad/40 text-sm text-bad">{error}</div>
+        <div
+          className="tile flex items-center gap-2 text-sm
+                     text-rose-600 dark:text-rose-300
+                     border-rose-300 dark:border-rose-900/60"
+        >
+          {error}
+        </div>
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -153,11 +169,15 @@ export default function Stats() {
           label={t("stats.received")}
           value={overview?.received ?? "—"}
           hint={t("stats.receivedHint")}
+          icon={Inbox}
+          accent="sky"
         />
         <MetricCard
           label={t("stats.sent")}
           value={overview?.sent ?? "—"}
           hint={t("stats.sentHint", { count: overview?.replied ?? 0 })}
+          icon={Send}
+          accent="emerald"
         />
         <MetricCard
           label={t("stats.approvedManual")}
@@ -165,16 +185,19 @@ export default function Stats() {
           hint={t("stats.approvalHint", {
             rate: formatPercent(overview?.approval_rate),
           })}
+          icon={ThumbsUp}
+          accent="violet"
         />
         <MetricCard
           label={t("stats.rejected")}
           value={overview?.rejected ?? "—"}
           hint={t("stats.rejectedHint")}
+          icon={ThumbsDown}
+          accent="rose"
         />
       </div>
 
-      <div className="tile">
-        <p className="tile-label">{t("stats.activity30")}</p>
+      <Tile title={t("stats.activity30")} icon={Activity}>
         <div className="h-64">
           <ResponsiveContainer>
             <LineChart data={activityChartData}>
@@ -213,10 +236,9 @@ export default function Stats() {
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </Tile>
 
-      <div className="tile">
-        <p className="tile-label">{t("stats.topChats")}</p>
+      <Tile title={t("stats.topChats")} icon={BarChart2}>
         {topChatsData.length === 0 ? (
           <EmptyState
             icon={BarChart2}
@@ -258,12 +280,18 @@ export default function Stats() {
             </ResponsiveContainer>
           </div>
         )}
-      </div>
+      </Tile>
 
       <div className="tile overflow-hidden p-0">
-        <p className="tile-label px-4 pt-4">
-          {t("stats.qualityByVersion")}
-        </p>
+        <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+          <Award
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("stats.qualityByVersion")}
+          </span>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">
@@ -315,9 +343,15 @@ export default function Stats() {
       </div>
 
       <div className="tile overflow-hidden p-0">
-        <p className="tile-label px-4 pt-4">
-          {t("stats.avgResponseTime")}
-        </p>
+        <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+          <Timer
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("stats.avgResponseTime")}
+          </span>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">

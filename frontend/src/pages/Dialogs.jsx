@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
+import { MessagesSquare } from "lucide-react";
 import { useLang } from "../hooks/useLang.js";
 import Page from "../components/Page.jsx";
+import Tile from "../components/Tile.jsx";
 
 function formatDate(iso) {
   if (!iso) return "";
@@ -206,15 +208,29 @@ export default function Dialogs() {
 
   return (
     <Page>
-      <div className="tile flex flex-wrap items-center justify-between gap-3">
+      <Tile
+        title={t("nav.dialogs")}
+        icon={MessagesSquare}
+        actions={
+          <button
+            onClick={runBackup}
+            disabled={busy}
+            className="btn-primary disabled:opacity-50"
+          >
+            {busy ? t("dialogs.backupRunning") : t("dialogs.runBackup")}
+          </button>
+        }
+      >
         <div className="flex flex-col gap-1">
-          <div className="text-sm">{t("dialogs.intro")}</div>
+          <div className="text-sm text-zinc-700 dark:text-slate-200">
+            {t("dialogs.intro")}
+          </div>
           <div className="text-xs text-muted">
             {t("dialogs.lastRun", {
               date: formatDate(settings.last_run_at) || t("common.dash"),
             })}
           </div>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-2">
             <span className="text-xs text-muted">
               {t("dialogs.intervalMin")}
             </span>
@@ -229,7 +245,7 @@ export default function Dialogs() {
               }}
             />
             <button
-              className="btn-secondary disabled:opacity-50"
+              className="btn-ghost disabled:opacity-50"
               onClick={saveInterval}
               disabled={!intervalDirty || savingInterval}
             >
@@ -245,19 +261,16 @@ export default function Dialogs() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={runBackup}
-            disabled={busy}
-            className="btn-primary disabled:opacity-50"
-          >
-            {busy ? t("dialogs.backupRunning") : t("dialogs.runBackup")}
-          </button>
-        </div>
-      </div>
+      </Tile>
 
       {error && (
-        <div className="tile border-bad/40 text-sm text-bad">{error}</div>
+        <div
+          className="tile flex items-center gap-2 text-sm
+                     text-rose-600 dark:text-rose-300
+                     border-rose-300 dark:border-rose-900/60"
+        >
+          {error}
+        </div>
       )}
 
       <div className="grid grid-cols-12 gap-3 h-[70vh]">
