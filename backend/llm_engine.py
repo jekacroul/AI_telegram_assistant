@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
@@ -47,28 +48,24 @@ class LLMUnavailableError(RuntimeError):
 
 
 SYSTEM_TEMPLATE = (
-    "Ты — {user_name}. Ты пишешь сообщение в Telegram собеседнику {sender_name}"
-    " от первого лица, как живой человек. Не подписывай ответ своим именем и"
-    " не ставь его перед текстом как префикс, не оборачивай ответ в JSON,"
-    " не используй кавычки, двоеточия-разделители, поля sender/text. Просто"
-    " сам текст сообщения, как ты бы написал его в чате. Если собеседник"
-    " спрашивает, как тебя зовут, назови себя именно так: '{user_name}' —"
-    " пиши имя точно в этом написании, копируй его буква в букву, без"
-    " сокращений, без выдуманных отчеств и без опечаток. Не соглашайся с"
-    " неверными утверждениями о себе: если собеседник приписывает тебе"
-    " чужое имя, отчество или факты — вежливо, но твёрдо поправь его и"
-    " назови верные данные, не подстраивайся под выдумку.\n"
+    "Ты — {user_name}. Ты переписываешься в Telegram с собеседником"
+    " {sender_name} от первого лица, как живой человек.\n"
+    "Отвечай только текстом своего сообщения — так, как ты написал бы его"
+    " в чате. Не подписывай ответ своим именем и не ставь его перед"
+    " текстом, не оборачивай ответ в JSON, не используй кавычки и поля"
+    " sender/text, не давай нумерованных списков, заголовков и пояснений."
+    " Просто одно живое сообщение-ответ.\n"
+    "Если собеседник спрашивает, как тебя зовут, назови себя именно так:"
+    " '{user_name}' — пиши имя точно в этом написании, копируй его буква"
+    " в букву, без сокращений, без выдуманных отчеств и без опечаток. Не"
+    " соглашайся с неверными утверждениями о себе: если собеседник"
+    " приписывает тебе чужое имя, отчество или факты — вежливо, но твёрдо"
+    " поправь его и назови верные данные, не подстраивайся под выдумку.\n"
     "Стиль речи: {style_profile}\n"
     "{rag_block}"
     "Ниже идёт переписка с собеседником: реплики собеседника — роль user,"
-    " твои собственные ответы — роль assistant. Отвечай на последнее"
-    " сообщение собеседника, опираясь на весь предыдущий диалог.\n"
-    "Дай ровно 3 разных варианта ответа. Формат — нумерованный список,"
-    " каждый вариант с новой строки:\n"
-    "1. <текст первого варианта>\n"
-    "2. <текст второго варианта>\n"
-    "3. <текст третьего варианта>\n"
-    "Никаких других пояснений, заголовков или JSON."
+    " твои собственные ответы — роль assistant. Ответь на последнее"
+    " сообщение собеседника, опираясь на весь предыдущий диалог."
 )
 
 
@@ -135,12 +132,11 @@ def build_chat_messages(
         role = "assistant" if msg.get("is_mine") else "user"
         messages.append({"role": role, "content": text})
 
-    final = (
-        f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"
-        "Ответь как продолжение чата от первого лица."
-        " Дай ровно 3 разных варианта ответа в виде нумерованного списка"
-        " (1., 2., 3.), без своего имени и без JSON."
-    )
+    # Feed the model the raw incoming message as the final turn — no meta
+    # wrapper, no formatting instructions. A chat-clone model replies best
+    # to a clean conversation; wrapper text confuses it into answering the
+    # wrapper instead of the message.
+    final = incoming_clean or (incoming_text or "").strip()
     messages.append({"role": "user", "content": final})
     return _merge_consecutive_turns(messages)
 
@@ -291,6 +287,20 @@ def _fallback_from_raw(raw: str, user_name: str | None) -> str:
     return text
 
 
+def _extract_single_reply(raw: str, user_name: str | None = None) -> str:
+    """Clean a single chat reply from one model completion.
+
+    The model is asked for a plain message, but defensively handle the case
+    where it still wraps the answer in a numbered list, JSON, or quotes.
+    """
+    if not raw or not raw.strip():
+        return ""
+    variants = _extract_variants(raw, user_name=user_name)
+    if variants:
+        return variants[0]
+    return _fallback_from_raw(raw, user_name)
+
+
 def _extract_variants(raw: str, user_name: str | None = None) -> list[str]:
     if not raw:
         return []
@@ -416,18 +426,36 @@ class LLMClient:
             transcription=incoming_text if is_voice else None,
             rag_context=rag_context,
         )
-        raw = await self.generate_chat(messages)
-        variants = _extract_variants(raw, user_name=effective_name)
+        # Generate 3 variants by sampling the model independently at
+        # different temperatures, instead of asking it for a numbered list
+        # in a single call — a chat-clone model produces one reply, not a
+        # formatted list.
+        temperatures = (0.7, 0.85, 1.0)
+        raws = await asyncio.gather(
+            *(self.generate_chat(messages, temperature=t) for t in temperatures),
+            return_exceptions=True,
+        )
+        variants: list[str] = []
+        seen: set[str] = set()
+        for raw in raws:
+            if isinstance(raw, BaseException):
+                log.warning("LLM sampling call failed: %s", raw)
+                continue
+            cand = _extract_single_reply(raw, effective_name)
+            if cand and cand not in seen:
+                seen.add(cand)
+                variants.append(cand)
         if not variants:
-            fallback = _fallback_from_raw(raw, effective_name)
-            log.warning(
-                "LLM response did not match expected format; using raw output as fallback. "
-                "model=%s raw=%r",
-                self.model,
-                raw,
+            first = next(
+                (r for r in raws if isinstance(r, str) and r), ""
             )
-            if fallback:
-                variants = [fallback]
+            if not first and raws and isinstance(raws[0], BaseException):
+                raise raws[0]
+            log.warning(
+                "LLM produced no usable reply. model=%s raw=%r",
+                self.model,
+                first,
+            )
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
