@@ -1033,9 +1033,7 @@ class TelegramService:
 
         lines: list[str] = []
         for m in pending:
-            who = settings.display_name if m.is_mine else (
-                m.sender_name or "собеседник"
-            )
+            who = "Я" if m.is_mine else (m.sender_name or "собеседник")
             txt = (m.text or "").replace("\n", " ").strip()
             if txt:
                 if len(txt) > SUMMARY_LINE_MAX_CHARS:
