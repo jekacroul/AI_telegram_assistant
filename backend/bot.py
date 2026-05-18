@@ -33,7 +33,14 @@ from sqlalchemy import select, update
 
 from . import admin_bot
 from .config import settings
-from .database import Message, QualityLog, SessionLocal, get_setting, set_setting
+from .database import (
+    ChatSummary,
+    Message,
+    QualityLog,
+    SessionLocal,
+    get_setting,
+    set_setting,
+)
 from .delay import get_delay_settings
 from .dialog_backup import mark_messages_deleted
 from .notifications import (
@@ -68,6 +75,24 @@ log = logging.getLogger(__name__)
 
 
 TELEGRAM_MESSAGE_LIMIT = 4096
+
+# How long to wait for the contact to stop sending messages before the bot
+# composes one reply for the whole burst. 0 disables batching.
+DEFAULT_SETTLE_SECONDS = 12
+MAX_SETTLE_SECONDS = 120
+# Recent raw messages fed to the model as short-term context. Older messages
+# are folded into the rolling per-chat summary instead.
+DEFAULT_REPLY_HISTORY_LIMIT = 20
+# Cap on messages folded into the summary in a single update (bounds the
+# first summary build for a long-existing chat and keeps the summary
+# prompt inside the model's context window).
+SUMMARY_BATCH_LIMIT = 40
+# Per-message length cap when feeding text into the summary prompt.
+SUMMARY_LINE_MAX_CHARS = 400
+# Only summarize messages from roughly the last month.
+SUMMARY_MAX_AGE_DAYS = 31
+# Max separate Telegram messages one reply may be split into.
+MAX_REPLY_MESSAGES = 5
 
 # Placeholder strings that carry no semantic content worth embedding.
 RAG_SKIP_TEXTS = {
@@ -104,6 +129,33 @@ def _split_for_telegram(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[
     return chunks
 
 
+_TRUE_SETTING_VALUES = {"1", "true", "True", "yes", "on"}
+
+
+def _setting_bool(value: object) -> bool:
+    return str(value).strip() in _TRUE_SETTING_VALUES
+
+
+def _coerce_int(value: object, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _split_reply_messages(text: str) -> list[str]:
+    """Split a composed reply into separate Telegram messages on line breaks,
+    so the bot can answer a burst with a few short messages like a human."""
+    if not text:
+        return [text]
+    parts = [ln.strip() for ln in text.split("\n")]
+    parts = [p for p in parts if p]
+    if not parts:
+        stripped = text.strip()
+        return [stripped] if stripped else [text]
+    return parts[:MAX_REPLY_MESSAGES]
+
+
 class TelegramService:
     def __init__(self) -> None:
         self.bot: Optional[Bot] = None
@@ -117,6 +169,9 @@ class TelegramService:
         self.update_count: int = 0
         self.last_error: str = ""
         self._delayed_reply_tasks: dict[int, asyncio.Task] = {}
+        # Latest reply context per chat, consumed by the debounced reply task
+        # once the contact's message burst settles.
+        self._pending_reply_ctx: dict[int, dict] = {}
 
     @property
     def is_configured(self) -> bool:
@@ -748,65 +803,20 @@ class TelegramService:
                 log.info("handle_incoming: no reply, auto_reply disabled (msg_id=%s)", msg_id)
 
             if auto_reply:
-                try:
-                    variants, reject_reason = await self._generate_variants(
-                        reply_input_text, sender_name, chat_id, is_voice=is_voice
-                    )
-                    chosen = pick_auto_variant(variants)
-                    if not chosen:
-                        log.info(
-                            "handle_incoming: no reply, no usable variant "
-                            "(msg_id=%s variants=%s reject_reason=%s)",
-                            msg_id,
-                            len(variants),
-                            reject_reason,
-                        )
-                        await self._mark_pending_quality(msg_id, reject_reason)
-                        await self._maybe_reanalyze(chat_id=chat_id)
-                        return
-                    await self._delay_before_auto_reply(chat_id, chat_name)
-                    await self.send_reply(
-                        chat_id,
-                        chosen,
-                        reply_to=tg_msg.message_id,
-                        business_connection_id=business_connection_id,
-                    )
-                    await self._record_reply(
-                        msg_id, chosen, sender_name, chat_id, chat_name
-                    )
-                    await notify_owner(chat_name, sender_name, reply_input_text, chosen)
-                    await admin_bot.notify_auto_reply(
-                        chat_name,
-                        sender_name,
-                        reply_input_text,
-                        chosen,
-                        message_id=msg_id,
-                    )
-                except asyncio.CancelledError:
-                    log.info("Отменяю отложенный ответ в %s", chat_name)
-                    return
-                except LLMUnavailableError as e:
-                    log.error("LLM unavailable: %s", e)
-                    self.last_error = str(e)
-                except TelegramBadRequest as e:
-                    if "BUSINESS_PEER_INVALID" in str(e):
-                        log.error(
-                            "auto reply blocked by business privacy for chat %s: %s",
-                            chat_id,
-                            e,
-                        )
-                        self.last_error = (
-                            "Telegram business privacy blocks the bot for this chat "
-                            "(BUSINESS_PEER_INVALID). Check Settings → Business → "
-                            "Chatbots and include this contact."
-                        )
-                        await message_bus.publish("pending", {"id": msg_id})
-                    else:
-                        log.exception("auto reply failed: %s", e)
-                        self.last_error = str(e)
-                except Exception as e:  # noqa: BLE001
-                    log.exception("auto reply failed: %s", e)
-                    self.last_error = str(e)
+                # Don't reply per-message. Record the latest burst context and
+                # (re)arm a debounced task: it waits for the contact to stop
+                # sending, then composes one reply for the whole chain.
+                self._pending_reply_ctx[chat_id] = {
+                    "msg_id": msg_id,
+                    "text": reply_input_text,
+                    "sender_name": sender_name,
+                    "chat_name": chat_name,
+                    "business_connection_id": business_connection_id,
+                    "is_voice": is_voice,
+                }
+                self._cancel_delayed_reply(chat_id)
+                task = asyncio.create_task(self._run_debounced_reply(chat_id))
+                self._delayed_reply_tasks[chat_id] = task
             else:
                 await message_bus.publish(
                     "pending", {"id": msg_id, "reason": "auto_reply_disabled"}
@@ -903,17 +913,28 @@ class TelegramService:
     ) -> tuple[list[str], str]:
         async with SessionLocal() as session:
             profile = await get_profile_for_chat(session, chat_id)
+            history_limit = _coerce_int(
+                await get_setting(
+                    session, "reply_history_limit", str(DEFAULT_REPLY_HISTORY_LIMIT)
+                ),
+                DEFAULT_REPLY_HISTORY_LIMIT,
+            )
+            history_limit = max(2, min(80, history_limit))
             history_q = await session.execute(
                 select(Message)
                 .where(Message.chat_id == chat_id)
                 .order_by(Message.timestamp.desc())
-                .limit(8)
+                .limit(history_limit)
             )
             history = list(history_q.scalars().all())[::-1]
             history_dicts = [
                 {"sender_name": m.sender_name, "is_mine": m.is_mine, "text": m.text}
                 for m in history
             ]
+            recent_min_id = min((m.id for m in history), default=0)
+            summary = await self._update_chat_summary(
+                session, chat_id, recent_min_id
+            )
             quality_enabled = (
                 await get_setting(session, "quality_filter_enabled", "1")
             ) in ("1", "true", "True")
@@ -931,6 +952,7 @@ class TelegramService:
                 chat_history=history_dicts,
                 is_voice=is_voice,
                 rag_context=rag_context,
+                summary=summary,
             )
             return (variants, "ok") if variants else ([], "no_variants")
         last_reason = "no_variants"
@@ -943,6 +965,7 @@ class TelegramService:
                 chat_history=history_dicts,
                 is_voice=is_voice,
                 rag_context=rag_context,
+                summary=summary,
             )
             accepted: list[str] = []
             async with SessionLocal() as session:
@@ -974,6 +997,162 @@ class TelegramService:
                 )
                 await session.commit()
         return [], last_reason
+
+    async def _update_chat_summary(
+        self, session, chat_id: int, recent_min_id: int
+    ) -> str:
+        """Roll the per-chat summary forward to cover messages that have aged
+        out of the recent window. Returns the current summary text."""
+        if not _setting_bool(await get_setting(session, "summary_enabled", "1")):
+            return ""
+        result = await session.execute(
+            select(ChatSummary).where(ChatSummary.chat_id == chat_id)
+        )
+        row = result.scalar_one_or_none()
+        last_id = row.last_message_id if row else 0
+        prev = row.summary if row else ""
+
+        cutoff = datetime.utcnow() - timedelta(days=SUMMARY_MAX_AGE_DAYS)
+        conds = [
+            Message.chat_id == chat_id,
+            Message.id > last_id,
+            Message.deleted == False,  # noqa: E712
+            Message.timestamp >= cutoff,
+        ]
+        if recent_min_id:
+            conds.append(Message.id < recent_min_id)
+        pending_q = await session.execute(
+            select(Message)
+            .where(*conds)
+            .order_by(Message.id.desc())
+            .limit(SUMMARY_BATCH_LIMIT)
+        )
+        pending = list(pending_q.scalars().all())[::-1]
+        if not pending:
+            return prev
+
+        lines: list[str] = []
+        for m in pending:
+            who = "Я" if m.is_mine else (m.sender_name or "собеседник")
+            txt = (m.text or "").replace("\n", " ").strip()
+            if txt:
+                if len(txt) > SUMMARY_LINE_MAX_CHARS:
+                    txt = txt[:SUMMARY_LINE_MAX_CHARS] + "…"
+                lines.append(f"{who}: {txt}")
+        new_last = max(m.id for m in pending)
+        if lines:
+            prev = await get_client().summarize(prev, lines) or prev
+
+        if row:
+            row.summary = prev
+            row.last_message_id = new_last
+            row.updated_at = datetime.utcnow()
+        else:
+            session.add(
+                ChatSummary(
+                    chat_id=chat_id,
+                    summary=prev,
+                    last_message_id=new_last,
+                    updated_at=datetime.utcnow(),
+                )
+            )
+        await session.commit()
+        return prev
+
+    async def _run_debounced_reply(self, chat_id: int) -> None:
+        """Wait out the contact's message burst, then compose one reply for
+        the whole chain. Re-armed (and the prior task cancelled) on every new
+        incoming message, so only the final quiet state is answered."""
+        ctx: Optional[dict] = None
+        try:
+            async with SessionLocal() as session:
+                settle = _coerce_int(
+                    await get_setting(
+                        session, "reply_settle_seconds", str(DEFAULT_SETTLE_SECONDS)
+                    ),
+                    DEFAULT_SETTLE_SECONDS,
+                )
+            settle = max(0, min(MAX_SETTLE_SECONDS, settle))
+            if settle:
+                await asyncio.sleep(settle)
+
+            ctx = self._pending_reply_ctx.get(chat_id)
+            if not ctx:
+                return
+            msg_id = ctx["msg_id"]
+            chat_name = ctx["chat_name"]
+            sender_name = ctx["sender_name"]
+            reply_input_text = ctx["text"]
+
+            variants, reject_reason = await self._generate_variants(
+                reply_input_text, sender_name, chat_id, is_voice=ctx["is_voice"]
+            )
+            chosen = pick_auto_variant(variants)
+            if not chosen:
+                log.info(
+                    "debounced reply: no usable variant (chat=%s reason=%s)",
+                    chat_id,
+                    reject_reason,
+                )
+                await self._mark_pending_quality(msg_id, reject_reason)
+                await self._maybe_reanalyze(chat_id=chat_id)
+                return
+
+            await self._delay_before_auto_reply(chat_id, chat_name)
+            parts = _split_reply_messages(chosen)
+            for idx, part in enumerate(parts):
+                await self.send_reply(
+                    chat_id,
+                    part,
+                    business_connection_id=ctx["business_connection_id"],
+                )
+                if idx + 1 < len(parts):
+                    await asyncio.sleep(random.uniform(0.8, 2.2))
+
+            await self._record_reply(
+                msg_id, chosen, sender_name, chat_id, chat_name
+            )
+            await notify_owner(chat_name, sender_name, reply_input_text, chosen)
+            await admin_bot.notify_auto_reply(
+                chat_name,
+                sender_name,
+                reply_input_text,
+                chosen,
+                message_id=msg_id,
+            )
+            await self._maybe_reanalyze(chat_id=chat_id)
+        except asyncio.CancelledError:
+            log.info("debounced reply cancelled for chat %s", chat_id)
+            return
+        except LLMUnavailableError as e:
+            log.error("LLM unavailable: %s", e)
+            self.last_error = str(e)
+        except TelegramBadRequest as e:
+            if "BUSINESS_PEER_INVALID" in str(e):
+                log.error(
+                    "auto reply blocked by business privacy for chat %s: %s",
+                    chat_id,
+                    e,
+                )
+                self.last_error = (
+                    "Telegram business privacy blocks the bot for this chat "
+                    "(BUSINESS_PEER_INVALID). Check Settings → Business → "
+                    "Chatbots and include this contact."
+                )
+                if ctx:
+                    await message_bus.publish("pending", {"id": ctx["msg_id"]})
+            else:
+                log.exception("auto reply failed: %s", e)
+                self.last_error = str(e)
+        except Exception as e:  # noqa: BLE001
+            log.exception("debounced auto reply failed: %s", e)
+            self.last_error = str(e)
+        finally:
+            current = asyncio.current_task()
+            if self._delayed_reply_tasks.get(chat_id) is current:
+                self._delayed_reply_tasks.pop(chat_id, None)
+            if ctx is not None and self._pending_reply_ctx.get(chat_id) is ctx:
+                self._pending_reply_ctx.pop(chat_id, None)
 
     async def _mark_pending_quality(self, msg_id: int, reason: str) -> None:
         async with SessionLocal() as session:
@@ -1036,14 +1215,26 @@ class TelegramService:
         chat_id: int,
         chat_name: str,
     ) -> None:
+        # One reply answers the whole burst: mark every still-unanswered
+        # incoming message up to the one replied to as handled, not just the
+        # last. Otherwise earlier messages of the chain stay "pending".
+        cleared_ids: list[int] = []
         async with SessionLocal() as session:
             result = await session.execute(
-                select(Message).where(Message.id == original_id)
+                select(Message).where(
+                    Message.chat_id == chat_id,
+                    Message.is_mine == False,  # noqa: E712
+                    Message.replied == False,  # noqa: E712
+                    Message.id <= original_id,
+                )
             )
-            original = result.scalar_one_or_none()
-            if original:
-                original.replied = True
-                original.reply_text = reply_text
+            burst = list(result.scalars().all())
+            for m in burst:
+                m.replied = True
+                m.reply_text = reply_text
+                m.pending_reason = None
+                if m.id != original_id:
+                    cleared_ids.append(m.id)
             session.add(
                 Message(
                     chat_id=chat_id,
@@ -1067,6 +1258,10 @@ class TelegramService:
                 "original_id": original_id,
             },
         )
+        if cleared_ids:
+            await message_bus.publish(
+                "queue_cleared", {"chat_id": chat_id, "ids": cleared_ids}
+            )
 
     async def send_reply(
         self,

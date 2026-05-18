@@ -46,30 +46,71 @@ class LLMUnavailableError(RuntimeError):
     pass
 
 
+# Output budget for a chat reply. Kept small so prompt + completion stay
+# well inside the model's context window (a chat reply needs little room).
+REPLY_MAX_TOKENS = 400
+
+
 SYSTEM_TEMPLATE = (
-    "Ты — {user_name}. Ты пишешь сообщение в Telegram собеседнику {sender_name}"
-    " от первого лица, как живой человек. Не подписывай ответ своим именем и"
-    " не ставь его перед текстом как префикс, не оборачивай ответ в JSON,"
-    " не используй кавычки, двоеточия-разделители, поля sender/text. Просто"
-    " сам текст сообщения, как ты бы написал его в чате. Если собеседник"
-    " спрашивает, как тебя зовут, назови себя именно так: '{user_name}' —"
-    " пиши имя точно в этом написании, копируй его буква в букву, без"
-    " сокращений, без выдуманных отчеств и без опечаток. Не соглашайся с"
-    " неверными утверждениями о себе: если собеседник приписывает тебе"
-    " чужое имя, отчество или факты — вежливо, но твёрдо поправь его и"
-    " назови верные данные, не подстраивайся под выдумку.\n"
+    "Ты пишешь сообщения в Telegram от первого лица — это твоя личная"
+    " переписка, ты отвечаешь сам за себя. Говори о себе только в первом"
+    " лице: 'я', 'мне', 'у меня', 'мой'. Категорически нельзя называть"
+    " себя по имени и говорить о себе в третьем лице, как о постороннем"
+    " человеке. Ты не бот, не ассистент и не ИИ — не упоминай это.\n"
+    "Отвечай только текстом сообщения, как в живом чате: без подписи"
+    " своим именем, без JSON, без кавычек, без нумерованных списков,"
+    " заголовков и пояснений. Просто одно живое сообщение-ответ.\n"
+    "Если собеседник прямо спросит, как тебя зовут — ответь: {user_name}"
+    " (точно в этом написании, буква в букву, без сокращений и выдуманных"
+    " отчеств). Если тебе приписывают чужое имя или факты — вежливо, но"
+    " твёрдо поправь.\n"
     "Стиль речи: {style_profile}\n"
+    "{summary_block}"
     "{rag_block}"
-    "Ниже идёт переписка с собеседником: реплики собеседника — роль user,"
-    " твои собственные ответы — роль assistant. Отвечай на последнее"
-    " сообщение собеседника, опираясь на весь предыдущий диалог.\n"
-    "Дай ровно 3 разных варианта ответа. Формат — нумерованный список,"
-    " каждый вариант с новой строки:\n"
-    "1. <текст первого варианта>\n"
-    "2. <текст второго варианта>\n"
-    "3. <текст третьего варианта>\n"
-    "Никаких других пояснений, заголовков или JSON."
+    "Ниже переписка с собеседником {sender_name}: его реплики — роль"
+    " user, твои собственные ответы — роль assistant. Ответь на последнее"
+    " сообщение от первого лица, опираясь на весь предыдущий диалог."
 )
+
+
+SUMMARY_SYSTEM = (
+    "Ты ведёшь краткое саммари своей личной переписки в Telegram. Тебе"
+    " дают текущее саммари и новые сообщения. Верни обновлённое саммари —"
+    " связный текст на русском от первого лица: про себя пиши 'я', а"
+    " собеседника называй по имени. По делу: ключевые темы,"
+    " договорённости, факты о собеседнике, тон общения, незакрытые"
+    " вопросы. Без вступлений и заголовков, не длиннее 1200 символов."
+    " Только текст саммари."
+)
+
+
+def _self_name_pattern(user_name: str | None) -> Optional[re.Pattern]:
+    """Regex matching the user's own name (full name and declined surname).
+
+    Used to scrub the user's name out of context fed to the model and out
+    of generated replies, so a clone model doesn't refer to itself by name
+    in the third person.
+    """
+    name = (user_name or "").strip()
+    if not name:
+        return None
+    alts = [re.escape(name)]
+    for token in re.split(r"\s+", name):
+        if len(token) >= 4:
+            alts.append(re.escape(token) + r"[а-яёa-z]*")
+    return re.compile(r"\b(?:" + "|".join(alts) + r")\b", re.IGNORECASE)
+
+
+def _strip_self_name(text: str, pattern: Optional[re.Pattern]) -> str:
+    """Remove the user's own name from text and tidy up the leftover gaps."""
+    if not pattern or not text:
+        return text
+    cleaned = pattern.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([,.!?…:;)])", r"\1", cleaned)
+    cleaned = re.sub(r"([(])[ \t]+", r"\1", cleaned)
+    cleaned = re.sub(r"(?m)^[ \t]+", "", cleaned)
+    return cleaned.strip()
 
 
 def build_system_prompt(
@@ -79,14 +120,26 @@ def build_system_prompt(
     is_voice: bool = False,
     transcription: Optional[str] = None,
     rag_context: Optional[str] = None,
+    summary: Optional[str] = None,
 ) -> str:
     style_str = json.dumps(style_profile or {}, ensure_ascii=False)
+    name_re = _self_name_pattern(user_name)
+    if name_re:
+        rag_context = _strip_self_name(rag_context or "", name_re) or None
+        summary = _strip_self_name(summary or "", name_re) or None
     rag_block = f"{rag_context.strip()}\n" if rag_context and rag_context.strip() else ""
+    summary_block = (
+        "Краткое саммари предыдущего общения с этим собеседником "
+        f"(может охватывать недели переписки):\n{summary.strip()}\n"
+        if summary and summary.strip()
+        else ""
+    )
     base = SYSTEM_TEMPLATE.format(
         user_name=user_name,
         style_profile=style_str,
         sender_name=sender_name or "неизвестно",
         rag_block=rag_block,
+        summary_block=summary_block,
     )
     if is_voice:
         voice_note = (
@@ -108,6 +161,7 @@ def build_chat_messages(
     is_voice: bool = False,
     transcription: Optional[str] = None,
     rag_context: Optional[str] = None,
+    summary: Optional[str] = None,
 ) -> list[dict]:
     """Build a multi-turn messages array: system + alternating dialogue turns."""
     system = build_system_prompt(
@@ -117,6 +171,7 @@ def build_chat_messages(
         is_voice=is_voice,
         transcription=transcription,
         rag_context=rag_context,
+        summary=summary,
     )
     messages: list[dict] = [{"role": "system", "content": system}]
 
@@ -128,19 +183,26 @@ def build_chat_messages(
         if not last.get("is_mine") and last_text == incoming_clean:
             history = history[:-1]
 
+    # Scrub the user's own name from prior turns: the model's earlier
+    # replies are fed back as context, and if they named the user in the
+    # third person the model keeps repeating the pattern.
+    name_re = _self_name_pattern(user_name)
     for msg in history:
         text = (msg.get("text") or "").replace("\n", " ").strip()
         if not text:
             continue
         role = "assistant" if msg.get("is_mine") else "user"
+        if role == "assistant" and name_re:
+            text = _strip_self_name(text, name_re)
+        if not text:
+            continue
         messages.append({"role": role, "content": text})
 
-    final = (
-        f"Сообщение собеседника ({sender_name or 'неизвестно'}): {incoming_text}\n"
-        "Ответь как продолжение чата от первого лица."
-        " Дай ровно 3 разных варианта ответа в виде нумерованного списка"
-        " (1., 2., 3.), без своего имени и без JSON."
-    )
+    # Feed the model the raw incoming message as the final turn — no meta
+    # wrapper, no formatting instructions. A chat-clone model replies best
+    # to a clean conversation; wrapper text confuses it into answering the
+    # wrapper instead of the message.
+    final = incoming_clean or (incoming_text or "").strip()
     messages.append({"role": "user", "content": final})
     return _merge_consecutive_turns(messages)
 
@@ -291,6 +353,29 @@ def _fallback_from_raw(raw: str, user_name: str | None) -> str:
     return text
 
 
+def _extract_single_reply(raw: str, user_name: str | None = None) -> str:
+    """Clean a single chat reply from one model completion.
+
+    The model is asked for a plain message, but defensively handle the case
+    where it still wraps the answer in a numbered list, JSON, or quotes.
+    Internal line breaks are preserved so a reply can later be split into
+    several Telegram messages.
+    """
+    if not raw or not raw.strip():
+        return ""
+    items = _parse_numbered_list(raw)
+    if len(items) >= 2:
+        # model produced a numbered list despite instructions — take the first
+        text = items[0]
+    else:
+        text = raw.strip()
+        text = re.sub(r"^\s*\d{1,2}[.\)]\s+", "", text)
+    text = _coerce_variant(text)
+    text = _strip_speaker_prefix(text, user_name)
+    lines = [ln.strip() for ln in text.splitlines()]
+    return "\n".join(ln for ln in lines if ln).strip()
+
+
 def _extract_variants(raw: str, user_name: str | None = None) -> list[str]:
     if not raw:
         return []
@@ -404,6 +489,7 @@ class LLMClient:
         user_name: Optional[str] = None,
         is_voice: bool = False,
         rag_context: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
         messages = build_chat_messages(
@@ -415,22 +501,89 @@ class LLMClient:
             is_voice=is_voice,
             transcription=incoming_text if is_voice else None,
             rag_context=rag_context,
+            summary=summary,
         )
-        raw = await self.generate_chat(messages)
-        variants = _extract_variants(raw, user_name=effective_name)
+        # Generate 3 variants by sampling the model independently at
+        # different temperatures, instead of asking it for a numbered list
+        # in a single call — a chat-clone model produces one reply, not a
+        # formatted list.
+        #
+        # Sampled sequentially (not concurrently): a local single-slot server
+        # may return 500 on parallel requests. A small output budget keeps
+        # prompt + completion inside the model's context window.
+        temperatures = (0.7, 0.85, 1.0)
+        variants: list[str] = []
+        seen: set[str] = set()
+        errors: list[Exception] = []
+        for temp in temperatures:
+            try:
+                raw = await self.generate_chat(
+                    messages, temperature=temp, num_predict=REPLY_MAX_TOKENS
+                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+                log.warning("LLM sampling call failed: %s", exc)
+                continue
+            cand = _extract_single_reply(raw, effective_name)
+            if cand and cand not in seen:
+                seen.add(cand)
+                variants.append(cand)
         if not variants:
-            fallback = _fallback_from_raw(raw, effective_name)
-            log.warning(
-                "LLM response did not match expected format; using raw output as fallback. "
-                "model=%s raw=%r",
-                self.model,
-                raw,
-            )
-            if fallback:
-                variants = [fallback]
+            if errors:
+                raise errors[0]
+            log.warning("LLM produced no usable reply. model=%s", self.model)
+        # Keep the bot from naming itself in the third person: prefer
+        # variants free of the user's own name; if every variant names the
+        # user, scrub the name out as a last resort.
+        name_re = _self_name_pattern(effective_name)
+        if name_re and variants:
+            clean = [v for v in variants if not name_re.search(v)]
+            if clean:
+                variants = clean
+            else:
+                scrubbed: list[str] = []
+                for v in variants:
+                    s = _strip_self_name(v, name_re)
+                    scrubbed.append(s if s else v)
+                variants = scrubbed
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
+
+    async def summarize(
+        self,
+        previous_summary: str,
+        dialogue_lines: list[str],
+    ) -> str:
+        """Roll a running summary forward with the given new dialogue lines.
+
+        Returns the previous summary unchanged when there is nothing new or
+        the model fails, so a transient error never wipes accumulated context.
+        """
+        lines = [ln.strip() for ln in dialogue_lines if ln and ln.strip()]
+        if not lines:
+            return previous_summary or ""
+        prompt = (
+            "Текущее саммари:\n"
+            f"{(previous_summary or '').strip() or '(пока пусто)'}\n\n"
+            "Новые сообщения переписки (по порядку):\n"
+            + "\n".join(lines)
+            + "\n\nВыдай обновлённое саммари одним связным текстом."
+        )
+        try:
+            raw = await self.generate_raw(
+                SUMMARY_SYSTEM, prompt, temperature=0.3, num_predict=512
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("summary generation failed: %s", exc)
+            return previous_summary or ""
+        cleaned = (raw or "").strip()
+        if not cleaned:
+            return previous_summary or ""
+        cleaned = re.sub(
+            r"^\s*(обновлённое\s+)?саммари\s*:\s*", "", cleaned, flags=re.IGNORECASE
+        )
+        return cleaned.strip()
 
 
 class OpenAICompatibleClient(LLMClient):

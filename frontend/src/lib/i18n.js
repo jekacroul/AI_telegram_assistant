@@ -427,6 +427,19 @@ export const translations = {
       autoReconcile: "Авто-очистка очереди",
       autoReconcileDesc:
         "При запуске приложения автоматически убирать из очереди диалоги, на которые ты уже ответил вручную в Telegram.",
+      conversationContext: "Контекст переписки",
+      conversationContextDesc:
+        "Как бот учитывает историю общения при составлении ответа.",
+      useSummary: "Саммари переписки",
+      useSummaryDesc:
+        "Бот ведёт краткое саммари диалога и учитывает его — так в контексте остаются недели общения, а не только последние сообщения.",
+      settleWindow: "Окно ожидания: {value} сек",
+      settleWindowOff: "Окно ожидания: выключено",
+      settleWindowDesc:
+        "Сколько ждать после сообщения собеседника. Каждое новое сообщение сбрасывает таймер — затем бот отвечает один раз на всю цепочку. 0 — отвечать сразу на каждое.",
+      historyDepth: "Глубина истории: {value} сообщений",
+      historyDepthDesc:
+        "Сколько последних сообщений передаётся модели дословно. Более старые сообщения сворачиваются в саммари.",
       groupReplies: "Ответы в группах",
       groupRepliesDesc: "Как бот реагирует на сообщения в групповых чатах.",
       groupMention:
@@ -1007,6 +1020,19 @@ export const translations = {
       autoReconcile: "Auto queue cleanup",
       autoReconcileDesc:
         "On app startup, automatically remove chats from the queue that you already answered manually in Telegram.",
+      conversationContext: "Conversation context",
+      conversationContextDesc:
+        "How the bot takes the chat history into account when composing a reply.",
+      useSummary: "Conversation summary",
+      useSummaryDesc:
+        "The bot keeps a rolling summary of the dialogue and uses it — so weeks of conversation stay in context, not just the latest messages.",
+      settleWindow: "Settle window: {value} sec",
+      settleWindowOff: "Settle window: off",
+      settleWindowDesc:
+        "How long to wait after a message from the contact. Each new message resets the timer — then the bot replies once to the whole burst. 0 — reply to each message immediately.",
+      historyDepth: "History depth: {value} messages",
+      historyDepthDesc:
+        "How many recent messages are passed to the model verbatim. Older messages are folded into the summary.",
       groupReplies: "Group replies",
       groupRepliesDesc: "How the bot reacts to messages in group chats.",
       groupMention:

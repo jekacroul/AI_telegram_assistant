@@ -200,6 +200,19 @@ class ChatPersona(Base):
     messages_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ChatSummary(Base):
+    """Rolling summary of a chat, covering messages older than the recent
+    window so weeks of conversation stay in context within the token budget."""
+
+    __tablename__ = "chat_summaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(Integer, index=True, unique=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    last_message_id: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class QualityLog(Base):
     __tablename__ = "quality_log"
 

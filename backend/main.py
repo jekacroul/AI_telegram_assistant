@@ -426,6 +426,9 @@ class SettingsIn(BaseModel):
     group_reply_mode: Optional[str] = None
     quality_filter_enabled: Optional[bool] = None
     auto_reconcile_queue: Optional[bool] = None
+    summary_enabled: Optional[bool] = None
+    reply_settle_seconds: Optional[int] = Field(default=None, ge=0, le=120)
+    reply_history_limit: Optional[int] = Field(default=None, ge=2, le=80)
 
 
 class QuickReplyIn(BaseModel):
@@ -549,6 +552,18 @@ async def save_settings(
             "auto_reconcile_queue",
             "1" if payload.auto_reconcile_queue else "0",
         )
+    if payload.summary_enabled is not None:
+        await set_setting(
+            session, "summary_enabled", "1" if payload.summary_enabled else "0"
+        )
+    if payload.reply_settle_seconds is not None:
+        await set_setting(
+            session, "reply_settle_seconds", str(payload.reply_settle_seconds)
+        )
+    if payload.reply_history_limit is not None:
+        await set_setting(
+            session, "reply_history_limit", str(payload.reply_history_limit)
+        )
     return {"ok": True}
 
 
@@ -568,6 +583,21 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
     auto_reconcile_queue = (
         await get_setting(session, "auto_reconcile_queue", "1")
     ) in ("1", "true", "True")
+    summary_enabled = (
+        await get_setting(session, "summary_enabled", "1")
+    ) in ("1", "true", "True")
+    try:
+        reply_settle_seconds = int(
+            await get_setting(session, "reply_settle_seconds", "12")
+        )
+    except ValueError:
+        reply_settle_seconds = 12
+    try:
+        reply_history_limit = int(
+            await get_setting(session, "reply_history_limit", "20")
+        )
+    except ValueError:
+        reply_history_limit = 20
     return {
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
@@ -576,6 +606,9 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
         "group_reply_mode": group_reply_mode,
         "quality_filter_enabled": quality_filter_enabled,
         "auto_reconcile_queue": auto_reconcile_queue,
+        "summary_enabled": summary_enabled,
+        "reply_settle_seconds": reply_settle_seconds,
+        "reply_history_limit": reply_history_limit,
     }
 
 
