@@ -62,10 +62,21 @@ SYSTEM_TEMPLATE = (
     " приписывает тебе чужое имя, отчество или факты — вежливо, но твёрдо"
     " поправь его и назови верные данные, не подстраивайся под выдумку.\n"
     "Стиль речи: {style_profile}\n"
+    "{summary_block}"
     "{rag_block}"
     "Ниже идёт переписка с собеседником: реплики собеседника — роль user,"
     " твои собственные ответы — роль assistant. Ответь на последнее"
     " сообщение собеседника, опираясь на весь предыдущий диалог."
+)
+
+
+SUMMARY_SYSTEM = (
+    "Ты ведёшь краткое саммари личной переписки в Telegram. Тебе дают"
+    " текущее саммари и новые сообщения. Верни обновлённое саммари —"
+    " связный текст на русском, по делу: ключевые темы, договорённости,"
+    " факты о собеседнике, тон общения, незакрытые вопросы. Без"
+    " вступлений и заголовков, не длиннее 1200 символов. Только текст"
+    " саммари."
 )
 
 
@@ -76,14 +87,22 @@ def build_system_prompt(
     is_voice: bool = False,
     transcription: Optional[str] = None,
     rag_context: Optional[str] = None,
+    summary: Optional[str] = None,
 ) -> str:
     style_str = json.dumps(style_profile or {}, ensure_ascii=False)
     rag_block = f"{rag_context.strip()}\n" if rag_context and rag_context.strip() else ""
+    summary_block = (
+        "Краткое саммари предыдущего общения с этим собеседником "
+        f"(может охватывать недели переписки):\n{summary.strip()}\n"
+        if summary and summary.strip()
+        else ""
+    )
     base = SYSTEM_TEMPLATE.format(
         user_name=user_name,
         style_profile=style_str,
         sender_name=sender_name or "неизвестно",
         rag_block=rag_block,
+        summary_block=summary_block,
     )
     if is_voice:
         voice_note = (
@@ -105,6 +124,7 @@ def build_chat_messages(
     is_voice: bool = False,
     transcription: Optional[str] = None,
     rag_context: Optional[str] = None,
+    summary: Optional[str] = None,
 ) -> list[dict]:
     """Build a multi-turn messages array: system + alternating dialogue turns."""
     system = build_system_prompt(
@@ -114,6 +134,7 @@ def build_chat_messages(
         is_voice=is_voice,
         transcription=transcription,
         rag_context=rag_context,
+        summary=summary,
     )
     messages: list[dict] = [{"role": "system", "content": system}]
 
@@ -292,13 +313,22 @@ def _extract_single_reply(raw: str, user_name: str | None = None) -> str:
 
     The model is asked for a plain message, but defensively handle the case
     where it still wraps the answer in a numbered list, JSON, or quotes.
+    Internal line breaks are preserved so a reply can later be split into
+    several Telegram messages.
     """
     if not raw or not raw.strip():
         return ""
-    variants = _extract_variants(raw, user_name=user_name)
-    if variants:
-        return variants[0]
-    return _fallback_from_raw(raw, user_name)
+    items = _parse_numbered_list(raw)
+    if len(items) >= 2:
+        # model produced a numbered list despite instructions — take the first
+        text = items[0]
+    else:
+        text = raw.strip()
+        text = re.sub(r"^\s*\d{1,2}[.\)]\s+", "", text)
+    text = _coerce_variant(text)
+    text = _strip_speaker_prefix(text, user_name)
+    lines = [ln.strip() for ln in text.splitlines()]
+    return "\n".join(ln for ln in lines if ln).strip()
 
 
 def _extract_variants(raw: str, user_name: str | None = None) -> list[str]:
@@ -414,6 +444,7 @@ class LLMClient:
         user_name: Optional[str] = None,
         is_voice: bool = False,
         rag_context: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
         messages = build_chat_messages(
@@ -425,6 +456,7 @@ class LLMClient:
             is_voice=is_voice,
             transcription=incoming_text if is_voice else None,
             rag_context=rag_context,
+            summary=summary,
         )
         # Generate 3 variants by sampling the model independently at
         # different temperatures, instead of asking it for a numbered list
@@ -459,6 +491,41 @@ class LLMClient:
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
+
+    async def summarize(
+        self,
+        previous_summary: str,
+        dialogue_lines: list[str],
+    ) -> str:
+        """Roll a running summary forward with the given new dialogue lines.
+
+        Returns the previous summary unchanged when there is nothing new or
+        the model fails, so a transient error never wipes accumulated context.
+        """
+        lines = [ln.strip() for ln in dialogue_lines if ln and ln.strip()]
+        if not lines:
+            return previous_summary or ""
+        prompt = (
+            "Текущее саммари:\n"
+            f"{(previous_summary or '').strip() or '(пока пусто)'}\n\n"
+            "Новые сообщения переписки (по порядку):\n"
+            + "\n".join(lines)
+            + "\n\nВыдай обновлённое саммари одним связным текстом."
+        )
+        try:
+            raw = await self.generate_raw(
+                SUMMARY_SYSTEM, prompt, temperature=0.3, num_predict=512
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("summary generation failed: %s", exc)
+            return previous_summary or ""
+        cleaned = (raw or "").strip()
+        if not cleaned:
+            return previous_summary or ""
+        cleaned = re.sub(
+            r"^\s*(обновлённое\s+)?саммари\s*:\s*", "", cleaned, flags=re.IGNORECASE
+        )
+        return cleaned.strip()
 
 
 class OpenAICompatibleClient(LLMClient):
