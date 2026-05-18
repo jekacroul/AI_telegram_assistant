@@ -22,12 +22,15 @@ import {
   ThumbsDown,
   Award,
   Timer,
+  LayoutGrid,
+  Table2,
 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme.js";
 import { useLang } from "../hooks/useLang.js";
 import { chartColors } from "../lib/colors.js";
 import Page from "../components/Page.jsx";
 import Tile from "../components/Tile.jsx";
+import Tabs from "../components/Tabs.jsx";
 
 function useChartColors() {
   const { isDark } = useTheme();
@@ -77,6 +80,7 @@ const TH =
 export default function Stats() {
   const { t } = useLang();
   const colors = useChartColors();
+  const [tab, setTab] = useState("overview");
   const [overview, setOverview] = useState(null);
   const [activity, setActivity] = useState([]);
   const [topChats, setTopChats] = useState([]);
@@ -164,6 +168,17 @@ export default function Stats() {
         </div>
       )}
 
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "overview", icon: LayoutGrid, label: t("stats.tabs.overview") },
+          { id: "tables", icon: Table2, label: t("stats.tabs.tables") },
+        ]}
+      />
+
+      {tab === "overview" && (
+        <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           label={t("stats.received")}
@@ -281,7 +296,11 @@ export default function Stats() {
           </div>
         )}
       </Tile>
+        </>
+      )}
 
+      {tab === "tables" && (
+        <>
       <div className="tile overflow-hidden p-0">
         <div className="flex items-center gap-2 px-4 pt-4 pb-3">
           <Award
@@ -383,6 +402,8 @@ export default function Stats() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </Page>
   );
 }

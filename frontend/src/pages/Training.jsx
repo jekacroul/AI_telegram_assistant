@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { Mic, ShieldX, Layers, History } from "lucide-react";
 import { useLang } from "../hooks/useLang.js";
+import Tabs from "../components/Tabs.jsx";
 import Page from "../components/Page.jsx";
 
 function formatEta(seconds) {
@@ -70,6 +71,7 @@ export default function Training() {
   ]);
   const [cachedExports, setCachedExports] = useState([]);
   const [trainSource, setTrainSource] = useState("auto");
+  const [tab, setTab] = useState("data");
 
   const refresh = async () => {
     const [st, rs, qs] = await Promise.all([
@@ -306,6 +308,17 @@ export default function Training() {
 
   return (
     <Page>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "data", icon: Layers, label: t("training.tabs.data") },
+          { id: "history", icon: History, label: t("training.tabs.history") },
+        ]}
+      />
+
+      {tab === "data" && (
+        <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat
           title={t("training.messages")}
@@ -788,7 +801,10 @@ export default function Training() {
         </div>
         );
       })()}
+        </>
+      )}
 
+      {tab === "history" && (
       <div className="tile">
         <div className="flex items-center gap-2 mb-3">
           <History
@@ -941,6 +957,7 @@ export default function Training() {
           </tbody>
         </table>
       </div>
+      )}
     </Page>
   );
 }

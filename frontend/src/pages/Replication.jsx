@@ -4,6 +4,7 @@ import { Settings2, History } from "lucide-react";
 import { useLang } from "../hooks/useLang.js";
 import Page from "../components/Page.jsx";
 import Tile from "../components/Tile.jsx";
+import Tabs from "../components/Tabs.jsx";
 
 function formatBytes(bytes, t) {
   if (!bytes || bytes <= 0) return t("replication.zeroBytes");
@@ -67,6 +68,7 @@ export default function Replication() {
   const [error, setError] = useState("");
   const [runLogs, setRunLogs] = useState({});
   const [loadingLogId, setLoadingLogId] = useState(null);
+  const [tab, setTab] = useState("settings");
 
   const refresh = async () => {
     try {
@@ -216,6 +218,25 @@ export default function Replication() {
 
   return (
     <Page>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          {
+            id: "settings",
+            icon: Settings2,
+            label: t("replication.tabs.settings"),
+          },
+          {
+            id: "history",
+            icon: History,
+            label: t("replication.tabs.history"),
+          },
+        ]}
+      />
+
+      {tab === "settings" && (
+        <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat
           title={t("replication.sourceDb")}
@@ -456,7 +477,10 @@ export default function Replication() {
           )}
         </div>
       )}
+        </>
+      )}
 
+      {tab === "history" && (
       <div className="tile">
         <div className="flex items-center gap-2 mb-3">
           <History
@@ -594,6 +618,7 @@ export default function Replication() {
           </tbody>
         </table>
       </div>
+      )}
     </Page>
   );
 }
