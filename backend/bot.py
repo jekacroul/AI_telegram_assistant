@@ -84,8 +84,11 @@ MAX_SETTLE_SECONDS = 120
 # are folded into the rolling per-chat summary instead.
 DEFAULT_REPLY_HISTORY_LIMIT = 20
 # Cap on messages folded into the summary in a single update (bounds the
-# first summary build for a long-existing chat).
-SUMMARY_BATCH_LIMIT = 80
+# first summary build for a long-existing chat and keeps the summary
+# prompt inside the model's context window).
+SUMMARY_BATCH_LIMIT = 40
+# Per-message length cap when feeding text into the summary prompt.
+SUMMARY_LINE_MAX_CHARS = 400
 # Only summarize messages from roughly the last month.
 SUMMARY_MAX_AGE_DAYS = 31
 # Max separate Telegram messages one reply may be split into.
@@ -1036,6 +1039,8 @@ class TelegramService:
             )
             txt = (m.text or "").replace("\n", " ").strip()
             if txt:
+                if len(txt) > SUMMARY_LINE_MAX_CHARS:
+                    txt = txt[:SUMMARY_LINE_MAX_CHARS] + "…"
                 lines.append(f"{who}: {txt}")
         new_last = max(m.id for m in pending)
         if lines:

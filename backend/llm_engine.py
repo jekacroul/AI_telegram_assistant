@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import random
@@ -45,6 +44,11 @@ def pick_auto_variant(variants: list[str]) -> Optional[str]:
 
 class LLMUnavailableError(RuntimeError):
     pass
+
+
+# Output budget for a chat reply. Kept small so prompt + completion stay
+# well inside the model's context window (a chat reply needs little room).
+REPLY_MAX_TOKENS = 400
 
 
 SYSTEM_TEMPLATE = (
@@ -462,32 +466,31 @@ class LLMClient:
         # different temperatures, instead of asking it for a numbered list
         # in a single call — a chat-clone model produces one reply, not a
         # formatted list.
+        #
+        # Sampled sequentially (not concurrently): a local single-slot server
+        # may return 500 on parallel requests. A small output budget keeps
+        # prompt + completion inside the model's context window.
         temperatures = (0.7, 0.85, 1.0)
-        raws = await asyncio.gather(
-            *(self.generate_chat(messages, temperature=t) for t in temperatures),
-            return_exceptions=True,
-        )
         variants: list[str] = []
         seen: set[str] = set()
-        for raw in raws:
-            if isinstance(raw, BaseException):
-                log.warning("LLM sampling call failed: %s", raw)
+        errors: list[Exception] = []
+        for temp in temperatures:
+            try:
+                raw = await self.generate_chat(
+                    messages, temperature=temp, num_predict=REPLY_MAX_TOKENS
+                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+                log.warning("LLM sampling call failed: %s", exc)
                 continue
             cand = _extract_single_reply(raw, effective_name)
             if cand and cand not in seen:
                 seen.add(cand)
                 variants.append(cand)
         if not variants:
-            first = next(
-                (r for r in raws if isinstance(r, str) and r), ""
-            )
-            if not first and raws and isinstance(raws[0], BaseException):
-                raise raws[0]
-            log.warning(
-                "LLM produced no usable reply. model=%s raw=%r",
-                self.model,
-                first,
-            )
+            if errors:
+                raise errors[0]
+            log.warning("LLM produced no usable reply. model=%s", self.model)
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
