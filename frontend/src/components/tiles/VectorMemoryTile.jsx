@@ -10,9 +10,12 @@ function formatEta(seconds) {
   return `${m}m ${s}s`;
 }
 
+// Persists last-known status across navigations to avoid a loading flash.
+let cachedRagStatus = null;
+
 export default function VectorMemoryTile({ dragHandleProps }) {
   const { t } = useLang();
-  const [ragStatus, setRagStatus] = useState(null);
+  const [ragStatus, setRagStatus] = useState(cachedRagStatus);
   const [error, setError] = useState("");
   const [ragSearch, setRagSearch] = useState({
     open: false,
@@ -24,7 +27,8 @@ export default function VectorMemoryTile({ dragHandleProps }) {
 
   const load = useCallback(async () => {
     try {
-      setRagStatus(await api.ragStatus());
+      cachedRagStatus = await api.ragStatus();
+      setRagStatus(cachedRagStatus);
     } catch {
       // ignore — keep last known state
     }

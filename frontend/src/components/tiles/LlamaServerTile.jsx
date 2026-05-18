@@ -4,14 +4,18 @@ import { api } from "../../lib/api.js";
 import Toggle from "../Toggle.jsx";
 import { useLang } from "../../hooks/useLang.js";
 
+// Persists last-known status across navigations to avoid a loading flash.
+let cachedSrv = null;
+
 export default function LlamaServerTile({ dragHandleProps }) {
   const { t } = useLang();
-  const [srv, setSrv] = useState(null);
+  const [srv, setSrv] = useState(cachedSrv);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
-      setSrv(await api.llamaServerStatus());
+      cachedSrv = await api.llamaServerStatus();
+      setSrv(cachedSrv);
     } catch {
       // ignore — keep last known state
     }
