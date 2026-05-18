@@ -13,10 +13,24 @@ import {
 import { api } from "../lib/api.js";
 import MetricCard from "../components/MetricCard.jsx";
 import EmptyState from "../components/EmptyState.jsx";
-import { BarChart2 } from "lucide-react";
+import {
+  BarChart2,
+  Activity,
+  Inbox,
+  Send,
+  ThumbsUp,
+  ThumbsDown,
+  Award,
+  Timer,
+  LayoutGrid,
+  Table2,
+} from "lucide-react";
 import { useTheme } from "../hooks/useTheme.js";
 import { useLang } from "../hooks/useLang.js";
 import { chartColors } from "../lib/colors.js";
+import Page from "../components/Page.jsx";
+import Tile from "../components/Tile.jsx";
+import Tabs from "../components/Tabs.jsx";
 
 function useChartColors() {
   const { isDark } = useTheme();
@@ -66,6 +80,7 @@ const TH =
 export default function Stats() {
   const { t } = useLang();
   const colors = useChartColors();
+  const [tab, setTab] = useState("overview");
   const [overview, setOverview] = useState(null);
   const [activity, setActivity] = useState([]);
   const [topChats, setTopChats] = useState([]);
@@ -142,21 +157,42 @@ export default function Stats() {
   );
 
   return (
-    <div className="space-y-6">
+    <Page className="space-y-6">
       {error && (
-        <div className="card border-bad/40 text-sm text-bad">{error}</div>
+        <div
+          className="tile flex items-center gap-2 text-sm
+                     text-rose-600 dark:text-rose-300
+                     border-rose-300 dark:border-rose-900/60"
+        >
+          {error}
+        </div>
       )}
 
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "overview", icon: LayoutGrid, label: t("stats.tabs.overview") },
+          { id: "tables", icon: Table2, label: t("stats.tabs.tables") },
+        ]}
+      />
+
+      {tab === "overview" && (
+        <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           label={t("stats.received")}
           value={overview?.received ?? "—"}
           hint={t("stats.receivedHint")}
+          icon={Inbox}
+          accent="sky"
         />
         <MetricCard
           label={t("stats.sent")}
           value={overview?.sent ?? "—"}
           hint={t("stats.sentHint", { count: overview?.replied ?? 0 })}
+          icon={Send}
+          accent="emerald"
         />
         <MetricCard
           label={t("stats.approvedManual")}
@@ -164,16 +200,19 @@ export default function Stats() {
           hint={t("stats.approvalHint", {
             rate: formatPercent(overview?.approval_rate),
           })}
+          icon={ThumbsUp}
+          accent="violet"
         />
         <MetricCard
           label={t("stats.rejected")}
           value={overview?.rejected ?? "—"}
           hint={t("stats.rejectedHint")}
+          icon={ThumbsDown}
+          accent="rose"
         />
       </div>
 
-      <div className="card">
-        <p className="section-label">{t("stats.activity30")}</p>
+      <Tile title={t("stats.activity30")} icon={Activity}>
         <div className="h-64">
           <ResponsiveContainer>
             <LineChart data={activityChartData}>
@@ -212,10 +251,9 @@ export default function Stats() {
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </Tile>
 
-      <div className="card">
-        <p className="section-label">{t("stats.topChats")}</p>
+      <Tile title={t("stats.topChats")} icon={BarChart2}>
         {topChatsData.length === 0 ? (
           <EmptyState
             icon={BarChart2}
@@ -257,12 +295,22 @@ export default function Stats() {
             </ResponsiveContainer>
           </div>
         )}
-      </div>
+      </Tile>
+        </>
+      )}
 
-      <div className="card overflow-hidden p-0">
-        <p className="section-label px-4 pt-4">
-          {t("stats.qualityByVersion")}
-        </p>
+      {tab === "tables" && (
+        <>
+      <div className="tile overflow-hidden p-0">
+        <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+          <Award
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("stats.qualityByVersion")}
+          </span>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">
@@ -313,10 +361,16 @@ export default function Stats() {
         </table>
       </div>
 
-      <div className="card overflow-hidden p-0">
-        <p className="section-label px-4 pt-4">
-          {t("stats.avgResponseTime")}
-        </p>
+      <div className="tile overflow-hidden p-0">
+        <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+          <Timer
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("stats.avgResponseTime")}
+          </span>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">
@@ -348,6 +402,8 @@ export default function Stats() {
           </tbody>
         </table>
       </div>
-    </div>
+        </>
+      )}
+    </Page>
   );
 }

@@ -2,7 +2,23 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 import { useLang } from "../hooks/useLang.js";
 import { useTheme } from "../hooks/useTheme.js";
+import {
+  Palette,
+  Cpu,
+  Users,
+  CalendarClock,
+  Timer,
+  MessageSquare,
+  Bell,
+  ShieldCheck,
+  Mic,
+  Database,
+  FlaskConical,
+  SlidersHorizontal,
+  MessageCircle,
+} from "lucide-react";
 import { LANGUAGES } from "../lib/i18n.js";
+import Page from "../components/Page.jsx";
 
 const dayValues = [0, 1, 2, 3, 4, 5, 6];
 
@@ -22,9 +38,18 @@ function formatDelayPreview(seconds) {
   return minutes.toFixed(1).replace(".", ",");
 }
 
+const SETTINGS_TABS = [
+  { id: "general", icon: SlidersHorizontal },
+  { id: "replies", icon: MessageCircle },
+  { id: "voice", icon: Mic },
+  { id: "memory", icon: Database },
+  { id: "notifications", icon: Bell },
+];
+
 export default function Settings() {
   const { t, lang, setLang } = useLang();
   const { theme, isDark, toggle: toggleTheme } = useTheme();
+  const [tab, setTab] = useState("general");
   const [s, setS] = useState({
     auto_reply: false,
     monitored_chats: [],
@@ -355,12 +380,39 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="card">
-        <div className="label">{t("settings.appearance")}</div>
+    <Page>
+      <div
+        className="flex flex-wrap gap-1 p-1 rounded-xl
+                   bg-light-card2 dark:bg-dark-card2
+                   border border-light-border dark:border-dark-border"
+      >
+        {SETTINGS_TABS.map((tb) => (
+          <button
+            key={tb.id}
+            onClick={() => setTab(tb.id)}
+            className={`flex items-center gap-2 px-3 h-8 rounded-lg text-sm
+              font-medium transition-colors ${
+                tab === tb.id
+                  ? "bg-light-card dark:bg-dark-card text-indigo-600 dark:text-indigo-400 shadow-sm"
+                  : "text-zinc-500 dark:text-slate-400 hover:text-zinc-700 dark:hover:text-slate-200"
+              }`}
+          >
+            <tb.icon size={14} />
+            {t(`settings.tabs.${tb.id}`)}
+          </button>
+        ))}
+      </div>
+
+      {tab === "general" && (
+        <>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <Palette size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.appearance")}</span>
+        </div>
         <div className="grid md:grid-cols-2 gap-3 mt-3">
           <div>
-            <div className="label">{t("settings.themeLabel")}</div>
+            <div className="tile-label">{t("settings.themeLabel")}</div>
             <div className="flex gap-2 mt-2">
               {[
                 { v: "light", label: t("settings.themeLight") },
@@ -381,7 +433,7 @@ export default function Settings() {
             </div>
           </div>
           <div>
-            <div className="label">{t("settings.languageLabel")}</div>
+            <div className="tile-label">{t("settings.languageLabel")}</div>
             <div className="flex gap-2 mt-2">
               {LANGUAGES.map((code) => (
                 <button
@@ -399,8 +451,11 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.lmModel")}</div>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <Cpu size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.lmModel")}</span>
+        </div>
         <select
           className="input mt-2"
           value={s.llm_model}
@@ -424,7 +479,12 @@ export default function Settings() {
         )}
       </div>
 
-      <div className="card">
+        </>
+      )}
+
+      {tab === "replies" && (
+        <>
+      <div className="tile">
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
@@ -442,7 +502,7 @@ export default function Settings() {
       </div>
 
 
-      <div className="card">
+      <div className="tile">
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
@@ -463,7 +523,7 @@ export default function Settings() {
         </label>
       </div>
 
-      <div className="card">
+      <div className="tile">
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
@@ -484,8 +544,11 @@ export default function Settings() {
         </label>
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.groupReplies")}</div>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <Users size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.groupReplies")}</span>
+        </div>
         <div className="text-xs text-muted mt-1">
           {t("settings.groupRepliesDesc")}
         </div>
@@ -507,10 +570,13 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="tile">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="label">{t("settings.schedule")}</div>
+            <div className="flex items-center gap-2">
+              <CalendarClock size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+              <span className="tile-label mb-0">{t("settings.schedule")}</span>
+            </div>
             <div className="text-xs text-muted mt-1">
               {t("settings.scheduleDesc")}
             </div>
@@ -547,7 +613,7 @@ export default function Settings() {
 
         <div className="grid md:grid-cols-3 gap-3 mt-4">
           <div>
-            <div className="label">{t("settings.timezone")}</div>
+            <div className="tile-label">{t("settings.timezone")}</div>
             <select
               className="input mt-1"
               value={schedule.timezone}
@@ -563,7 +629,7 @@ export default function Settings() {
             </select>
           </div>
           <div>
-            <div className="label">{t("settings.from")}</div>
+            <div className="tile-label">{t("settings.from")}</div>
             <input
               className="input mt-1"
               type="time"
@@ -574,7 +640,7 @@ export default function Settings() {
             />
           </div>
           <div>
-            <div className="label">{t("settings.to")}</div>
+            <div className="tile-label">{t("settings.to")}</div>
             <input
               className="input mt-1"
               type="time"
@@ -587,7 +653,7 @@ export default function Settings() {
         </div>
 
         <div className="mt-4">
-          <div className="label">{t("settings.weekdays")}</div>
+          <div className="tile-label">{t("settings.weekdays")}</div>
           <div className="flex flex-wrap gap-2 mt-2">
             {dayValues.map((d) => (
               <label
@@ -612,8 +678,11 @@ export default function Settings() {
         )}
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.replyDelay")}</div>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <Timer size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.replyDelay")}</span>
+        </div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -683,8 +752,11 @@ export default function Settings() {
       </div>
 
 
-      <div className="card">
-        <div className="label">{t("settings.monitoredChats")}</div>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <MessageSquare size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.monitoredChats")}</span>
+        </div>
         <div className="text-xs text-muted mt-1">
           {t("settings.monitoredChatsDesc")}
         </div>
@@ -708,18 +780,30 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <button className="btn-primary" onClick={save} disabled={saving}>
-          {t("common.save")}
-        </button>
-        <button className="btn-secondary" onClick={runTest}>
-          {t("settings.testModel")}
-        </button>
-        {error && <span className="text-bad text-sm self-center">{error}</span>}
-      </div>
+        </>
+      )}
 
-      <div className="card">
-        <div className="label">{t("settings.notifications")}</div>
+      {(tab === "general" || tab === "replies") && (
+        <div className="flex gap-2">
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {t("common.save")}
+          </button>
+          <button className="btn-secondary" onClick={runTest}>
+            {t("settings.testModel")}
+          </button>
+          {error && (
+            <span className="text-bad text-sm self-center">{error}</span>
+          )}
+        </div>
+      )}
+
+      {tab === "notifications" && (
+        <>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <Bell size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.notifications")}</span>
+        </div>
         <label className="flex items-start gap-3 mt-2">
           <input
             type="checkbox"
@@ -740,7 +824,7 @@ export default function Settings() {
         </label>
 
         <div className="mt-3">
-          <div className="label">{t("settings.yourChatId")}</div>
+          <div className="tile-label">{t("settings.yourChatId")}</div>
           <div className="flex gap-2 mt-1">
             <input
               className="input flex-1"
@@ -776,14 +860,17 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="label">{t("settings.adminPanel")}</div>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.adminPanel")}</span>
+        </div>
         <div className="text-xs text-muted mt-1">
           {t("settings.adminPanelDesc")}
         </div>
 
         <div className="mt-3">
-          <div className="label">OWNER_CHAT_ID</div>
+          <div className="tile-label">OWNER_CHAT_ID</div>
           <div className="flex gap-2 mt-1">
             <input
               className="input flex-1"
@@ -860,10 +947,17 @@ export default function Settings() {
           )}
         </div>
       </div>
+        </>
+      )}
 
-      <div className="card">
+      {tab === "voice" && (
+        <>
+      <div className="tile">
         <div className="flex items-center justify-between gap-3">
-          <div className="label">{t("settings.voiceMessages")}</div>
+          <div className="flex items-center gap-2">
+            <Mic size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+            <span className="tile-label mb-0">{t("settings.voiceMessages")}</span>
+          </div>
           <span
             className={`px-2 py-0.5 rounded-full text-xs ${
               whisper.device === "cuda"
@@ -909,7 +1003,7 @@ export default function Settings() {
           <>
             <div className="grid md:grid-cols-2 gap-3 mt-4">
               <div>
-                <div className="label">{t("settings.modelLabel")}</div>
+                <div className="tile-label">{t("settings.modelLabel")}</div>
                 <select
                   className="input mt-1"
                   value={whisper.whisper_model}
@@ -928,7 +1022,7 @@ export default function Settings() {
                 </select>
               </div>
               <div>
-                <div className="label">
+                <div className="tile-label">
                   {t("settings.languageLabelVoice")}
                 </div>
                 <select
@@ -971,7 +1065,7 @@ export default function Settings() {
             </label>
 
             <div className="mt-4">
-              <div className="label">{t("settings.voiceReaction")}</div>
+              <div className="tile-label">{t("settings.voiceReaction")}</div>
               <div className="space-y-1 mt-2">
                 {[
                   { v: "text", label: t("settings.voiceText") },
@@ -1022,9 +1116,16 @@ export default function Settings() {
           )}
         </div>
       </div>
+        </>
+      )}
 
-      <div className="card">
-        <div className="label">{t("settings.ragMemory")}</div>
+      {tab === "memory" && (
+        <>
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <Database size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">{t("settings.ragMemory")}</span>
+        </div>
         <label className="flex items-start gap-3 mt-3">
           <input
             type="checkbox"
@@ -1075,7 +1176,7 @@ export default function Settings() {
             </div>
 
             <div className="mt-4">
-              <div className="label">{t("settings.maxResults")}</div>
+              <div className="tile-label">{t("settings.maxResults")}</div>
               <input
                 className="input mt-1 w-32"
                 type="number"
@@ -1156,10 +1257,15 @@ export default function Settings() {
           {ragErr && <span className="text-bad text-sm">{ragErr}</span>}
         </div>
       </div>
+        </>
+      )}
 
-      {test && (
-        <div className="card">
-          <div className="label">{t("settings.testResult")}</div>
+      {(tab === "general" || tab === "replies") && test && (
+        <div className="tile">
+          <div className="flex items-center gap-2 mb-1">
+            <FlaskConical size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+            <span className="tile-label mb-0">{t("settings.testResult")}</span>
+          </div>
           {test.loading && <div className="text-sm text-muted">...</div>}
           {test.error && <div className="text-bad text-sm">{test.error}</div>}
           {test.variants && (
@@ -1171,6 +1277,6 @@ export default function Settings() {
           )}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

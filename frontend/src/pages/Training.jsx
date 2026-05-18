@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
+import { Mic, ShieldX, Layers, History } from "lucide-react";
 import { useLang } from "../hooks/useLang.js";
+import Tabs from "../components/Tabs.jsx";
+import Page from "../components/Page.jsx";
 
 function formatEta(seconds) {
   if (!seconds || seconds <= 0) return "—";
@@ -68,6 +71,7 @@ export default function Training() {
   ]);
   const [cachedExports, setCachedExports] = useState([]);
   const [trainSource, setTrainSource] = useState("auto");
+  const [tab, setTab] = useState("data");
 
   const refresh = async () => {
     const [st, rs, qs] = await Promise.all([
@@ -303,7 +307,18 @@ export default function Training() {
     botEnabled && combined.total > 0 && combined.bot / combined.total < 0.1;
 
   return (
-    <div className="space-y-4">
+    <Page>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "data", icon: Layers, label: t("training.tabs.data") },
+          { id: "history", icon: History, label: t("training.tabs.history") },
+        ]}
+      />
+
+      {tab === "data" && (
+        <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat
           title={t("training.messages")}
@@ -328,9 +343,17 @@ export default function Training() {
       </div>
 
       {voiceStats && (
-        <div className="card">
-          <div className="label">{t("training.voiceMessages")}</div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2 text-sm">
+        <div className="tile">
+          <div className="flex items-center gap-2 mb-3">
+            <Mic
+              size={14}
+              className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+            />
+            <span className="tile-label mb-0">
+              {t("training.voiceMessages")}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
             <div>
               <div className="text-muted text-xs">
                 {t("training.voiceReceived")}
@@ -363,9 +386,17 @@ export default function Training() {
         </div>
       )}
 
-      <div className="card">
-        <div className="label">{t("training.rejectedByQuality")}</div>
-        <div className="text-xl font-semibold mt-1">
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-3">
+          <ShieldX
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("training.rejectedByQuality")}
+          </span>
+        </div>
+        <div className="text-xl font-semibold">
           {qualityStats
             ? t("training.rejectedOf", {
                 rejected: qualityStats.total_rejected,
@@ -389,8 +420,14 @@ export default function Training() {
         </div>
       </div>
 
-      <div className="card space-y-4">
-        <div className="label">{t("training.dataSources")}</div>
+      <div className="tile space-y-4">
+        <div className="flex items-center gap-2">
+          <Layers
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">{t("training.dataSources")}</span>
+        </div>
 
         <div className="rounded-lg border border-line p-3 space-y-2">
           <div className="flex items-center gap-3">
@@ -604,7 +641,7 @@ export default function Training() {
         </div>
       </div>
 
-      <div className="card flex flex-wrap gap-2 items-center">
+      <div className="tile flex flex-wrap gap-2 items-center">
         <button className="btn-secondary" onClick={build} disabled={busy}>
           {busy
             ? t("training.building")
@@ -683,7 +720,7 @@ export default function Training() {
           progress.phase !== "cancelled";
         const showIndeterminate = isRunningPhase && percent == null;
         return (
-        <div className="card">
+        <div className="tile">
           <div className="flex flex-wrap gap-4 text-sm items-center">
             <span>
               {t("training.phaseLabel")}
@@ -764,10 +801,19 @@ export default function Training() {
         </div>
         );
       })()}
+        </>
+      )}
 
-      <div className="card">
-        <div className="text-sm text-muted mb-2">
-          {t("training.adapterHistory")}
+      {tab === "history" && (
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-3">
+          <History
+            size={14}
+            className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+          />
+          <span className="tile-label mb-0">
+            {t("training.adapterHistory")}
+          </span>
         </div>
         <table className="w-full text-sm">
           <thead className="text-muted">
@@ -911,7 +957,8 @@ export default function Training() {
           </tbody>
         </table>
       </div>
-    </div>
+      )}
+    </Page>
   );
 }
 
@@ -922,8 +969,8 @@ function reasonLabel(reason, t) {
 
 function Stat({ title, value }) {
   return (
-    <div className="card">
-      <div className="label">{title}</div>
+    <div className="tile">
+      <div className="tile-label">{title}</div>
       <div className="text-xl font-semibold mt-1 truncate">{value}</div>
     </div>
   );

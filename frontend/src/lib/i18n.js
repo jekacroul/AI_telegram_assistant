@@ -131,6 +131,7 @@ export const translations = {
         "Удалить всю историю и чат «{name}»? Будут удалены все сообщения и резервные копии. Это действие нельзя отменить.",
     },
     training: {
+      tabs: { data: "Обучение", history: "История" },
       messages: "Сообщений",
       trainingPairs: "Пар для обучения",
       lastRun: "Последний запуск",
@@ -288,6 +289,7 @@ export const translations = {
       },
     },
     stats: {
+      tabs: { overview: "Обзор", tables: "Таблицы" },
       received: "Получено",
       receivedHint: "входящих сообщений",
       sent: "Отправлено",
@@ -326,6 +328,7 @@ export const translations = {
       add: "Добавить",
     },
     replication: {
+      tabs: { settings: "Настройки", history: "История" },
       sourceDb: "Исходная БД",
       replicasStored: "Реплик хранится",
       totalRecords: "всего записей: {count}",
@@ -399,6 +402,13 @@ export const translations = {
       minSec: "{m}м {s}с",
     },
     settings: {
+      tabs: {
+        general: "Общие",
+        replies: "Автоответы",
+        voice: "Голос",
+        memory: "Память",
+        notifications: "Уведомления",
+      },
       appearance: "Внешний вид",
       themeLabel: "Тема оформления",
       themeLight: "Светлая",
@@ -701,6 +711,7 @@ export const translations = {
         "Delete the entire history and chat «{name}»? All messages and backups will be removed. This action cannot be undone.",
     },
     training: {
+      tabs: { data: "Training", history: "History" },
       messages: "Messages",
       trainingPairs: "Training pairs",
       lastRun: "Last run",
@@ -858,6 +869,7 @@ export const translations = {
       },
     },
     stats: {
+      tabs: { overview: "Overview", tables: "Tables" },
       received: "Received",
       receivedHint: "incoming messages",
       sent: "Sent",
@@ -896,6 +908,7 @@ export const translations = {
       add: "Add",
     },
     replication: {
+      tabs: { settings: "Settings", history: "History" },
       sourceDb: "Source DB",
       replicasStored: "Replicas stored",
       totalRecords: "total records: {count}",
@@ -969,6 +982,13 @@ export const translations = {
       minSec: "{m}m {s}s",
     },
     settings: {
+      tabs: {
+        general: "General",
+        replies: "Auto-replies",
+        voice: "Voice",
+        memory: "Memory",
+        notifications: "Notifications",
+      },
       appearance: "Appearance",
       themeLabel: "Color theme",
       themeLight: "Light",
