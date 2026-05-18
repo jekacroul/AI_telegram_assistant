@@ -84,6 +84,35 @@ SUMMARY_SYSTEM = (
 )
 
 
+def _self_name_pattern(user_name: str | None) -> Optional[re.Pattern]:
+    """Regex matching the user's own name (full name and declined surname).
+
+    Used to scrub the user's name out of context fed to the model and out
+    of generated replies, so a clone model doesn't refer to itself by name
+    in the third person.
+    """
+    name = (user_name or "").strip()
+    if not name:
+        return None
+    alts = [re.escape(name)]
+    for token in re.split(r"\s+", name):
+        if len(token) >= 4:
+            alts.append(re.escape(token) + r"[а-яёa-z]*")
+    return re.compile(r"\b(?:" + "|".join(alts) + r")\b", re.IGNORECASE)
+
+
+def _strip_self_name(text: str, pattern: Optional[re.Pattern]) -> str:
+    """Remove the user's own name from text and tidy up the leftover gaps."""
+    if not pattern or not text:
+        return text
+    cleaned = pattern.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([,.!?…:;)])", r"\1", cleaned)
+    cleaned = re.sub(r"([(])[ \t]+", r"\1", cleaned)
+    cleaned = re.sub(r"(?m)^[ \t]+", "", cleaned)
+    return cleaned.strip()
+
+
 def build_system_prompt(
     user_name: str,
     style_profile: dict | None,
@@ -94,6 +123,10 @@ def build_system_prompt(
     summary: Optional[str] = None,
 ) -> str:
     style_str = json.dumps(style_profile or {}, ensure_ascii=False)
+    name_re = _self_name_pattern(user_name)
+    if name_re:
+        rag_context = _strip_self_name(rag_context or "", name_re) or None
+        summary = _strip_self_name(summary or "", name_re) or None
     rag_block = f"{rag_context.strip()}\n" if rag_context and rag_context.strip() else ""
     summary_block = (
         "Краткое саммари предыдущего общения с этим собеседником "
@@ -150,11 +183,19 @@ def build_chat_messages(
         if not last.get("is_mine") and last_text == incoming_clean:
             history = history[:-1]
 
+    # Scrub the user's own name from prior turns: the model's earlier
+    # replies are fed back as context, and if they named the user in the
+    # third person the model keeps repeating the pattern.
+    name_re = _self_name_pattern(user_name)
     for msg in history:
         text = (msg.get("text") or "").replace("\n", " ").strip()
         if not text:
             continue
         role = "assistant" if msg.get("is_mine") else "user"
+        if role == "assistant" and name_re:
+            text = _strip_self_name(text, name_re)
+        if not text:
+            continue
         messages.append({"role": role, "content": text})
 
     # Feed the model the raw incoming message as the final turn — no meta
@@ -491,6 +532,20 @@ class LLMClient:
             if errors:
                 raise errors[0]
             log.warning("LLM produced no usable reply. model=%s", self.model)
+        # Keep the bot from naming itself in the third person: prefer
+        # variants free of the user's own name; if every variant names the
+        # user, scrub the name out as a last resort.
+        name_re = _self_name_pattern(effective_name)
+        if name_re and variants:
+            clean = [v for v in variants if not name_re.search(v)]
+            if clean:
+                variants = clean
+            else:
+                scrubbed: list[str] = []
+                for v in variants:
+                    s = _strip_self_name(v, name_re)
+                    scrubbed.append(s if s else v)
+                variants = scrubbed
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
