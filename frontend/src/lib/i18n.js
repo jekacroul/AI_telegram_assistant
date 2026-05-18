@@ -399,6 +399,13 @@ export const translations = {
       minSec: "{m}м {s}с",
     },
     settings: {
+      tabs: {
+        general: "Общие",
+        replies: "Автоответы",
+        voice: "Голос",
+        memory: "Память",
+        notifications: "Уведомления",
+      },
       appearance: "Внешний вид",
       themeLabel: "Тема оформления",
       themeLight: "Светлая",
@@ -969,6 +976,13 @@ export const translations = {
       minSec: "{m}m {s}s",
     },
     settings: {
+      tabs: {
+        general: "General",
+        replies: "Auto-replies",
+        voice: "Voice",
+        memory: "Memory",
+        notifications: "Notifications",
+      },
       appearance: "Appearance",
       themeLabel: "Color theme",
       themeLight: "Light",

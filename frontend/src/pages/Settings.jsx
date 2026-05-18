@@ -14,6 +14,8 @@ import {
   Mic,
   Database,
   FlaskConical,
+  SlidersHorizontal,
+  MessageCircle,
 } from "lucide-react";
 import { LANGUAGES } from "../lib/i18n.js";
 import Page from "../components/Page.jsx";
@@ -36,9 +38,18 @@ function formatDelayPreview(seconds) {
   return minutes.toFixed(1).replace(".", ",");
 }
 
+const SETTINGS_TABS = [
+  { id: "general", icon: SlidersHorizontal },
+  { id: "replies", icon: MessageCircle },
+  { id: "voice", icon: Mic },
+  { id: "memory", icon: Database },
+  { id: "notifications", icon: Bell },
+];
+
 export default function Settings() {
   const { t, lang, setLang } = useLang();
   const { theme, isDark, toggle: toggleTheme } = useTheme();
+  const [tab, setTab] = useState("general");
   const [s, setS] = useState({
     auto_reply: false,
     monitored_chats: [],
@@ -370,6 +381,30 @@ export default function Settings() {
 
   return (
     <Page>
+      <div
+        className="flex flex-wrap gap-1 p-1 rounded-xl
+                   bg-light-card2 dark:bg-dark-card2
+                   border border-light-border dark:border-dark-border"
+      >
+        {SETTINGS_TABS.map((tb) => (
+          <button
+            key={tb.id}
+            onClick={() => setTab(tb.id)}
+            className={`flex items-center gap-2 px-3 h-8 rounded-lg text-sm
+              font-medium transition-colors ${
+                tab === tb.id
+                  ? "bg-light-card dark:bg-dark-card text-indigo-600 dark:text-indigo-400 shadow-sm"
+                  : "text-zinc-500 dark:text-slate-400 hover:text-zinc-700 dark:hover:text-slate-200"
+              }`}
+          >
+            <tb.icon size={14} />
+            {t(`settings.tabs.${tb.id}`)}
+          </button>
+        ))}
+      </div>
+
+      {tab === "general" && (
+        <>
       <div className="tile">
         <div className="flex items-center gap-2 mb-1">
           <Palette size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
@@ -444,6 +479,11 @@ export default function Settings() {
         )}
       </div>
 
+        </>
+      )}
+
+      {tab === "replies" && (
+        <>
       <div className="tile">
         <label className="flex items-start gap-3">
           <input
@@ -740,16 +780,25 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <button className="btn-primary" onClick={save} disabled={saving}>
-          {t("common.save")}
-        </button>
-        <button className="btn-secondary" onClick={runTest}>
-          {t("settings.testModel")}
-        </button>
-        {error && <span className="text-bad text-sm self-center">{error}</span>}
-      </div>
+        </>
+      )}
 
+      {(tab === "general" || tab === "replies") && (
+        <div className="flex gap-2">
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {t("common.save")}
+          </button>
+          <button className="btn-secondary" onClick={runTest}>
+            {t("settings.testModel")}
+          </button>
+          {error && (
+            <span className="text-bad text-sm self-center">{error}</span>
+          )}
+        </div>
+      )}
+
+      {tab === "notifications" && (
+        <>
       <div className="tile">
         <div className="flex items-center gap-2 mb-1">
           <Bell size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
@@ -898,7 +947,11 @@ export default function Settings() {
           )}
         </div>
       </div>
+        </>
+      )}
 
+      {tab === "voice" && (
+        <>
       <div className="tile">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -1063,7 +1116,11 @@ export default function Settings() {
           )}
         </div>
       </div>
+        </>
+      )}
 
+      {tab === "memory" && (
+        <>
       <div className="tile">
         <div className="flex items-center gap-2 mb-1">
           <Database size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
@@ -1200,8 +1257,10 @@ export default function Settings() {
           {ragErr && <span className="text-bad text-sm">{ragErr}</span>}
         </div>
       </div>
+        </>
+      )}
 
-      {test && (
+      {(tab === "general" || tab === "replies") && test && (
         <div className="tile">
           <div className="flex items-center gap-2 mb-1">
             <FlaskConical size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
