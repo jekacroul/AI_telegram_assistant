@@ -57,6 +57,9 @@ export default function Settings() {
     group_reply_mode: "mention",
     quality_filter_enabled: true,
     auto_reconcile_queue: true,
+    summary_enabled: true,
+    reply_settle_seconds: 12,
+    reply_history_limit: 20,
   });
   const [chats, setChats] = useState([]);
   const [models, setModels] = useState([]);
@@ -138,6 +141,10 @@ export default function Settings() {
       group_reply_mode: st.group_reply_mode || "mention",
       quality_filter_enabled: st.quality_filter_enabled !== false,
       auto_reconcile_queue: st.auto_reconcile_queue !== false,
+      summary_enabled: st.summary_enabled !== false,
+      reply_settle_seconds:
+        st.reply_settle_seconds ?? 12,
+      reply_history_limit: st.reply_history_limit ?? 20,
     }));
     setSchedule((prev) => ({
       ...prev,
@@ -542,6 +549,95 @@ export default function Settings() {
             </div>
           </div>
         </label>
+      </div>
+
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <MessageCircle size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">
+            {t("settings.conversationContext")}
+          </span>
+        </div>
+        <div className="text-xs text-muted mt-1">
+          {t("settings.conversationContextDesc")}
+        </div>
+
+        <label className="flex items-start gap-3 mt-4">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={s.summary_enabled}
+            onChange={(e) =>
+              setS({ ...s, summary_enabled: e.target.checked })
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">
+              {t("settings.useSummary")}
+            </div>
+            <div className="text-xs text-muted">
+              {t("settings.useSummaryDesc")}
+            </div>
+          </div>
+        </label>
+
+        <div className="mt-4">
+          <div className="flex justify-between text-sm">
+            <span>
+              {s.reply_settle_seconds > 0
+                ? t("settings.settleWindow", {
+                    value: s.reply_settle_seconds,
+                  })
+                : t("settings.settleWindowOff")}
+            </span>
+            <span className="text-muted">0–120</span>
+          </div>
+          <input
+            className="w-full mt-2"
+            type="range"
+            min={0}
+            max={120}
+            step="1"
+            value={s.reply_settle_seconds}
+            onChange={(e) =>
+              setS({
+                ...s,
+                reply_settle_seconds: Number(e.target.value),
+              })
+            }
+          />
+          <div className="text-xs text-muted mt-1">
+            {t("settings.settleWindowDesc")}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <div className="flex justify-between text-sm">
+            <span>
+              {t("settings.historyDepth", {
+                value: s.reply_history_limit,
+              })}
+            </span>
+            <span className="text-muted">2–80</span>
+          </div>
+          <input
+            className="w-full mt-2"
+            type="range"
+            min={2}
+            max={80}
+            step="1"
+            value={s.reply_history_limit}
+            onChange={(e) =>
+              setS({
+                ...s,
+                reply_history_limit: Number(e.target.value),
+              })
+            }
+          />
+          <div className="text-xs text-muted mt-1">
+            {t("settings.historyDepthDesc")}
+          </div>
+        </div>
       </div>
 
       <div className="tile">
