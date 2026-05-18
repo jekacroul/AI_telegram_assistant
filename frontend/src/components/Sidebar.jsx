@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -9,6 +9,8 @@ import {
   Zap,
   HardDrive,
   Settings,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle.jsx";
 import LanguageToggle from "./LanguageToggle.jsx";
@@ -25,38 +27,99 @@ export const NAV_ITEMS = [
   { to: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
+function getInitialCollapsed() {
+  try {
+    return localStorage.getItem("sidebarCollapsed") !== "false";
+  } catch {
+    return true;
+  }
+}
+
 export default function Sidebar() {
   const { t } = useLang();
+  const [collapsed, setCollapsed] = useState(getInitialCollapsed);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sidebarCollapsed", String(collapsed));
+    } catch {
+      // ignore
+    }
+  }, [collapsed]);
+
   return (
     <aside
-      className="w-14 flex-shrink-0 flex flex-col items-center gap-1 py-3
+      className={`${collapsed ? "w-14 items-center" : "w-52 items-stretch"}
+                 flex-shrink-0 flex flex-col gap-1 py-3 px-2
                  bg-light-card dark:bg-dark-card
-                 border-r border-light-border dark:border-dark-border"
+                 border-r border-light-border dark:border-dark-border
+                 transition-[width] duration-200`}
     >
-      <div className="w-9 h-9 rounded-xl mb-2 flex items-center justify-center
-                      bg-indigo-600 dark:bg-indigo-500 text-white font-bold text-sm">
-        AI
+      <div
+        className={`flex items-center gap-2 mb-2 ${
+          collapsed ? "justify-center" : "px-1"
+        }`}
+      >
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center
+                        bg-indigo-600 dark:bg-indigo-500 text-white font-bold text-sm
+                        flex-shrink-0">
+          AI
+        </div>
+        {!collapsed && (
+          <span className="font-semibold text-sm whitespace-nowrap
+                           text-zinc-700 dark:text-slate-200">
+            {t("appTitle")}
+          </span>
+        )}
       </div>
 
-      <nav className="flex flex-col items-center gap-1">
+      <nav className="flex flex-col gap-1">
         {NAV_ITEMS.map(({ to, labelKey, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             end={to === "/"}
-            title={t(labelKey)}
+            title={collapsed ? t(labelKey) : undefined}
             className={({ isActive }) =>
-              `nav-item ${isActive ? "nav-item-active" : ""}`
+              `${collapsed ? "nav-item" : "nav-item-row"} ${
+                isActive ? "nav-item-active" : ""
+              }`
             }
           >
-            <Icon size={17} />
+            <Icon size={17} className="flex-shrink-0" />
+            {!collapsed && (
+              <span className="whitespace-nowrap">{t(labelKey)}</span>
+            )}
           </NavLink>
         ))}
       </nav>
 
       <div className="flex-1" />
-      <LanguageToggle />
-      <ThemeToggle />
+
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        title={collapsed ? t("nav.expand") : t("nav.collapse")}
+        className={collapsed ? "nav-item" : "nav-item-row"}
+      >
+        {collapsed ? (
+          <PanelLeftOpen size={17} className="flex-shrink-0" />
+        ) : (
+          <PanelLeftClose size={17} className="flex-shrink-0" />
+        )}
+        {!collapsed && (
+          <span className="whitespace-nowrap">{t("nav.collapse")}</span>
+        )}
+      </button>
+
+      <div
+        className={`flex gap-1 ${
+          collapsed ? "flex-col items-center" : "items-center justify-center"
+        }`}
+      >
+        <LanguageToggle />
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }

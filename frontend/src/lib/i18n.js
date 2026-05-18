@@ -28,6 +28,8 @@ export const translations = {
       quickReplies: "Быстрые ответы",
       replication: "Репликация",
       settings: "Настройки",
+      expand: "Развернуть меню",
+      collapse: "Свернуть меню",
     },
     subtitle: {
       dashboard: "Обзор ассистента",
@@ -596,6 +598,8 @@ export const translations = {
       quickReplies: "Quick replies",
       replication: "Replication",
       settings: "Settings",
+      expand: "Expand menu",
+      collapse: "Collapse menu",
     },
     subtitle: {
       dashboard: "Assistant overview",
