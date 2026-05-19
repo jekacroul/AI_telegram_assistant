@@ -1082,6 +1082,30 @@ async def reconcile_queue(session: AsyncSession = Depends(get_session)) -> dict:
     return {"cleared": cleared, "remaining": remaining or 0}
 
 
+@app.post("/api/messages/clear-queue")
+async def clear_queue(session: AsyncSession = Depends(get_session)) -> dict:
+    """Mark every pending message as replied, emptying the queue entirely.
+
+    Unlike reconcile-queue, this does not check for a later owner message —
+    it clears all incoming messages still waiting for a reply, covering
+    dialogs that are already finished but still linger in the queue.
+    """
+    where = (
+        Message.is_mine == False,  # noqa: E712
+        Message.replied == False,  # noqa: E712
+        Message.deleted == False,  # noqa: E712
+    )
+    rows = (await session.execute(select(Message).where(*where))).scalars().all()
+    for m in rows:
+        m.replied = True
+        m.pending_reason = None
+    await session.commit()
+    cleared = len(rows)
+    if cleared:
+        await message_bus.publish("queue_cleared", {"reconciled": cleared})
+    return {"cleared": cleared, "remaining": 0}
+
+
 @app.get("/api/messages/recent")
 async def recent(
     limit: int = 100, session: AsyncSession = Depends(get_session)
