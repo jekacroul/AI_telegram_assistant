@@ -149,13 +149,6 @@ export const api = {
     }),
   dialogsRunBackup: () =>
     request("/api/dialogs/run-backup", { method: "POST" }),
-  getNotifyChat: () => request("/api/settings/notify-chat"),
-  saveNotifyChat: (data) =>
-    request("/api/settings/notify-chat", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  detectNotifyChat: () => request("/api/settings/notify-chat/detect"),
   getAdminSettings: () => request("/api/admin/settings"),
   saveAdminSettings: (data) =>
     request("/api/admin/settings", {

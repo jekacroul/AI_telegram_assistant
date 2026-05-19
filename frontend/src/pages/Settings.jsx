@@ -67,7 +67,6 @@ export default function Settings() {
   const [test, setTest] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [notify, setNotify] = useState({ chat_id: "", enabled: true });
   const [delay, setDelay] = useState({
     delay_enabled: false,
     delay_min_seconds: 60,
@@ -82,9 +81,6 @@ export default function Settings() {
     active: true,
     next_active_text: "",
   });
-  const [notifySaving, setNotifySaving] = useState(false);
-  const [notifyMsg, setNotifyMsg] = useState("");
-  const [notifyError, setNotifyError] = useState("");
   const [admin, setAdmin] = useState({
     owner_chat_id: "",
     admin_notify_auto: true,
@@ -168,15 +164,6 @@ export default function Settings() {
     } catch (e) {
       setModels([]);
       setModelsError(e.message || t("settings.modelsErrorShort"));
-    }
-    try {
-      const n = await api.getNotifyChat();
-      setNotify({
-        chat_id: n.chat_id || "",
-        enabled: n.enabled !== false,
-      });
-    } catch {
-      // ignore
     }
     try {
       const w = await api.getWhisperSettings();
@@ -322,35 +309,6 @@ export default function Settings() {
       setTest({ loading: false, ...res });
     } catch (e) {
       setTest({ loading: false, error: e.message });
-    }
-  }
-
-  async function saveNotify() {
-    setNotifySaving(true);
-    setNotifyError("");
-    setNotifyMsg("");
-    try {
-      await api.saveNotifyChat({
-        chat_id: notify.chat_id.trim(),
-        enabled: !!notify.enabled,
-      });
-      setNotifyMsg(t("common.saved"));
-    } catch (e) {
-      setNotifyError(e.message);
-    } finally {
-      setNotifySaving(false);
-    }
-  }
-
-  async function detectNotify() {
-    setNotifyError("");
-    setNotifyMsg("");
-    try {
-      const res = await api.detectNotifyChat();
-      setNotify((prev) => ({ ...prev, chat_id: String(res.chat_id || "") }));
-      setNotifyMsg(t("settings.chatIdDetected"));
-    } catch (e) {
-      setNotifyError(e.message);
     }
   }
 
@@ -895,67 +853,6 @@ export default function Settings() {
 
       {tab === "notifications" && (
         <>
-      <div className="tile">
-        <div className="flex items-center gap-2 mb-1">
-          <Bell size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
-          <span className="tile-label mb-0">{t("settings.notifications")}</span>
-        </div>
-        <label className="flex items-start gap-3 mt-2">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={!!notify.enabled}
-            onChange={(e) =>
-              setNotify((prev) => ({ ...prev, enabled: e.target.checked }))
-            }
-          />
-          <div>
-            <div className="text-sm font-medium">
-              {t("settings.notifyOnReply")}
-            </div>
-            <div className="text-xs text-muted">
-              {t("settings.notifyOnReplyDesc")}
-            </div>
-          </div>
-        </label>
-
-        <div className="mt-3">
-          <div className="tile-label">{t("settings.yourChatId")}</div>
-          <div className="flex gap-2 mt-1">
-            <input
-              className="input flex-1"
-              placeholder={t("settings.chatIdPlaceholder")}
-              value={notify.chat_id}
-              onChange={(e) =>
-                setNotify((prev) => ({ ...prev, chat_id: e.target.value }))
-              }
-            />
-            <button className="btn-secondary" onClick={detectNotify}>
-              {t("settings.detectAuto")}
-            </button>
-          </div>
-          <div className="text-xs text-muted mt-1">
-            {t("settings.detectHint")}
-          </div>
-        </div>
-
-        <div className="flex gap-2 mt-3 items-center">
-          <button
-            className="btn-primary"
-            onClick={saveNotify}
-            disabled={notifySaving}
-          >
-            {t("settings.saveNotifications")}
-          </button>
-          {notifyMsg && (
-            <span className="text-good text-sm">{notifyMsg}</span>
-          )}
-          {notifyError && (
-            <span className="text-bad text-sm">{notifyError}</span>
-          )}
-        </div>
-      </div>
-
       <div className="tile">
         <div className="flex items-center gap-2 mb-1">
           <ShieldCheck size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />

@@ -87,11 +87,7 @@ from .replication import (
 from .llm_engine import LLMUnavailableError, get_client
 from .quality_filter import is_good_response
 from .rag_engine import EMBED_MODEL_NAME, get_rag_context, rag_engine
-from .notifications import (
-    SETTING_LAST_PRIVATE_CHAT_ID,
-    SETTING_NOTIFY_CHAT_ID,
-    SETTING_NOTIFY_ENABLED,
-)
+from .notifications import SETTING_LAST_PRIVATE_CHAT_ID
 from .schedule import (
     DEFAULT_SCHEDULE_DAYS,
     DEFAULT_SCHEDULE_ENABLED,
@@ -205,13 +201,6 @@ async def _best_contact_name(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    if settings.notify_chat_id:
-        async with SessionLocal() as session:
-            current = await get_setting(session, SETTING_NOTIFY_CHAT_ID, "")
-            if not current:
-                await set_setting(
-                    session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id
-                )
     if settings.owner_chat_id:
         async with SessionLocal() as session:
             current_owner = await get_setting(session, "owner_chat_id", "")
@@ -655,43 +644,6 @@ async def save_schedule(
     return {"ok": True, **schedule_to_dict(schedule)}
 
 
-class NotifyChatIn(BaseModel):
-    chat_id: Optional[str] = None
-    enabled: Optional[bool] = None
-
-
-@app.get("/api/settings/notify-chat")
-async def get_notify_chat(session: AsyncSession = Depends(get_session)) -> dict:
-    chat_id = await get_setting(
-        session, SETTING_NOTIFY_CHAT_ID, settings.notify_chat_id
-    )
-    enabled = (await get_setting(session, SETTING_NOTIFY_ENABLED, "1")) in (
-        "1",
-        "true",
-        "True",
-    )
-    return {"chat_id": chat_id, "enabled": enabled}
-
-
-@app.post("/api/settings/notify-chat")
-async def save_notify_chat(
-    payload: NotifyChatIn, session: AsyncSession = Depends(get_session)
-) -> dict:
-    if payload.chat_id is not None:
-        value = payload.chat_id.strip()
-        if value:
-            try:
-                int(value)
-            except ValueError:
-                raise HTTPException(400, "chat_id must be an integer")
-        await set_setting(session, SETTING_NOTIFY_CHAT_ID, value)
-    if payload.enabled is not None:
-        await set_setting(
-            session, SETTING_NOTIFY_ENABLED, "1" if payload.enabled else "0"
-        )
-    return {"ok": True}
-
-
 VOICE_REPLY_MODES = {"text", "skip", "pending"}
 WHISPER_MODEL_CHOICES = {"tiny", "base", "small", "medium", "large-v3"}
 
@@ -1015,17 +967,6 @@ async def voice_stats(session: AsyncSession = Depends(get_session)) -> dict:
         "voice_low_confidence": low,
         "avg_confidence": round(avg_conf, 3),
     }
-
-
-@app.get("/api/settings/notify-chat/detect")
-async def detect_notify_chat(session: AsyncSession = Depends(get_session)) -> dict:
-    chat_id = await get_setting(session, SETTING_LAST_PRIVATE_CHAT_ID, "")
-    if not chat_id:
-        raise HTTPException(
-            404,
-            "Не удалось определить chat_id. Напишите боту /start в личку и попробуйте снова.",
-        )
-    return {"chat_id": chat_id}
 
 
 class AdminSettingsIn(BaseModel):
