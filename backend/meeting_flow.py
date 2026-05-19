@@ -21,6 +21,7 @@ from .caldav_config import get_caldav_config
 from .database import CreatedMeeting, PendingMeeting, SessionLocal
 from .meeting_detector import (
     detect_meeting_intent,
+    extract_requested_time,
     looks_like_confirmation,
     matched_day_index,
 )
@@ -139,15 +140,42 @@ async def process_incoming_confirmation(
         if not slots:
             return None
 
-        # Prefer a slot on the weekday the contact named, else the closest.
+        # Narrow the candidates to the weekday the contact named, if any.
         day_idx = matched_day_index(incoming_text)
-        chosen = None
+        candidates = slots
         if day_idx is not None:
+            by_day = [s for s in slots if s["start"].weekday() == day_idx]
+            if by_day:
+                candidates = by_day
+
+        # If the contact named a concrete time, only auto-create when that
+        # exact time was among the slots the bot offered. A counter-proposal
+        # of a different time must NOT be silently booked at some other
+        # slot — leave it pending so the conversation can coordinate it.
+        requested = extract_requested_time(incoming_text)
+        if requested is not None:
+            hour, minute = requested
             chosen = next(
-                (s for s in slots if s["start"].weekday() == day_idx), None
+                (
+                    s
+                    for s in candidates
+                    if s["start"].hour == hour
+                    and s["start"].minute == minute
+                ),
+                None,
             )
-        if chosen is None:
-            chosen = slots[0]
+            if chosen is None:
+                log.info(
+                    "confirmation names %02d:%02d which was not offered; "
+                    "leaving meeting pending for chat %s",
+                    hour,
+                    minute,
+                    chat_id,
+                )
+                return None
+        else:
+            # A bare "да / ок" agrees to the first (closest) proposed slot.
+            chosen = candidates[0]
 
         title = _event_title(meeting_type, sender_name)
         uid = await calendar_engine.create_event(

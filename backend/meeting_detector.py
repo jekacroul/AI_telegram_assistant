@@ -106,3 +106,35 @@ def matched_day_index(text: str) -> Optional[int]:
         if tok in _DAY_TOKENS:
             return _DAY_TOKENS[tok]
     return None
+
+
+# Ordered most-specific first: an explicit "HH:MM" beats a bare "в HH".
+_REQ_TIME_PATTERNS = [
+    re.compile(r"\b(\d{1,2})[:.](\d{2})\b"),
+    re.compile(r"\bв\s+(\d{1,2})\s*час"),
+    re.compile(r"\b(\d{1,2})\s*час"),
+    re.compile(r"\bв\s+(\d{1,2})\b"),
+]
+
+
+def extract_requested_time(text: str) -> Optional[tuple[int, int]]:
+    """Return an explicit clock time (hour, minute) named in the text.
+
+    Recognises "в 12 часов", "в 12", "12:00", "15.30" and similar. Minute
+    defaults to 0 when not stated. Returns None when no time is mentioned.
+    """
+    if not text:
+        return None
+    low = text.lower()
+    for pattern in _REQ_TIME_PATTERNS:
+        m = pattern.search(low)
+        if not m:
+            continue
+        hour = int(m.group(1))
+        minute = 0
+        if pattern.groups >= 2 and m.group(2):
+            minute = int(m.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return (hour, minute)
+    return None
+
