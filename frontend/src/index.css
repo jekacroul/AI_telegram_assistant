@@ -259,6 +259,34 @@
   }
 }
 
+.spark-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 0 0 2px var(--spark-dot-ring, #fff),
+    0 0 8px currentColor;
+  animation: spark-dot-in 0.3s ease 0.55s both;
+}
+
+.dark .spark-dot {
+  --spark-dot-ring: #161b27;
+}
+
+@keyframes spark-dot-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
 @keyframes indeterminate-slide {
   0% {
     left: -40%;
