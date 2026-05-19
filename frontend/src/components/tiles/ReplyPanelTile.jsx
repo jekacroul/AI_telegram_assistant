@@ -4,6 +4,7 @@ import {
   Mic,
   Inbox,
   CheckCheck,
+  Trash2,
   Image as ImageIcon,
   Video,
 } from "lucide-react";
@@ -64,6 +65,7 @@ export default function ReplyPanelTile({
   onSelect,
   onToggleAuto,
   onClearQueue,
+  onClearAllQueue,
 }) {
   const { t } = useLang();
   const pending = messages || [];
@@ -78,6 +80,26 @@ export default function ReplyPanelTile({
     setClearMsg("");
     try {
       const res = await onClearQueue();
+      const cleared = res?.cleared ?? 0;
+      setClearMsg(
+        cleared > 0
+          ? t("tiles.clearQueueDone") + cleared
+          : t("tiles.clearQueueEmpty"),
+      );
+    } catch (e) {
+      setClearMsg(e.message || "error");
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  async function handleClearAll() {
+    if (clearing || !onClearAllQueue) return;
+    if (!window.confirm(t("tiles.clearAllQueueConfirm"))) return;
+    setClearing(true);
+    setClearMsg("");
+    try {
+      const res = await onClearAllQueue();
       const cleared = res?.cleared ?? 0;
       setClearMsg(
         cleared > 0
@@ -133,15 +155,26 @@ export default function ReplyPanelTile({
 
       {total > 0 && (
         <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
-          <button
-            className="btn-ghost text-[11px]"
-            onClick={handleClear}
-            disabled={clearing}
-            title={t("tiles.clearQueueHint")}
-          >
-            <CheckCheck size={13} />
-            {t("tiles.clearQueue")}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              className="btn-ghost text-[11px]"
+              onClick={handleClear}
+              disabled={clearing}
+              title={t("tiles.clearQueueHint")}
+            >
+              <CheckCheck size={13} />
+              {t("tiles.clearQueue")}
+            </button>
+            <button
+              className="btn-ghost text-[11px] text-rose-500 dark:text-rose-400"
+              onClick={handleClearAll}
+              disabled={clearing}
+              title={t("tiles.clearAllQueueHint")}
+            >
+              <Trash2 size={13} />
+              {t("tiles.clearAllQueue")}
+            </button>
+          </div>
           {clearMsg && (
             <span className="text-[10px] text-zinc-400 dark:text-slate-500 truncate">
               {clearMsg}

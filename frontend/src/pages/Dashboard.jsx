@@ -92,6 +92,12 @@ export default function Dashboard() {
     return res;
   }
 
+  async function clearAllQueue() {
+    const res = await api.clearQueue();
+    refresh();
+    return res;
+  }
+
   const activity = Array.isArray(data.activity) ? data.activity : [];
   const last14 = activity.slice(-14);
   const recv14 = last14.map((r) => r.received || 0);
@@ -310,6 +316,7 @@ export default function Dashboard() {
             onSelect={setActive}
             onToggleAuto={toggleAuto}
             onClearQueue={clearQueue}
+            onClearAllQueue={clearAllQueue}
           />
         );
       default:

@@ -598,6 +598,11 @@ export const translations = {
         "Убрать из очереди диалоги, на которые ты уже ответил вручную",
       clearQueueDone: "Очищено сообщений: ",
       clearQueueEmpty: "Нечего очищать — отвеченных сообщений в очереди нет",
+      clearAllQueue: "Очистить всё",
+      clearAllQueueHint:
+        "Убрать из очереди все сообщения, ждущие ответа",
+      clearAllQueueConfirm:
+        "Очистить всю очередь? Все сообщения будут помечены как отвеченные.",
       inChat: "в ",
       expand: "Развернуть",
       collapse: "Свернуть",
@@ -1186,6 +1191,11 @@ export const translations = {
         "Remove chats from the queue that you already answered manually",
       clearQueueDone: "Messages cleared: ",
       clearQueueEmpty: "Nothing to clear — no answered messages in the queue",
+      clearAllQueue: "Clear all",
+      clearAllQueueHint:
+        "Remove every message waiting for a reply from the queue",
+      clearAllQueueConfirm:
+        "Clear the whole queue? All messages will be marked as answered.",
       inChat: "in ",
       expand: "Expand",
       collapse: "Collapse",
