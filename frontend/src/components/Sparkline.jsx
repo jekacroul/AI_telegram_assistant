@@ -1,4 +1,4 @@
-import React, { useId, useMemo } from "react";
+import React, { useId, useMemo, useRef, useState } from "react";
 import { useTheme } from "../hooks/useTheme.js";
 import { pickColor } from "../lib/colors.js";
 
@@ -28,6 +28,8 @@ function smoothPath(pts) {
 
 export default function Sparkline({
   data = [],
+  labels = [],
+  unit = "",
   color = "indigo",
   height = 40,
   fill = true,
@@ -35,11 +37,13 @@ export default function Sparkline({
   const { isDark } = useTheme();
   const stroke = pickColor(color, isDark);
   const uid = useId().replace(/:/g, "");
+  const wrapRef = useRef(null);
+  const [hover, setHover] = useState(null);
 
-  const { path, area, last, w, h } = useMemo(() => {
+  const { path, area, pts, last, w, h } = useMemo(() => {
     const h = height;
     const w = 260;
-    if (!data.length) return { path: "", area: "", last: null, w, h };
+    if (!data.length) return { path: "", area: "", pts: [], last: null, w, h };
     const pad = 4;
     const max = Math.max(...data, 1);
     const min = Math.min(...data, 0);
@@ -53,6 +57,7 @@ export default function Sparkline({
     return {
       path: line,
       area: `${line} L ${w} ${h} L 0 ${h} Z`,
+      pts,
       last: pts[pts.length - 1],
       w,
       h,
@@ -68,8 +73,31 @@ export default function Sparkline({
     );
   }
 
+  function handleMove(e) {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const frac = (e.clientX - rect.left) / rect.width;
+    const idx = Math.min(
+      data.length - 1,
+      Math.max(0, Math.round(frac * (data.length - 1))),
+    );
+    setHover(idx);
+  }
+
+  const n = data.length;
+  const hoverX = hover != null && n > 1 ? (hover / (n - 1)) * 100 : 0;
+  const hoverPt = hover != null ? pts[hover] : null;
+  const hoverY = hoverPt ? (hoverPt[1] / h) * 100 : 0;
+  const tipLeft = Math.min(82, Math.max(18, hoverX));
+
   return (
-    <div className="relative w-full" style={{ height }}>
+    <div
+      ref={wrapRef}
+      className="relative w-full"
+      style={{ height }}
+      onMouseMove={handleMove}
+      onMouseLeave={() => setHover(null)}
+    >
       <svg
         key={String(isDark)}
         viewBox={`0 0 ${w} ${h}`}
@@ -98,7 +126,54 @@ export default function Sparkline({
           }}
         />
       </svg>
-      {last && (
+
+      {hoverPt && (
+        <>
+          <div
+            className="absolute top-0 bottom-0 pointer-events-none"
+            style={{
+              left: `${hoverX}%`,
+              width: 1,
+              marginLeft: -0.5,
+              background: stroke,
+              opacity: 0.35,
+            }}
+          />
+          <span
+            className="spark-dot"
+            style={{
+              left: `${hoverX}%`,
+              top: `${hoverY}%`,
+              color: stroke,
+              animation: "none",
+            }}
+          />
+          <div
+            className="absolute z-10 pointer-events-none"
+            style={{
+              left: `${tipLeft}%`,
+              top: `${hoverY}%`,
+              transform: "translate(-50%, calc(-100% - 10px))",
+            }}
+          >
+            <div
+              className="px-2 py-1 rounded-lg shadow-lg whitespace-nowrap
+                         bg-light-card dark:bg-dark-card
+                         border border-light-border dark:border-dark-border"
+            >
+              <div className="text-[10px] leading-tight text-zinc-400 dark:text-slate-500">
+                {labels[hover] ?? `#${hover + 1}`}
+              </div>
+              <div className="text-xs font-semibold leading-tight text-zinc-800 dark:text-slate-200">
+                {Math.round(data[hover]).toLocaleString()}
+                {unit ? ` ${unit}` : ""}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {last && !hoverPt && (
         <span
           className="spark-dot"
           style={{

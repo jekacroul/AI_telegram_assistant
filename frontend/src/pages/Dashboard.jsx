@@ -96,6 +96,7 @@ export default function Dashboard() {
   const last14 = activity.slice(-14);
   const recv14 = last14.map((r) => r.received || 0);
   const sent14 = last14.map((r) => r.sent || 0);
+  const labels14 = last14.map((r) => shortDay(r.day));
   const bars = activity
     .slice(-24)
     .map((r) => ({ label: shortDay(r.day), value: r.received || 0 }));
@@ -127,6 +128,8 @@ export default function Dashboard() {
             value={recvToday}
             accent="sky"
             series={recv14}
+            seriesLabels={labels14}
+            seriesUnit={t("tiles.msgsUnit")}
             delta={recvDelta}
             expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
@@ -157,6 +160,8 @@ export default function Dashboard() {
             value={sentToday}
             accent="emerald"
             series={sent14}
+            seriesLabels={labels14}
+            seriesUnit={t("tiles.msgsUnit")}
             delta={sentDelta}
             expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
@@ -191,6 +196,17 @@ export default function Dashboard() {
             value={approvalPct}
             format={(v) => `${Math.round(v)}%`}
             accent="violet"
+            progress={approvalPct}
+            meta={[
+              {
+                label: t("dashboard.generated"),
+                value: quality.total_generated ?? "—",
+              },
+              {
+                label: t("dashboard.rejectedByFilter"),
+                value: quality.total_rejected ?? "—",
+              },
+            ]}
             expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >
@@ -227,6 +243,18 @@ export default function Dashboard() {
             label={t("dashboard.ragIndexed")}
             value={rag.total_indexed || 0}
             accent="indigo"
+            meta={[
+              {
+                label: t("dashboard.dbSize"),
+                value: `${rag.collection_size_mb ?? 0} MB`,
+              },
+              {
+                label: t("dashboard.lastIndexing"),
+                value: rag.last_indexed_at
+                  ? new Date(rag.last_indexed_at).toLocaleDateString()
+                  : "—",
+              },
+            ]}
             expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >

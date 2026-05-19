@@ -10,6 +10,8 @@ import {
 import Sparkline from "../Sparkline.jsx";
 import { useCountUp } from "../../hooks/useCountUp.js";
 import { useLang } from "../../hooks/useLang.js";
+import { useTheme } from "../../hooks/useTheme.js";
+import { pickColor } from "../../lib/colors.js";
 
 function DeltaBadge({ delta }) {
   const { t } = useLang();
@@ -42,13 +44,19 @@ export default function MetricTile({
   format = (v) => Math.round(v).toLocaleString(),
   accent = "indigo",
   series = null,
+  seriesLabels = null,
+  seriesUnit = "",
+  progress = null,
+  meta = null,
   delta = null,
   expanded = false,
   onToggleExpand,
   children,
 }) {
   const { t } = useLang();
+  const { isDark } = useTheme();
   const animated = useCountUp(Number(value) || 0);
+  const accentColor = pickColor(accent, isDark);
 
   return (
     <div className="tile">
@@ -79,9 +87,46 @@ export default function MetricTile({
 
       {delta != null && <DeltaBadge delta={delta} />}
 
+      {progress != null && (
+        <div className="mt-3 progress-bar">
+          <div
+            className="progress-fill"
+            style={{
+              width: `${Math.min(100, Math.max(0, progress))}%`,
+              background: accentColor,
+            }}
+          />
+        </div>
+      )}
+
       {series && series.length > 0 && (
         <div className="mt-2">
-          <Sparkline data={series} color={accent} height={expanded ? 100 : 40} />
+          <Sparkline
+            data={series}
+            labels={seriesLabels || []}
+            unit={seriesUnit}
+            color={accent}
+            height={expanded ? 100 : 40}
+          />
+        </div>
+      )}
+
+      {!expanded && meta && meta.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {meta.map((m) => (
+            <div
+              key={m.label}
+              className="rounded-lg px-2.5 py-2 bg-light-card2 dark:bg-dark-card2
+                         border border-light-border dark:border-dark-border"
+            >
+              <div className="text-[10px] text-zinc-400 dark:text-slate-500 truncate">
+                {m.label}
+              </div>
+              <div className="text-sm font-semibold text-zinc-700 dark:text-slate-200 truncate">
+                {m.value}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
