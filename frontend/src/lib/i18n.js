@@ -543,6 +543,7 @@ export const translations = {
     tiles: {
       activity24: "Активность · 24 дня",
       messagesCount: "{count} сообщений",
+      msgsUnit: "сообщ.",
       today: "сегодня",
       lmStudio: "LM Studio",
       telegramBot: "Telegram-бот",
@@ -1130,6 +1131,7 @@ export const translations = {
     tiles: {
       activity24: "Activity · 24 days",
       messagesCount: "{count} messages",
+      msgsUnit: "msgs",
       today: "today",
       lmStudio: "LM Studio",
       telegramBot: "Telegram bot",
