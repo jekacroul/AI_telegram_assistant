@@ -19,6 +19,12 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
+# Surfaced when the optional CalDAV libraries are not installed.
+_MISSING_DEPS_MSG = (
+    "CalDAV-библиотеки не установлены. Выполните: "
+    "pip install caldav icalendar python-dateutil pytz"
+)
+
 # Russian day/month names for human-readable slot labels.
 DAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 DAYS_RU_FULL = [
@@ -153,6 +159,11 @@ class CalendarEngine:
             self._connected = False
             self.last_error = "connection timed out"
             log.warning("CalDAV connection timed out; disabled for this session")
+            return False
+        except ModuleNotFoundError:
+            self._connected = False
+            self.last_error = _MISSING_DEPS_MSG
+            log.error("CalDAV disabled: %s", _MISSING_DEPS_MSG)
             return False
         except Exception as e:  # noqa: BLE001
             self._connected = False
