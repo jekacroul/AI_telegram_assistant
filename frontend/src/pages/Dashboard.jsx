@@ -110,6 +110,10 @@ export default function Dashboard() {
 
   const recvToday = recv14[recv14.length - 1] || 0;
   const sentToday = sent14[sent14.length - 1] || 0;
+  const recvDelta =
+    recv14.length > 1 ? recvToday - (recv14[recv14.length - 2] || 0) : null;
+  const sentDelta =
+    sent14.length > 1 ? sentToday - (sent14[sent14.length - 2] || 0) : null;
   const approvalPct =
     overview.approval_rate != null ? Math.round(overview.approval_rate * 100) : 0;
 
@@ -123,6 +127,7 @@ export default function Dashboard() {
             value={recvToday}
             accent="sky"
             series={recv14}
+            delta={recvDelta}
             expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >
@@ -152,6 +157,7 @@ export default function Dashboard() {
             value={sentToday}
             accent="emerald"
             series={sent14}
+            delta={sentDelta}
             expanded={expandedIds.has(id)}
             onToggleExpand={() => toggleExpand(id)}
           >
