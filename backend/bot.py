@@ -43,11 +43,7 @@ from .database import (
 )
 from .delay import get_delay_settings
 from .dialog_backup import mark_messages_deleted
-from .notifications import (
-    SETTING_LAST_PRIVATE_CHAT_ID,
-    SETTING_NOTIFY_CHAT_ID,
-    notify_owner,
-)
+from .notifications import SETTING_LAST_PRIVATE_CHAT_ID
 from .schedule import is_within_schedule
 
 ALLOWED_UPDATES = [
@@ -1112,7 +1108,6 @@ class TelegramService:
             await self._record_reply(
                 msg_id, chosen, sender_name, chat_id, chat_name
             )
-            await notify_owner(chat_name, sender_name, reply_input_text, chosen)
             await admin_bot.notify_auto_reply(
                 chat_name,
                 sender_name,

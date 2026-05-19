@@ -470,15 +470,8 @@ export const translations = {
       msgsAbbr: "{count} сообщ.",
       testModel: "Test model",
       notifications: "Уведомления",
-      notifyOnReply: "Уведомлять когда бот отвечает",
-      notifyOnReplyDesc:
-        "Бот пришлёт сообщение в указанный чат после каждого авто-ответа.",
-      yourChatId: "Ваш chat_id",
       chatIdPlaceholder: "например, 123456789",
       detectAuto: "Определить автоматически",
-      detectHint:
-        "Напишите боту /start в личку, затем нажмите «Определить автоматически».",
-      saveNotifications: "Сохранить уведомления",
       chatIdDetected: "chat_id определён. Не забудь сохранить.",
       adminPanel: "Admin Panel",
       adminPanelDesc:
@@ -1063,15 +1056,8 @@ export const translations = {
       msgsAbbr: "{count} msgs",
       testModel: "Test model",
       notifications: "Notifications",
-      notifyOnReply: "Notify when the bot replies",
-      notifyOnReplyDesc:
-        "The bot will send a message to the specified chat after each auto-reply.",
-      yourChatId: "Your chat_id",
       chatIdPlaceholder: "e.g. 123456789",
       detectAuto: "Detect automatically",
-      detectHint:
-        "Send /start to the bot in a private chat, then click «Detect automatically».",
-      saveNotifications: "Save notifications",
       chatIdDetected: "chat_id detected. Don't forget to save.",
       adminPanel: "Admin Panel",
       adminPanelDesc:

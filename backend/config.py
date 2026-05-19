@@ -56,7 +56,6 @@ class Settings(BaseSettings):
     llama_server_auto_start: bool = Field(
         default=True, alias="LLAMA_SERVER_AUTO_START"
     )
-    notify_chat_id: str = Field(default="", alias="NOTIFY_CHAT_ID")
     media_path: str = Field(default="./media/", alias="MEDIA_PATH")
     owner_chat_id: str = Field(default="", alias="OWNER_CHAT_ID")
     admin_bot_enabled: bool = Field(default=True, alias="ADMIN_BOT_ENABLED")
