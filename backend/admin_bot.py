@@ -460,6 +460,7 @@ def _help_text() -> str:
         "/reply &lt;id&gt; &lt;текст&gt; — ручной ответ\n"
         "/model status|load|unload — управление моделями\n"
         "/whitelist add|remove|list &lt;chat_id&gt; — наблюдаемые чаты\n"
+        "/calendar — состояние календаря и свободные слоты\n"
         "/help — эта справка"
     )
 
@@ -690,6 +691,115 @@ async def cmd_help(message: Message) -> None:
 
 
 # --------------------------------------------------------------------------
+# Calendar (CalDAV)
+# --------------------------------------------------------------------------
+def _calendar_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _btn("📋 События на неделю", "cal:events"),
+                _btn("🕐 Свободные слоты", "cal:slots"),
+            ],
+            [_btn("← Назад", "m:main")],
+        ]
+    )
+
+
+def _fmt_event_dt(dt) -> str:
+    try:
+        return dt.strftime("%d.%m %H:%M")
+    except Exception:  # noqa: BLE001
+        return str(dt)
+
+
+async def build_calendar_text() -> str:
+    from .calendar_engine import calendar_engine
+
+    status = await calendar_engine.get_status()
+    if not status.get("connected"):
+        return (
+            "📅 <b>Календарь</b>\n"
+            "──────────────\n"
+            "Статус: 🔴 не подключён\n"
+            "Настрой подключение в веб-панели: Настройки → Календарь"
+        )
+    next_event = status.get("next_event")
+    if next_event:
+        next_line = (
+            f"Следующее: {_esc(str(next_event.get('title', '')))} "
+            f"в {_fmt_event_dt(next_event.get('start'))}"
+        )
+    else:
+        next_line = "Следующее: ближайших событий нет"
+    return (
+        "📅 <b>Календарь</b>\n"
+        "──────────────\n"
+        f"Статус: ✅ подключён ({_esc(str(status.get('calendar') or '—'))})\n"
+        f"Сегодня: {status.get('events_today', 0)} событ.\n"
+        f"{next_line}"
+    )
+
+
+async def cmd_calendar(message: Message) -> None:
+    if not await _guard(message, "/calendar"):
+        return
+    await message.answer(
+        await build_calendar_text(), reply_markup=_calendar_menu_kb()
+    )
+
+
+async def _handle_calendar(cq: CallbackQuery, parts: list[str]) -> None:
+    from .calendar_engine import calendar_engine
+    from datetime import datetime as _dt, timedelta as _td
+
+    action = parts[1] if len(parts) > 1 else ""
+    if not calendar_engine.is_connected:
+        await _edit_or_send(
+            cq, await build_calendar_text(), _calendar_menu_kb()
+        )
+        return
+    if action == "events":
+        events = await calendar_engine.get_events(
+            _dt.now(), _dt.now() + _td(days=7)
+        )
+        if not events:
+            body = "На ближайшую неделю событий нет 🎉"
+        else:
+            body = "\n".join(
+                f"• {_fmt_event_dt(e['start'])} — {_esc(str(e['title']))}"
+                for e in events[:15]
+            )
+        await _edit_or_send(
+            cq,
+            "📋 <b>События на неделю</b>\n──────────────\n" + body,
+            _calendar_menu_kb(),
+        )
+    elif action == "slots":
+        slots = await calendar_engine.get_free_slots()
+        if not slots:
+            body = "Свободных слотов не найдено"
+        else:
+            body = "\n".join(f"• {_esc(s['label'])}" for s in slots)
+        await _edit_or_send(
+            cq,
+            "🕐 <b>Свободные слоты</b>\n──────────────\n" + body,
+            _calendar_menu_kb(),
+        )
+    elif action == "del" and len(parts) >= 3:
+        uid = ":".join(parts[2:])
+        ok = await calendar_engine.delete_event(uid)
+        await _edit_or_send(
+            cq,
+            "🗑 Событие удалено из календаря" if ok
+            else "Не удалось удалить событие",
+        )
+    else:
+        await _edit_or_send(
+            cq, await build_calendar_text(), _calendar_menu_kb()
+        )
+
+
+# --------------------------------------------------------------------------
 # Shared actions
 # --------------------------------------------------------------------------
 async def _apply_whitelist(action: str, raw_id: str) -> str:
@@ -896,6 +1006,8 @@ async def on_callback(cq: CallbackQuery, state: FSMContext) -> None:
             await _handle_feedback(cq, parts, state)
         elif kind == "mdl":
             await _handle_model(cq, parts[1] if len(parts) > 1 else "")
+        elif kind == "cal":
+            await _handle_calendar(cq, parts)
     except Exception:  # noqa: BLE001
         log.exception("admin callback failed: %s", data)
     await cq.answer()
@@ -1235,6 +1347,32 @@ async def notify_auto_reply(
         log.error("notify_auto_reply failed: %s", e)
 
 
+async def notify_meeting_created(event: dict, chat_name: str = "") -> None:
+    """Notify the owner that the assistant auto-created a calendar event."""
+    bot, owner_id = await _owner_bot_and_id()
+    if not bot or owner_id is None:
+        return
+    async with SessionLocal() as session:
+        if (await get_setting(session, "caldav_notify", "1")) not in _TRUE:
+            return
+    sender = event.get("sender_name") or chat_name or "Собеседник"
+    text = (
+        "📅 <b>Создал встречу в календаре</b>\n\n"
+        f"{_esc(sender)} подтвердил встречу\n"
+        f"📌 {_esc(str(event.get('title', '')))}\n"
+        f"🗓 {_esc(str(event.get('label', '')))}"
+    )
+    uid = event.get("uid") or ""
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[_btn("🗑 Удалить", f"cal:del:{uid}")]]
+    ) if uid else None
+    try:
+        await bot.send_message(owner_id, text, reply_markup=kb)
+        await _log_notification("meeting_created", None)
+    except Exception as e:  # noqa: BLE001
+        log.error("notify_meeting_created failed: %s", e)
+
+
 async def notify_pending(message_id: int) -> None:
     """Notify the owner about a new message awaiting manual handling."""
     bot, owner_id = await _owner_bot_and_id()
@@ -1366,6 +1504,7 @@ def register(dp: Dispatcher) -> None:
     dp.message.register(cmd_reply, owner, Command("reply"))
     dp.message.register(cmd_model, owner, Command("model"))
     dp.message.register(cmd_whitelist, owner, Command("whitelist"))
+    dp.message.register(cmd_calendar, owner, Command("calendar"))
     dp.message.register(cmd_help, owner, Command("help"))
 
     # Callback queries.

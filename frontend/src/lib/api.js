@@ -228,6 +228,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  calendarStatus: () => request("/api/calendar/status"),
+  calendarEvents: (days = 7) =>
+    request(`/api/calendar/events?days=${days}`),
+  calendarFreeSlots: (days = 7, duration = 60) =>
+    request(`/api/calendar/free-slots?days=${days}&duration=${duration}`),
+  calendarUpcoming: () => request("/api/calendar/upcoming"),
+  calendarCreateEvent: (data) =>
+    request("/api/calendar/event", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  calendarConnectTest: (data) =>
+    request("/api/calendar/connect-test", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getCalendarSettings: () => request("/api/settings/calendar"),
+  saveCalendarSettings: (data) =>
+    request("/api/settings/calendar", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
 
 export function streamEvents(path, onEvent) {

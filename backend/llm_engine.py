@@ -503,6 +503,7 @@ class LLMClient:
             rag_context=rag_context,
             summary=summary,
         )
+        await self._inject_calendar_context(messages, incoming_text)
         # Generate 3 variants by sampling the model independently at
         # different temperatures, instead of asking it for a numbered list
         # in a single call — a chat-clone model produces one reply, not a
@@ -549,6 +550,41 @@ class LLMClient:
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
+
+    @staticmethod
+    async def _inject_calendar_context(
+        messages: list[dict], incoming_text: str
+    ) -> None:
+        """When the incoming message asks for a meeting and the calendar is
+        connected, append the owner's free slots to the system prompt so the
+        model can propose real times. Silently does nothing otherwise."""
+        try:
+            from .calendar_engine import calendar_engine
+            from .meeting_detector import detect_meeting_intent
+
+            if not calendar_engine.is_connected:
+                return
+            intent = await detect_meeting_intent(incoming_text)
+            if not intent or not intent.has_intent:
+                return
+            slots = await calendar_engine.get_free_slots()
+            if not slots:
+                return
+            slot_lines = "\n".join(
+                f"{i + 1}. {s['label']}" for i, s in enumerate(slots)
+            )
+            inject = (
+                "\n\nСобеседник предлагает встречу или звонок. Вот мои"
+                " свободные слоты в календаре — предложи 2-3 варианта в"
+                " ответе.\n"
+                f"📅 Свободные слоты в календаре:\n{slot_lines}\n"
+                "Отвечай естественно, как в живом чате, не перечисляй слоты"
+                " сухим нумерованным списком."
+            )
+            if messages and messages[0].get("role") == "system":
+                messages[0]["content"] += inject
+        except Exception:  # noqa: BLE001
+            log.exception("calendar context injection failed")
 
     async def summarize(
         self,

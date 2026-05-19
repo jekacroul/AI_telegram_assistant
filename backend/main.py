@@ -38,6 +38,7 @@ from .bot import telegram_service
 from .config import ROOT_DIR, settings
 from .logging_setup import setup_logging
 from .database import (
+    CreatedMeeting,
     DatasetBuild,
     DialogBackup,
     DialogBackupMessage,
@@ -87,6 +88,12 @@ from .replication import (
 from .llm_engine import LLMUnavailableError, get_client
 from .quality_filter import is_good_response
 from .rag_engine import EMBED_MODEL_NAME, get_rag_context, rag_engine
+from .calendar_engine import CalendarEngine, calendar_engine
+from .caldav_config import (
+    get_caldav_config,
+    refresh_calendar_connection,
+    save_caldav_config,
+)
 from .notifications import SETTING_LAST_PRIVATE_CHAT_ID
 from .schedule import (
     DEFAULT_SCHEDULE_DAYS,
@@ -222,6 +229,7 @@ async def lifespan(app: FastAPI):
     if settings.llama_server_auto_start and settings.llama_base_model_gguf:
         asyncio.create_task(_auto_start_llama_server())
     asyncio.create_task(_startup_rag_index())
+    asyncio.create_task(_startup_calendar_connect())
     yield
     await replication_scheduler.stop()
     await dialog_backup_scheduler.stop()
@@ -334,6 +342,16 @@ async def _startup_rag_index() -> None:
         )
     except Exception:  # noqa: BLE001
         log.exception("RAG startup indexing failed")
+
+
+async def _startup_calendar_connect() -> None:
+    """Connect to the CalDAV server at startup when the integration is on."""
+    try:
+        connected = await refresh_calendar_connection()
+        if connected:
+            log.info("CalDAV: подключено при старте")
+    except Exception:  # noqa: BLE001
+        log.exception("CalDAV startup connect failed")
 
 
 app = FastAPI(title="Telegram Local AI Assistant", lifespan=lifespan)
@@ -1848,6 +1866,194 @@ async def save_rag_settings(
             str(payload.cross_chat_min_similarity),
         )
     return await _rag_settings_dict(session)
+
+
+# --------------------------------------------------------------------------
+# Calendar (CalDAV)
+# --------------------------------------------------------------------------
+def _event_to_dict(event: dict) -> dict:
+    start = event.get("start")
+    end = event.get("end")
+    return {
+        "title": event.get("title", ""),
+        "uid": event.get("uid", ""),
+        "start": start.isoformat() if hasattr(start, "isoformat") else None,
+        "end": end.isoformat() if hasattr(end, "isoformat") else None,
+    }
+
+
+def _relative_label(start: datetime) -> str:
+    """Human-readable relative time for an upcoming event ('через 2 часа')."""
+    delta = start - datetime.now()
+    secs = delta.total_seconds()
+    if secs < 0:
+        return "сейчас"
+    if secs < 3600:
+        return f"через {max(1, int(secs // 60))} мин"
+    if secs < 86400:
+        return f"через {int(secs // 3600)} ч"
+    days = int(secs // 86400)
+    return f"через {days} дн" if days > 1 else "завтра"
+
+
+@app.get("/api/calendar/status")
+async def calendar_status() -> dict:
+    status = await calendar_engine.get_status()
+    next_event = status.get("next_event")
+    next_payload = None
+    if next_event:
+        start = next_event.get("start")
+        next_payload = {
+            "title": next_event.get("title", ""),
+            "start": start.strftime("%H:%M") if hasattr(start, "strftime") else "",
+        }
+    return {
+        "connected": status.get("connected", False),
+        "calendar": status.get("calendar"),
+        "events_today": status.get("events_today", 0),
+        "next_event": next_payload,
+        "error": status.get("error", ""),
+    }
+
+
+@app.get("/api/calendar/events")
+async def calendar_events(days: int = 7) -> list[dict]:
+    days = max(1, min(60, days))
+    start = datetime.now()
+    events = await calendar_engine.get_events(
+        start, start + timedelta(days=days)
+    )
+    return [_event_to_dict(e) for e in events]
+
+
+@app.get("/api/calendar/free-slots")
+async def calendar_free_slots(days: int = 7, duration: int = 60) -> list[dict]:
+    days = max(1, min(60, days))
+    duration = max(15, min(240, duration))
+    slots = await calendar_engine.get_free_slots(
+        days_ahead=days, slot_duration_minutes=duration
+    )
+    return [
+        {
+            "start": s["start"].isoformat(),
+            "end": s["end"].isoformat(),
+            "label": s["label"],
+        }
+        for s in slots
+    ]
+
+
+@app.get("/api/calendar/upcoming")
+async def calendar_upcoming() -> list[dict]:
+    events = await calendar_engine.get_events(
+        datetime.now(), datetime.now() + timedelta(days=30)
+    )
+    out: list[dict] = []
+    for e in events[:5]:
+        d = _event_to_dict(e)
+        d["relative"] = _relative_label(e["start"])
+        out.append(d)
+    return out
+
+
+@app.post("/api/calendar/event")
+async def calendar_create_event(
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    if not calendar_engine.is_connected:
+        raise HTTPException(400, "Календарь не подключён")
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title is required")
+    try:
+        start = datetime.fromisoformat(payload["start"])
+        end = datetime.fromisoformat(payload["end"])
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, "start/end must be ISO datetimes") from exc
+    if start.tzinfo is not None:
+        start = start.replace(tzinfo=None)
+    if end.tzinfo is not None:
+        end = end.replace(tzinfo=None)
+    uid = await calendar_engine.create_event(
+        title=title,
+        start=start,
+        end=end,
+        description=payload.get("description", ""),
+        location=payload.get("location", ""),
+    )
+    if not uid:
+        raise HTTPException(500, "Не удалось создать событие")
+    session.add(
+        CreatedMeeting(
+            chat_id=0,
+            calendar_uid=uid,
+            title=title,
+            start_time=start,
+            end_time=end,
+            created_by="manual",
+        )
+    )
+    await session.commit()
+    return {"ok": True, "uid": uid}
+
+
+@app.post("/api/calendar/connect-test")
+async def calendar_connect_test(payload: dict = Body(...)) -> dict:
+    """Test a CalDAV connection without persisting the credentials."""
+    probe = CalendarEngine()
+    probe.apply_config(
+        {
+            "caldav_url": payload.get("url") or "",
+            "caldav_username": payload.get("username") or "",
+            "caldav_password": payload.get("password") or "",
+            "caldav_calendar_name": payload.get("calendar_name") or "",
+        }
+    )
+    ok = await probe.connect()
+    if not ok:
+        return {"success": False, "error": probe.last_error}
+    today_start = datetime.now().replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    events = await probe.get_events(
+        today_start, today_start + timedelta(days=1)
+    )
+    return {
+        "success": True,
+        "calendar_name": probe._calendar_display_name(),
+        "events_count": len(events),
+    }
+
+
+@app.get("/api/settings/calendar")
+async def get_calendar_settings(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    cfg = await get_caldav_config(session)
+    status = await calendar_engine.get_status()
+    # Never expose the stored password; report whether one is set instead.
+    has_password = bool(cfg.pop("caldav_password", ""))
+    cfg["caldav_has_password"] = has_password
+    cfg["connected"] = status.get("connected", False)
+    cfg["calendar"] = status.get("calendar")
+    return cfg
+
+
+@app.post("/api/settings/calendar")
+async def save_calendar_settings(
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await save_caldav_config(session, payload)
+    connected = await refresh_calendar_connection()
+    cfg = await get_caldav_config(session)
+    cfg.pop("caldav_password", None)
+    cfg["caldav_has_password"] = bool(
+        await get_setting(session, "caldav_password", "")
+    )
+    cfg["connected"] = connected
+    return cfg
 
 
 @app.get("/api/style/profile")

@@ -31,7 +31,7 @@ from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
 from sqlalchemy import select, update
 
-from . import admin_bot
+from . import admin_bot, meeting_flow
 from .config import settings
 from .database import (
     ChatSummary,
@@ -781,6 +781,17 @@ class TelegramService:
                 await self._maybe_reanalyze(chat_id=chat_id)
                 return
 
+            # Calendar: a short "да / в среду" may confirm a meeting the bot
+            # proposed earlier — turn it into a real event and notify the owner.
+            try:
+                event = await meeting_flow.process_incoming_confirmation(
+                    chat_id, sender_name, reply_input_text
+                )
+                if event:
+                    await admin_bot.notify_meeting_created(event, chat_name)
+            except Exception:  # noqa: BLE001
+                log.exception("meeting confirmation flow failed")
+
             if not should_reply:
                 log.info(
                     "handle_incoming: no reply, should_reply=False "
@@ -1107,6 +1118,11 @@ class TelegramService:
 
             await self._record_reply(
                 msg_id, chosen, sender_name, chat_id, chat_name
+            )
+            # If the contact asked for a meeting, remember the slots offered
+            # so a later confirmation can be matched to a concrete time.
+            await meeting_flow.maybe_record_pending_meeting(
+                chat_id, msg_id, sender_name, reply_input_text
             )
             await admin_bot.notify_auto_reply(
                 chat_name,

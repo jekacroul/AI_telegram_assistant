@@ -274,6 +274,42 @@ class ReplicationRun(Base):
     protected: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class PendingMeeting(Base):
+    """A meeting proposal the bot offered in a reply, awaiting the contact's
+    confirmation. ``proposed_slots_json`` holds the free slots that were
+    offered so a later "да/ок/в среду" can be matched to a concrete time."""
+
+    __tablename__ = "pending_meetings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(Integer, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sender_name: Mapped[str] = mapped_column(String(255), default="")
+    proposed_slots_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+
+
+class CreatedMeeting(Base):
+    """A calendar event the assistant created (auto on confirmation or
+    manually from the dashboard)."""
+
+    __tablename__ = "created_meetings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(Integer, index=True, default=0)
+    calendar_uid: Mapped[str] = mapped_column(String(256), default="")
+    title: Mapped[str] = mapped_column(String(512), default="")
+    start_time: Mapped[datetime] = mapped_column(DateTime, index=True)
+    end_time: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    created_by: Mapped[str] = mapped_column(String(16), default="auto")
+
+
 engine = create_async_engine(settings.db_url, echo=False, future=True)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

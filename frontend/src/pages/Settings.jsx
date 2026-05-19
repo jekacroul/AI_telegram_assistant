@@ -43,8 +43,11 @@ const SETTINGS_TABS = [
   { id: "replies", icon: MessageCircle },
   { id: "voice", icon: Mic },
   { id: "memory", icon: Database },
+  { id: "calendar", icon: CalendarClock },
   { id: "notifications", icon: Bell },
 ];
+
+const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
 export default function Settings() {
   const { t, lang, setLang } = useLang();
@@ -112,6 +115,29 @@ export default function Settings() {
   const [ragSaving, setRagSaving] = useState(false);
   const [ragMsg, setRagMsg] = useState("");
   const [ragErr, setRagErr] = useState("");
+  const [cal, setCal] = useState({
+    caldav_enabled: false,
+    caldav_url: "https://caldav.icloud.com",
+    caldav_username: "",
+    caldav_password: "",
+    caldav_calendar_name: "",
+    caldav_has_password: false,
+    connected: false,
+    calendar: null,
+    caldav_work_start: 9,
+    caldav_work_end: 20,
+    caldav_work_days: [0, 1, 2, 3, 4],
+    caldav_slot_duration: 60,
+    caldav_lookahead_days: 7,
+    caldav_propose_slots: true,
+    caldav_auto_create: true,
+    caldav_notify: true,
+  });
+  const [calTest, setCalTest] = useState(null);
+  const [calTesting, setCalTesting] = useState(false);
+  const [calSaving, setCalSaving] = useState(false);
+  const [calMsg, setCalMsg] = useState("");
+  const [calErr, setCalErr] = useState("");
 
   const modelOptions = useMemo(() => {
     const list = [...models];
@@ -184,6 +210,12 @@ export default function Settings() {
         admin_notify_auto: a.admin_notify_auto !== false,
         admin_notify_pending: a.admin_notify_pending !== false,
       });
+    } catch {
+      // ignore
+    }
+    try {
+      const c = await api.getCalendarSettings();
+      setCal((prev) => ({ ...prev, ...c, caldav_password: "" }));
     } catch {
       // ignore
     }
@@ -268,6 +300,65 @@ export default function Settings() {
     } finally {
       setRagSaving(false);
     }
+  }
+
+  async function testCalendar() {
+    setCalTesting(true);
+    setCalTest(null);
+    setCalErr("");
+    setCalMsg("");
+    try {
+      const res = await api.calendarConnectTest({
+        url: cal.caldav_url,
+        username: cal.caldav_username,
+        password: cal.caldav_password,
+        calendar_name: cal.caldav_calendar_name,
+      });
+      setCalTest(res);
+    } catch (e) {
+      setCalTest({ success: false, error: e.message });
+    } finally {
+      setCalTesting(false);
+    }
+  }
+
+  async function saveCalendar() {
+    setCalSaving(true);
+    setCalErr("");
+    setCalMsg("");
+    try {
+      const payload = {
+        caldav_enabled: !!cal.caldav_enabled,
+        caldav_url: cal.caldav_url,
+        caldav_username: cal.caldav_username,
+        caldav_calendar_name: cal.caldav_calendar_name,
+        caldav_work_start: Number(cal.caldav_work_start),
+        caldav_work_end: Number(cal.caldav_work_end),
+        caldav_work_days: cal.caldav_work_days,
+        caldav_slot_duration: Number(cal.caldav_slot_duration),
+        caldav_lookahead_days: Number(cal.caldav_lookahead_days),
+        caldav_propose_slots: !!cal.caldav_propose_slots,
+        caldav_auto_create: !!cal.caldav_auto_create,
+        caldav_notify: !!cal.caldav_notify,
+      };
+      if (cal.caldav_password) payload.caldav_password = cal.caldav_password;
+      const res = await api.saveCalendarSettings(payload);
+      setCal((prev) => ({ ...prev, ...res, caldav_password: "" }));
+      setCalMsg(t("common.saved"));
+    } catch (e) {
+      setCalErr(e.message);
+    } finally {
+      setCalSaving(false);
+    }
+  }
+
+  function toggleWorkDay(day) {
+    setCal((prev) => {
+      const days = new Set(prev.caldav_work_days);
+      if (days.has(day)) days.delete(day);
+      else days.add(day);
+      return { ...prev, caldav_work_days: Array.from(days).sort((a, b) => a - b) };
+    });
   }
 
   async function unloadWhisper() {
@@ -849,6 +940,289 @@ export default function Settings() {
             <span className="text-bad text-sm self-center">{error}</span>
           )}
         </div>
+      )}
+
+      {tab === "calendar" && (
+        <>
+      <div className="tile">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CalendarClock
+              size={14}
+              className="text-indigo-500 dark:text-indigo-400 flex-shrink-0"
+            />
+            <span className="tile-label mb-0">Подключение CalDAV</span>
+          </div>
+          {cal.connected ? (
+            <span className="text-xs font-medium px-2 py-1 rounded-md bg-good/15 text-good">
+              Подключён{cal.calendar ? ` · ${cal.calendar}` : ""}
+            </span>
+          ) : (
+            <span className="text-xs font-medium px-2 py-1 rounded-md bg-bad/15 text-bad">
+              Не подключён
+            </span>
+          )}
+        </div>
+
+        <label className="flex items-start gap-3 mt-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!cal.caldav_enabled}
+            onChange={(e) =>
+              setCal((p) => ({ ...p, caldav_enabled: e.target.checked }))
+            }
+          />
+          <div>
+            <div className="text-sm font-medium">Включить интеграцию календаря</div>
+            <div className="text-xs text-muted">
+              Бот сможет предлагать свободные слоты и создавать встречи.
+            </div>
+          </div>
+        </label>
+
+        <div className="mt-3">
+          <div className="tile-label">CalDAV URL</div>
+          <input
+            className="input mt-1"
+            placeholder="https://caldav.icloud.com"
+            value={cal.caldav_url}
+            onChange={(e) =>
+              setCal((p) => ({ ...p, caldav_url: e.target.value }))
+            }
+          />
+        </div>
+
+        <div className="mt-3">
+          <div className="tile-label">Apple ID</div>
+          <input
+            className="input mt-1"
+            type="email"
+            placeholder="you@icloud.com"
+            value={cal.caldav_username}
+            onChange={(e) =>
+              setCal((p) => ({ ...p, caldav_username: e.target.value }))
+            }
+          />
+        </div>
+
+        <div className="mt-3">
+          <div className="tile-label">Пароль приложения</div>
+          <input
+            className="input mt-1"
+            type="password"
+            placeholder={
+              cal.caldav_has_password ? "•••••••• (сохранён)" : "пароль приложения"
+            }
+            value={cal.caldav_password}
+            onChange={(e) =>
+              setCal((p) => ({ ...p, caldav_password: e.target.value }))
+            }
+          />
+          <div className="text-xs text-muted mt-1">
+            Создайте пароль приложения на{" "}
+            <a
+              href="https://appleid.apple.com"
+              target="_blank"
+              rel="noreferrer"
+              className="text-indigo-500 dark:text-indigo-400 underline"
+            >
+              appleid.apple.com
+            </a>{" "}
+            — обычный пароль Apple ID не подойдёт.
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <div className="tile-label">Имя календаря (необязательно)</div>
+          <input
+            className="input mt-1"
+            placeholder="Личный"
+            value={cal.caldav_calendar_name}
+            onChange={(e) =>
+              setCal((p) => ({ ...p, caldav_calendar_name: e.target.value }))
+            }
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2 mt-3 items-center">
+          <button
+            className="btn-secondary"
+            onClick={testCalendar}
+            disabled={calTesting}
+          >
+            {calTesting ? "Проверка…" : "Проверить подключение"}
+          </button>
+          <button
+            className="btn-primary"
+            onClick={saveCalendar}
+            disabled={calSaving}
+          >
+            {t("common.save")}
+          </button>
+          {calMsg && <span className="text-good text-sm">{calMsg}</span>}
+          {calErr && <span className="text-bad text-sm">{calErr}</span>}
+        </div>
+        {calTest && (
+          <div
+            className={`text-sm mt-2 ${
+              calTest.success ? "text-good" : "text-bad"
+            }`}
+          >
+            {calTest.success
+              ? `✅ Подключено${
+                  calTest.calendar_name ? ` · ${calTest.calendar_name}` : ""
+                } · Найдено ${calTest.events_count ?? 0} событий сегодня`
+              : `❌ Ошибка подключения · ${calTest.error || "проверьте данные"}`}
+          </div>
+        )}
+      </div>
+
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <Timer size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">Рабочие часы</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <div>
+            <div className="tile-label">С</div>
+            <select
+              className="input mt-1"
+              value={cal.caldav_work_start}
+              onChange={(e) =>
+                setCal((p) => ({ ...p, caldav_work_start: Number(e.target.value) }))
+              }
+            >
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {String(h).padStart(2, "0")}:00
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="tile-label">До</div>
+            <select
+              className="input mt-1"
+              value={cal.caldav_work_end}
+              onChange={(e) =>
+                setCal((p) => ({ ...p, caldav_work_end: Number(e.target.value) }))
+              }
+            >
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {String(h).padStart(2, "0")}:00
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="mt-3">
+          <div className="tile-label">Рабочие дни</div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {WEEKDAY_LABELS.map((label, day) => (
+              <button
+                key={day}
+                type="button"
+                className={`btn-secondary ${
+                  cal.caldav_work_days.includes(day) ? "ring-2 ring-accent" : ""
+                }`}
+                onClick={() => toggleWorkDay(day)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <div>
+            <div className="tile-label">Длительность слота</div>
+            <select
+              className="input mt-1"
+              value={cal.caldav_slot_duration}
+              onChange={(e) =>
+                setCal((p) => ({
+                  ...p,
+                  caldav_slot_duration: Number(e.target.value),
+                }))
+              }
+            >
+              <option value={30}>30 мин</option>
+              <option value={60}>60 мин</option>
+              <option value={90}>90 мин</option>
+              <option value={120}>2 часа</option>
+            </select>
+          </div>
+          <div>
+            <div className="tile-label">Горизонт планирования</div>
+            <select
+              className="input mt-1"
+              value={cal.caldav_lookahead_days}
+              onChange={(e) =>
+                setCal((p) => ({
+                  ...p,
+                  caldav_lookahead_days: Number(e.target.value),
+                }))
+              }
+            >
+              <option value={3}>3 дня</option>
+              <option value={7}>7 дней</option>
+              <option value={14}>14 дней</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <SlidersHorizontal size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">Поведение</span>
+        </div>
+        {[
+          {
+            key: "caldav_propose_slots",
+            title: "Предлагать слоты при запросе встречи",
+            desc: "Бот добавит свободное время в ответ на «давай встретимся».",
+          },
+          {
+            key: "caldav_auto_create",
+            title: "Автоматически создавать событие при подтверждении",
+            desc: "Когда собеседник соглашается, встреча появится в календаре.",
+          },
+          {
+            key: "caldav_notify",
+            title: "Уведомлять о созданных событиях в Telegram",
+            desc: "Админ-бот пришлёт уведомление о новой встрече.",
+          },
+        ].map((item) => (
+          <label key={item.key} className="flex items-start gap-3 mt-3">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={!!cal[item.key]}
+              onChange={(e) =>
+                setCal((p) => ({ ...p, [item.key]: e.target.checked }))
+              }
+            />
+            <div>
+              <div className="text-sm font-medium">{item.title}</div>
+              <div className="text-xs text-muted">{item.desc}</div>
+            </div>
+          </label>
+        ))}
+        <div className="flex flex-wrap gap-2 mt-3 items-center">
+          <button
+            className="btn-primary"
+            onClick={saveCalendar}
+            disabled={calSaving}
+          >
+            {t("common.save")}
+          </button>
+          {calMsg && <span className="text-good text-sm">{calMsg}</span>}
+          {calErr && <span className="text-bad text-sm">{calErr}</span>}
+        </div>
+      </div>
+        </>
       )}
 
       {tab === "notifications" && (
