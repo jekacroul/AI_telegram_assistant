@@ -1999,17 +1999,9 @@ async def calendar_create_event(
 
 
 @app.post("/api/calendar/connect-test")
-async def calendar_connect_test(payload: dict = Body(...)) -> dict:
-    """Test a CalDAV connection without persisting the credentials."""
-    probe = CalendarEngine()
-    probe.apply_config(
-        {
-            "caldav_url": payload.get("url") or "",
-            "caldav_username": payload.get("username") or "",
-            "caldav_password": payload.get("password") or "",
-            "caldav_calendar_name": payload.get("calendar_name") or "",
-        }
-    )
+async def calendar_connect_test() -> dict:
+    """Test the CalDAV connection using the credentials from the environment."""
+    probe = CalendarEngine()  # initialised from .env credentials
     ok = await probe.connect()
     if not ok:
         return {"success": False, "error": probe.last_error}
@@ -2032,9 +2024,8 @@ async def get_calendar_settings(
 ) -> dict:
     cfg = await get_caldav_config(session)
     status = await calendar_engine.get_status()
-    # Never expose the stored password; report whether one is set instead.
-    has_password = bool(cfg.pop("caldav_password", ""))
-    cfg["caldav_has_password"] = has_password
+    # Credentials live in .env — expose only non-sensitive context.
+    cfg["caldav_has_password"] = bool(cfg.pop("caldav_password", ""))
     cfg["connected"] = status.get("connected", False)
     cfg["calendar"] = status.get("calendar")
     return cfg
@@ -2048,10 +2039,7 @@ async def save_calendar_settings(
     await save_caldav_config(session, payload)
     connected = await refresh_calendar_connection()
     cfg = await get_caldav_config(session)
-    cfg.pop("caldav_password", None)
-    cfg["caldav_has_password"] = bool(
-        await get_setting(session, "caldav_password", "")
-    )
+    cfg["caldav_has_password"] = bool(cfg.pop("caldav_password", ""))
     cfg["connected"] = connected
     return cfg
 

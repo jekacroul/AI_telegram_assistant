@@ -239,11 +239,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  calendarConnectTest: (data) =>
-    request("/api/calendar/connect-test", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+  calendarConnectTest: () =>
+    request("/api/calendar/connect-test", { method: "POST" }),
   getCalendarSettings: () => request("/api/settings/calendar"),
   saveCalendarSettings: (data) =>
     request("/api/settings/calendar", {

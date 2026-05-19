@@ -46,23 +46,21 @@ def _parse_days(value: str) -> list[int]:
 
 
 async def get_caldav_config(session: AsyncSession) -> dict:
-    """Return the full CalDAV configuration (DB values, .env fallbacks)."""
+    """Return the full CalDAV configuration.
+
+    Connection credentials always come from the environment (.env); only the
+    behaviour settings are stored in / read from the DB.
+    """
     return {
+        # Connection — environment only, not editable from the dashboard.
+        "caldav_url": settings.caldav_url,
+        "caldav_username": settings.caldav_username,
+        "caldav_password": settings.caldav_password,
+        "caldav_calendar_name": settings.caldav_calendar_name,
+        # Behaviour — editable from the dashboard, stored in the DB.
         "caldav_enabled": _bool(
             await get_setting(session, "caldav_enabled", ""),
             settings.caldav_enabled,
-        ),
-        "caldav_url": await get_setting(
-            session, "caldav_url", settings.caldav_url
-        ),
-        "caldav_username": await get_setting(
-            session, "caldav_username", settings.caldav_username
-        ),
-        "caldav_password": await get_setting(
-            session, "caldav_password", settings.caldav_password
-        ),
-        "caldav_calendar_name": await get_setting(
-            session, "caldav_calendar_name", settings.caldav_calendar_name
         ),
         "caldav_work_start": _int(
             await get_setting(session, "caldav_work_start", ""),
@@ -96,12 +94,11 @@ async def get_caldav_config(session: AsyncSession) -> dict:
 
 
 async def save_caldav_config(session: AsyncSession, payload: dict) -> None:
-    """Persist provided CalDAV settings. Unknown / missing keys are skipped.
+    """Persist the editable CalDAV behaviour settings.
 
-    The password is only written when a non-empty value is supplied, so the
-    masked form field does not wipe a stored password on save.
+    Connection credentials are intentionally NOT accepted here — they are
+    configured exclusively through .env. Unknown / missing keys are skipped.
     """
-    str_keys = ("caldav_url", "caldav_username", "caldav_calendar_name")
     bool_keys = (
         "caldav_enabled", "caldav_propose_slots",
         "caldav_auto_create", "caldav_notify",
@@ -110,17 +107,12 @@ async def save_caldav_config(session: AsyncSession, payload: dict) -> None:
         "caldav_work_start", "caldav_work_end",
         "caldav_slot_duration", "caldav_lookahead_days",
     )
-    for key in str_keys:
-        if key in payload and payload[key] is not None:
-            await set_setting(session, key, str(payload[key]))
     for key in bool_keys:
         if key in payload and payload[key] is not None:
             await set_setting(session, key, "1" if payload[key] else "0")
     for key in int_keys:
         if key in payload and payload[key] is not None:
             await set_setting(session, key, str(int(payload[key])))
-    if "caldav_password" in payload and payload["caldav_password"]:
-        await set_setting(session, "caldav_password", str(payload["caldav_password"]))
     if "caldav_work_days" in payload and payload["caldav_work_days"] is not None:
         days = [
             str(int(d))

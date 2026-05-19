@@ -308,12 +308,7 @@ export default function Settings() {
     setCalErr("");
     setCalMsg("");
     try {
-      const res = await api.calendarConnectTest({
-        url: cal.caldav_url,
-        username: cal.caldav_username,
-        password: cal.caldav_password,
-        calendar_name: cal.caldav_calendar_name,
-      });
+      const res = await api.calendarConnectTest();
       setCalTest(res);
     } catch (e) {
       setCalTest({ success: false, error: e.message });
@@ -329,9 +324,6 @@ export default function Settings() {
     try {
       const payload = {
         caldav_enabled: !!cal.caldav_enabled,
-        caldav_url: cal.caldav_url,
-        caldav_username: cal.caldav_username,
-        caldav_calendar_name: cal.caldav_calendar_name,
         caldav_work_start: Number(cal.caldav_work_start),
         caldav_work_end: Number(cal.caldav_work_end),
         caldav_work_days: cal.caldav_work_days,
@@ -341,9 +333,8 @@ export default function Settings() {
         caldav_auto_create: !!cal.caldav_auto_create,
         caldav_notify: !!cal.caldav_notify,
       };
-      if (cal.caldav_password) payload.caldav_password = cal.caldav_password;
       const res = await api.saveCalendarSettings(payload);
-      setCal((prev) => ({ ...prev, ...res, caldav_password: "" }));
+      setCal((prev) => ({ ...prev, ...res }));
       setCalMsg(t("common.saved"));
     } catch (e) {
       setCalErr(e.message);
@@ -981,46 +972,28 @@ export default function Settings() {
           </div>
         </label>
 
-        <div className="mt-3">
-          <div className="tile-label">CalDAV URL</div>
-          <input
-            className="input mt-1"
-            placeholder="https://caldav.icloud.com"
-            value={cal.caldav_url}
-            onChange={(e) =>
-              setCal((p) => ({ ...p, caldav_url: e.target.value }))
-            }
-          />
-        </div>
-
-        <div className="mt-3">
-          <div className="tile-label">Apple ID</div>
-          <input
-            className="input mt-1"
-            type="email"
-            placeholder="you@icloud.com"
-            value={cal.caldav_username}
-            onChange={(e) =>
-              setCal((p) => ({ ...p, caldav_username: e.target.value }))
-            }
-          />
-        </div>
-
-        <div className="mt-3">
-          <div className="tile-label">Пароль приложения</div>
-          <input
-            className="input mt-1"
-            type="password"
-            placeholder={
-              cal.caldav_has_password ? "•••••••• (сохранён)" : "пароль приложения"
-            }
-            value={cal.caldav_password}
-            onChange={(e) =>
-              setCal((p) => ({ ...p, caldav_password: e.target.value }))
-            }
-          />
-          <div className="text-xs text-muted mt-1">
-            Создайте пароль приложения на{" "}
+        <div className="mt-3 rounded-lg border border-light-border dark:border-dark-border
+                        bg-light-card2 dark:bg-dark-card2 p-3">
+          <div className="text-xs text-muted">
+            Данные подключения задаются в файле{" "}
+            <code className="font-mono">.env</code> и не редактируются здесь:
+          </div>
+          <div className="mt-2 space-y-1 text-sm">
+            <div className="flex justify-between gap-3">
+              <span className="text-muted font-mono text-xs">CALDAV_URL</span>
+              <span className="truncate">{cal.caldav_url || "—"}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-muted font-mono text-xs">CALDAV_USERNAME</span>
+              <span className="truncate">{cal.caldav_username || "—"}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-muted font-mono text-xs">CALDAV_PASSWORD</span>
+              <span>{cal.caldav_has_password ? "задан" : "не задан"}</span>
+            </div>
+          </div>
+          <div className="text-xs text-muted mt-2">
+            Для iCloud создайте пароль приложения на{" "}
             <a
               href="https://appleid.apple.com"
               target="_blank"
@@ -1029,20 +1002,8 @@ export default function Settings() {
             >
               appleid.apple.com
             </a>{" "}
-            — обычный пароль Apple ID не подойдёт.
+            и пропишите его в <code className="font-mono">CALDAV_PASSWORD</code>.
           </div>
-        </div>
-
-        <div className="mt-3">
-          <div className="tile-label">Имя календаря (необязательно)</div>
-          <input
-            className="input mt-1"
-            placeholder="Личный"
-            value={cal.caldav_calendar_name}
-            onChange={(e) =>
-              setCal((p) => ({ ...p, caldav_calendar_name: e.target.value }))
-            }
-          />
         </div>
 
         <div className="flex flex-wrap gap-2 mt-3 items-center">
