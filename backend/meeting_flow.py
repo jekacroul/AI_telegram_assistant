@@ -2,55 +2,133 @@
 
 Ties the meeting detector and the calendar engine together:
 
-* after the bot proposes time slots in a reply, the offered slots are stored
-  as a :class:`PendingMeeting`;
-* when the contact later confirms ("да", "в среду", ...), the matching slot
-  is turned into a real calendar event and the owner is notified.
+* when the contact's message shows meeting intent, a :class:`PendingMeeting`
+  is opened for the chat (remembering any date hint, e.g. "завтра");
+* while that negotiation is open, a message naming a concrete time
+  ("в 19", "давай в 12 часов") is resolved to a real datetime and, if it
+  is in the future and free, turned into a calendar event.
+
+The event is booked at the time the contact actually named — never at an
+arbitrary slot — and only while a meeting is being negotiated.
 """
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+import re
+from datetime import date, datetime, time, timedelta
 from typing import Optional
 
 from sqlalchemy import select
 
-from .calendar_engine import calendar_engine, slots_from_json, slots_to_json
+from .calendar_engine import (
+    _slot_label,
+    calendar_engine,
+    slots_from_json,
+    slots_to_json,
+)
 from .caldav_config import get_caldav_config
 from .database import CreatedMeeting, PendingMeeting, SessionLocal
 from .meeting_detector import (
     detect_meeting_intent,
     extract_requested_time,
-    looks_like_confirmation,
     matched_day_index,
 )
 
 log = logging.getLogger(__name__)
 
+# A pending meeting older than this is considered a stale negotiation and is
+# no longer matched against incoming times.
+_PENDING_TTL = timedelta(hours=24)
 
-def _encode_proposal(meeting_type: str, slots: list[dict]) -> str:
+
+def _encode_proposal(meeting_type: str, date_hint: str, slots: list[dict]) -> str:
     return json.dumps(
-        {"meeting_type": meeting_type, "slots": json.loads(slots_to_json(slots))},
+        {
+            "meeting_type": meeting_type,
+            "date_hint": date_hint or "",
+            "slots": json.loads(slots_to_json(slots)),
+        },
         ensure_ascii=False,
     )
 
 
-def _decode_proposal(raw: str) -> tuple[str, list[dict]]:
+def _decode_proposal(raw: str) -> tuple[str, str, list[dict]]:
     try:
         data = json.loads(raw or "{}")
     except (ValueError, TypeError):
-        return "meeting", []
+        return "meeting", "", []
     if isinstance(data, list):  # tolerate a bare slot list
-        return "meeting", slots_from_json(raw)
-    meeting_type = data.get("meeting_type", "meeting")
-    slots = slots_from_json(json.dumps(data.get("slots", [])))
-    return meeting_type, slots
+        return "meeting", "", slots_from_json(raw)
+    return (
+        data.get("meeting_type", "meeting"),
+        data.get("date_hint", ""),
+        slots_from_json(json.dumps(data.get("slots", []))),
+    )
 
 
 def _event_title(meeting_type: str, sender_name: str) -> str:
     who = sender_name or "собеседником"
     return f"{'Звонок' if meeting_type == 'call' else 'Встреча'} с {who}"
+
+
+def _resolve_date(
+    text: str, hour: int, minute: int, now: datetime
+) -> Optional[date]:
+    """Resolve a calendar date from textual hints (сегодня / завтра /
+    weekday / DD.MM). Returns None when the text carries no date hint."""
+    if not text:
+        return None
+    low = text.lower()
+    today = now.date()
+    if "послезавтра" in low:
+        return today + timedelta(days=2)
+    if "завтра" in low:
+        return today + timedelta(days=1)
+    if "сегодня" in low:
+        return today
+    day_idx = matched_day_index(low)
+    if day_idx is not None:
+        for offset in range(0, 8):
+            candidate = today + timedelta(days=offset)
+            if candidate.weekday() != day_idx:
+                continue
+            at = datetime.combine(candidate, time(hour=hour, minute=minute))
+            if at > now:
+                return candidate
+        return None
+    m = re.search(r"\b(\d{1,2})[./](\d{1,2})\b", low)
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        for year in (today.year, today.year + 1):
+            try:
+                cand = date(year, month, day)
+            except ValueError:
+                continue
+            if cand >= today:
+                return cand
+    return None
+
+
+def _resolve_start(
+    incoming_text: str,
+    date_hint: str,
+    hour: int,
+    minute: int,
+    now: datetime,
+) -> datetime:
+    """Build the meeting start datetime: a date hint in the confirmation
+    wins, then the hint remembered from the original request, then a
+    default of today (if the time is still ahead) or tomorrow."""
+    target = _resolve_date(incoming_text, hour, minute, now) or _resolve_date(
+        date_hint or "", hour, minute, now
+    )
+    if target is not None:
+        return datetime.combine(target, time(hour=hour, minute=minute))
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate
 
 
 async def maybe_record_pending_meeting(
@@ -59,22 +137,16 @@ async def maybe_record_pending_meeting(
     sender_name: str,
     incoming_text: str,
 ) -> None:
-    """If the contact's message asked for a meeting and the calendar is
-    connected, store the free slots the bot just offered so a later
-    confirmation can be matched. No-op when the feature is disabled."""
+    """Open a pending meeting for the chat when the contact's message shows
+    meeting intent, remembering any date hint so a later bare time ("в 19")
+    can still be placed on the right day."""
     if not calendar_engine.is_connected:
         return
     try:
-        async with SessionLocal() as session:
-            cfg = await get_caldav_config(session)
-        if not cfg["caldav_propose_slots"]:
-            return
         intent = await detect_meeting_intent(incoming_text)
         if not intent or not intent.has_intent:
             return
         slots = await calendar_engine.get_free_slots()
-        if not slots:
-            return
         async with SessionLocal() as session:
             # Supersede any earlier still-pending proposal for this chat.
             stale = (
@@ -93,13 +165,19 @@ async def maybe_record_pending_meeting(
                     message_id=message_id,
                     sender_name=sender_name,
                     proposed_slots_json=_encode_proposal(
-                        intent.meeting_type or "meeting", slots
+                        intent.meeting_type or "meeting",
+                        intent.suggested_date or "",
+                        slots,
                     ),
                     status="pending",
                 )
             )
             await session.commit()
-        log.info("recorded pending meeting for chat %s (%d slots)", chat_id, len(slots))
+        log.info(
+            "opened pending meeting for chat %s (date hint=%r)",
+            chat_id,
+            intent.suggested_date or "",
+        )
     except Exception:  # noqa: BLE001
         log.exception("maybe_record_pending_meeting failed")
 
@@ -107,26 +185,31 @@ async def maybe_record_pending_meeting(
 async def process_incoming_confirmation(
     chat_id: int, sender_name: str, incoming_text: str
 ) -> Optional[dict]:
-    """Check whether an incoming message confirms a pending meeting proposal.
+    """If an incoming message names a concrete time while a meeting is being
+    negotiated, create the calendar event at exactly that time.
 
-    On a match, create the calendar event, persist a :class:`CreatedMeeting`
-    and return event info; otherwise return None.
+    Returns event info on success, otherwise None (no time named, no open
+    negotiation, the time is in the past, or it clashes with an event).
     """
     if not calendar_engine.is_connected:
         return None
-    if not looks_like_confirmation(incoming_text):
+    requested = extract_requested_time(incoming_text)
+    if requested is None:
         return None
+    hour, minute = requested
     try:
         async with SessionLocal() as session:
             cfg = await get_caldav_config(session)
             if not cfg["caldav_auto_create"]:
                 return None
+            cutoff = datetime.utcnow() - _PENDING_TTL
             pending = (
                 await session.execute(
                     select(PendingMeeting)
                     .where(
                         PendingMeeting.chat_id == chat_id,
                         PendingMeeting.status == "pending",
+                        PendingMeeting.created_at >= cutoff,
                     )
                     .order_by(PendingMeeting.id.desc())
                     .limit(1)
@@ -135,59 +218,55 @@ async def process_incoming_confirmation(
             if not pending:
                 return None
             pending_id = pending.id
-            meeting_type, slots = _decode_proposal(pending.proposed_slots_json)
-
-        if not slots:
-            return None
-
-        # Narrow the candidates to the weekday the contact named, if any.
-        day_idx = matched_day_index(incoming_text)
-        candidates = slots
-        if day_idx is not None:
-            by_day = [s for s in slots if s["start"].weekday() == day_idx]
-            if by_day:
-                candidates = by_day
-
-        # If the contact named a concrete time, only auto-create when that
-        # exact time was among the slots the bot offered. A counter-proposal
-        # of a different time must NOT be silently booked at some other
-        # slot — leave it pending so the conversation can coordinate it.
-        requested = extract_requested_time(incoming_text)
-        if requested is not None:
-            hour, minute = requested
-            chosen = next(
-                (
-                    s
-                    for s in candidates
-                    if s["start"].hour == hour
-                    and s["start"].minute == minute
-                ),
-                None,
+            meeting_type, date_hint, _slots = _decode_proposal(
+                pending.proposed_slots_json
             )
-            if chosen is None:
-                log.info(
-                    "confirmation names %02d:%02d which was not offered; "
-                    "leaving meeting pending for chat %s",
-                    hour,
-                    minute,
-                    chat_id,
-                )
-                return None
-        else:
-            # A bare "да / ок" agrees to the first (closest) proposed slot.
-            chosen = candidates[0]
+
+        now = datetime.now()
+        start = _resolve_start(incoming_text, date_hint, hour, minute, now)
+        if start <= now:
+            log.info(
+                "confirmation time %02d:%02d resolves to the past; skipping "
+                "for chat %s",
+                hour,
+                minute,
+                chat_id,
+            )
+            return None
+        duration = max(15, int(calendar_engine.slot_duration or 60))
+        end = start + timedelta(minutes=duration)
+
+        # Don't book over an existing event.
+        window = await calendar_engine.get_events(
+            start - timedelta(hours=3), end + timedelta(hours=3)
+        )
+        conflict = any(
+            isinstance(e["start"], datetime)
+            and isinstance(e["end"], datetime)
+            and not (end <= e["start"] or start >= e["end"])
+            for e in window
+        )
+        if conflict:
+            log.info(
+                "requested meeting time %s conflicts with an existing event; "
+                "skipping for chat %s",
+                start,
+                chat_id,
+            )
+            return None
 
         title = _event_title(meeting_type, sender_name)
         uid = await calendar_engine.create_event(
             title=title,
-            start=chosen["start"],
-            end=chosen["end"],
+            start=start,
+            end=end,
             description="Создано AI-ассистентом по подтверждению собеседника.",
         )
         if not uid:
             log.warning("confirmation matched but event creation failed")
             return None
 
+        label = _slot_label(start, end)
         async with SessionLocal() as session:
             pending = (
                 await session.execute(
@@ -201,20 +280,25 @@ async def process_incoming_confirmation(
                     chat_id=chat_id,
                     calendar_uid=uid,
                     title=title,
-                    start_time=chosen["start"],
-                    end_time=chosen["end"],
+                    start_time=start,
+                    end_time=end,
                     created_by="auto",
                 )
             )
             await session.commit()
 
-        log.info("auto-created calendar event '%s' for chat %s", title, chat_id)
+        log.info(
+            "auto-created calendar event '%s' at %s for chat %s",
+            title,
+            start,
+            chat_id,
+        )
         return {
             "uid": uid,
             "title": title,
-            "label": chosen["label"],
-            "start": chosen["start"],
-            "end": chosen["end"],
+            "label": label,
+            "start": start,
+            "end": end,
             "sender_name": sender_name,
         }
     except Exception:  # noqa: BLE001
