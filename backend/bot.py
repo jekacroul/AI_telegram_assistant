@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -137,6 +138,26 @@ def _coerce_int(value: object, default: int) -> int:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+async def _load_reply_temperatures(session) -> list[float]:
+    """Return the configured per-variant temperatures, falling back to the
+    defaults when the setting is missing or malformed."""
+    raw = await get_setting(session, "reply_temperatures", "[0.7, 0.85, 1.0]")
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return [0.7, 0.85, 1.0]
+    if not isinstance(parsed, list) or len(parsed) != 3:
+        return [0.7, 0.85, 1.0]
+    out: list[float] = []
+    for v in parsed:
+        try:
+            t = float(v)
+        except (TypeError, ValueError):
+            return [0.7, 0.85, 1.0]
+        out.append(max(0.0, min(2.0, t)))
+    return out
 
 
 def _split_reply_messages(text: str) -> list[str]:
@@ -983,6 +1004,7 @@ class TelegramService:
             quality_enabled = (
                 await get_setting(session, "quality_filter_enabled", "1")
             ) in ("1", "true", "True")
+            temperatures = await _load_reply_temperatures(session)
             try:
                 rag_context, _ = await get_rag_context(session, text, chat_id)
             except Exception:  # noqa: BLE001
@@ -1003,6 +1025,7 @@ class TelegramService:
                 rag_context=rag_context,
                 summary=summary,
                 extra_system_context=extra_system_context,
+                temperatures=temperatures,
             )
             return (variants, "ok") if variants else ([], "no_variants")
         last_reason = "no_variants"
@@ -1017,6 +1040,7 @@ class TelegramService:
                 rag_context=rag_context,
                 summary=summary,
                 extra_system_context=extra_system_context,
+                temperatures=temperatures,
             )
             accepted: list[str] = []
             async with SessionLocal() as session:

@@ -63,7 +63,13 @@ export default function Settings() {
     summary_enabled: true,
     reply_settle_seconds: 12,
     reply_history_limit: 20,
+    reply_temperatures: [0.7, 0.85, 1.0],
   });
+  const [meetingKw, setMeetingKw] = useState({ builtin: [], user: [] });
+  const [newKw, setNewKw] = useState("");
+  const [missedCands, setMissedCands] = useState([]);
+  const [kwSaving, setKwSaving] = useState(false);
+  const [kwErr, setKwErr] = useState("");
   const [chats, setChats] = useState([]);
   const [models, setModels] = useState([]);
   const [modelsError, setModelsError] = useState("");
@@ -167,7 +173,27 @@ export default function Settings() {
       reply_settle_seconds:
         st.reply_settle_seconds ?? 12,
       reply_history_limit: st.reply_history_limit ?? 20,
+      reply_temperatures:
+        Array.isArray(st.reply_temperatures) &&
+        st.reply_temperatures.length === 3
+          ? st.reply_temperatures.map((v) => Number(v))
+          : [0.7, 0.85, 1.0],
     }));
+    try {
+      const kw = await api.meetingKeywords();
+      setMeetingKw({
+        builtin: Array.isArray(kw.builtin) ? kw.builtin : [],
+        user: Array.isArray(kw.user) ? kw.user : [],
+      });
+    } catch {
+      // ignore
+    }
+    try {
+      const cands = await api.missedMeetingCandidates(15);
+      setMissedCands(Array.isArray(cands) ? cands : []);
+    } catch {
+      // ignore
+    }
     setSchedule((prev) => ({
       ...prev,
       enabled: !!sch.enabled,
@@ -349,6 +375,48 @@ export default function Settings() {
       if (days.has(day)) days.delete(day);
       else days.add(day);
       return { ...prev, caldav_work_days: Array.from(days).sort((a, b) => a - b) };
+    });
+  }
+
+  async function persistMeetingKeywords(next) {
+    setKwSaving(true);
+    setKwErr("");
+    try {
+      const res = await api.saveMeetingKeywords(next);
+      setMeetingKw({
+        builtin: Array.isArray(res.builtin) ? res.builtin : meetingKw.builtin,
+        user: Array.isArray(res.user) ? res.user : next,
+      });
+    } catch (e) {
+      setKwErr(e.message);
+    } finally {
+      setKwSaving(false);
+    }
+  }
+
+  async function addMeetingKeyword(text) {
+    const v = (text || "").trim().toLowerCase();
+    if (!v) return;
+    if (meetingKw.user.includes(v)) {
+      setNewKw("");
+      return;
+    }
+    const next = [...meetingKw.user, v];
+    setNewKw("");
+    await persistMeetingKeywords(next);
+  }
+
+  async function removeMeetingKeyword(phrase) {
+    const next = meetingKw.user.filter((p) => p !== phrase);
+    await persistMeetingKeywords(next);
+  }
+
+  function setReplyTemperature(idx, value) {
+    const v = Math.max(0, Math.min(2, Number(value)));
+    setS((prev) => {
+      const next = [...(prev.reply_temperatures || [0.7, 0.85, 1.0])];
+      next[idx] = v;
+      return { ...prev, reply_temperatures: next };
     });
   }
 
@@ -678,6 +746,152 @@ export default function Settings() {
             {t("settings.historyDepthDesc")}
           </div>
         </div>
+      </div>
+
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <FlaskConical size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">Температуры генерации</span>
+        </div>
+        <div className="text-xs text-muted mt-1">
+          Для каждого ответа модель генерирует 3 варианта с разной
+          температурой и выбирает лучший. Низкая температура — строже
+          держит инструкции, высокая — живее, но менее предсказуемо.
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i}>
+              <div className="tile-label">Вариант {i + 1}</div>
+              <input
+                className="input mt-1"
+                type="number"
+                min={0}
+                max={2}
+                step={0.05}
+                value={(s.reply_temperatures || [0.7, 0.85, 1.0])[i]}
+                onChange={(e) => setReplyTemperature(i, e.target.value)}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="text-xs text-muted mt-2">
+          По умолчанию: 0.7 / 0.85 / 1.0. Для Qwen2.5 или похожих
+          инструкционных моделей попробуй 0.5 / 0.7 / 0.85 — стабильнее
+          следуют системному промпту.
+        </div>
+      </div>
+
+      <div className="tile">
+        <div className="flex items-center gap-2 mb-1">
+          <CalendarClock size={14} className="text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
+          <span className="tile-label mb-0">Распознавание встреч</span>
+        </div>
+        <div className="text-xs text-muted mt-1">
+          Фразы, по которым бот понимает, что речь о встрече, и подключает
+          календарь. Встроенные нельзя редактировать, но можно добавить
+          свои.
+        </div>
+
+        <div className="mt-3">
+          <div className="tile-label">Свои фразы</div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {meetingKw.user.length === 0 && (
+              <span className="text-xs text-muted">
+                Пока ничего не добавлено.
+              </span>
+            )}
+            {meetingKw.user.map((p) => (
+              <span
+                key={p}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md
+                           bg-indigo-500/10 text-indigo-600 dark:text-indigo-300
+                           text-xs"
+              >
+                {p}
+                <button
+                  className="text-bad ml-1"
+                  onClick={() => removeMeetingKeyword(p)}
+                  disabled={kwSaving}
+                  title="Удалить"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-2">
+            <input
+              className="input flex-1"
+              placeholder="например: пересечёмся в баре"
+              value={newKw}
+              onChange={(e) => setNewKw(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addMeetingKeyword(newKw);
+              }}
+            />
+            <button
+              className="btn-secondary"
+              onClick={() => addMeetingKeyword(newKw)}
+              disabled={kwSaving || !newKw.trim()}
+            >
+              Добавить
+            </button>
+          </div>
+          {kwErr && <div className="text-bad text-xs mt-1">{kwErr}</div>}
+        </div>
+
+        {missedCands.length > 0 && (
+          <div className="mt-4">
+            <div className="tile-label">
+              Возможно пропущенные сообщения
+            </div>
+            <div className="text-xs text-muted mt-1">
+              Сообщения, где упоминалось время, но бот не понял про встречу.
+              Нажми «использовать» — фраза попадёт в свои.
+            </div>
+            <div className="space-y-1 mt-2 max-h-48 overflow-auto">
+              {missedCands.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-start gap-2 text-xs p-2 rounded-md
+                             bg-light-card2 dark:bg-dark-card2 border
+                             border-light-border dark:border-dark-border"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-muted">
+                      {c.sender_name || c.chat_name}
+                    </div>
+                    <div className="truncate">«{c.text}»</div>
+                  </div>
+                  <button
+                    className="btn-secondary text-xs px-2 py-1"
+                    onClick={() => addMeetingKeyword(c.text)}
+                    disabled={kwSaving}
+                  >
+                    использовать
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <details className="mt-4 text-xs">
+          <summary className="cursor-pointer text-muted">
+            Встроенные фразы ({meetingKw.builtin.length})
+          </summary>
+          <div className="flex flex-wrap gap-1 mt-2">
+            {meetingKw.builtin.map((p) => (
+              <span
+                key={p}
+                className="px-2 py-0.5 rounded-md bg-light-card2
+                           dark:bg-dark-card2 text-muted"
+              >
+                {p}
+              </span>
+            ))}
+          </div>
+        </details>
       </div>
 
       <div className="tile">

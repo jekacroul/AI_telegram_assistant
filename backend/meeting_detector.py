@@ -51,13 +51,42 @@ _DATE_PATTERNS = [
 ]
 
 
+# User-defined keyword phrases, loaded from the DB at startup and refreshed
+# whenever the dashboard saves changes. Stored lowercased.
+_user_keywords: list[str] = []
+
+
+def set_user_keywords(phrases: list[str]) -> None:
+    """Replace the user-defined keyword list with the given phrases."""
+    global _user_keywords
+    cleaned: list[str] = []
+    for p in phrases or []:
+        if not isinstance(p, str):
+            continue
+        s = p.strip().lower()
+        if s and s not in cleaned:
+            cleaned.append(s)
+    _user_keywords = cleaned
+
+
+def get_user_keywords() -> list[str]:
+    return list(_user_keywords)
+
+
+def get_builtin_keywords() -> list[str]:
+    """Read-only copy of the built-in keyword list (for display in the UI)."""
+    return list(_KEYWORDS)
+
+
 async def detect_meeting_intent(text: str) -> Optional[MeetingIntent]:
     """Return a :class:`MeetingIntent` if the message asks for a meeting/call,
-    otherwise None."""
+    otherwise None. Both built-in and user-defined keywords are checked."""
     if not text:
         return None
     text_lower = text.lower()
-    if not any(kw in text_lower for kw in _KEYWORDS):
+    if not any(kw in text_lower for kw in _KEYWORDS) and not any(
+        kw in text_lower for kw in _user_keywords
+    ):
         return None
 
     time_match = _TIME_PATTERN.search(text_lower)

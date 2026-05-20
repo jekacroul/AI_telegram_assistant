@@ -247,6 +247,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  meetingKeywords: () => request("/api/meeting/keywords"),
+  saveMeetingKeywords: (phrases) =>
+    request("/api/meeting/keywords", {
+      method: "POST",
+      body: JSON.stringify({ phrases }),
+    }),
+  missedMeetingCandidates: (limit = 20) =>
+    request(`/api/meeting/missed-candidates?limit=${limit}`),
 };
 
 export function streamEvents(path, onEvent) {

@@ -534,6 +534,7 @@ class LLMClient:
         rag_context: Optional[str] = None,
         summary: Optional[str] = None,
         extra_system_context: Optional[str] = None,
+        temperatures: Optional[list[float]] = None,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
         messages = build_chat_messages(
@@ -564,11 +565,15 @@ class LLMClient:
         # Sampled sequentially (not concurrently): a local single-slot server
         # may return 500 on parallel requests. A small output budget keeps
         # prompt + completion inside the model's context window.
-        temperatures = (0.7, 0.85, 1.0)
+        sample_temps = (
+            tuple(temperatures)
+            if temperatures and len(temperatures) >= 1
+            else (0.7, 0.85, 1.0)
+        )
         variants: list[str] = []
         seen: set[str] = set()
         errors: list[Exception] = []
-        for temp in temperatures:
+        for temp in sample_temps:
             try:
                 raw = await self.generate_chat(
                     messages, temperature=temp, num_predict=REPLY_MAX_TOKENS
