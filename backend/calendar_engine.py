@@ -12,7 +12,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from .config import settings
@@ -319,6 +319,17 @@ class CalendarEngine:
     ) -> None:
         from icalendar import Calendar, Event
 
+        # iCloud silently drops events whose DTSTART has no timezone (the
+        # standard calls it "floating time" but Apple treats it as invalid
+        # for display). Attach the local system timezone so start/end are
+        # serialised with an explicit TZID instead.
+        local_tz = datetime.now().astimezone().tzinfo
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=local_tz)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=local_tz)
+        now_utc = datetime.now(timezone.utc)
+
         cal = Calendar()
         cal.add("prodid", "-//AI Assistant//caldav//")
         cal.add("version", "2.0")
@@ -326,6 +337,12 @@ class CalendarEngine:
         event.add("summary", title)
         event.add("dtstart", start)
         event.add("dtend", end)
+        # DTSTAMP / CREATED / LAST-MODIFIED are required by RFC 5545; without
+        # them the caldav library auto-injects DTSTAMP and warns about a
+        # non-compliant server.
+        event.add("dtstamp", now_utc)
+        event.add("created", now_utc)
+        event.add("last-modified", now_utc)
         event.add("description", description)
         if location:
             event.add("location", location)
