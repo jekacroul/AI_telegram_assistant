@@ -56,17 +56,21 @@ async def detect_meeting_intent(text: str) -> Optional[MeetingIntent]:
         return None
 
     time_match = _TIME_PATTERN.search(text_lower)
-    date_match = None
-    for pattern in _DATE_PATTERNS:
-        m = pattern.search(text_lower)
-        if m:
-            date_match = m
-            break
+    # In a reschedule ("перенеси с X на Y") the meaningful date is the new
+    # one — Y, after "на" — not the first date in the message (which is
+    # the OLD date X). Fall back to the first-match heuristic otherwise.
+    suggested_date: Optional[str] = reschedule_target_date(text)
+    if not suggested_date:
+        for pattern in _DATE_PATTERNS:
+            m = pattern.search(text_lower)
+            if m:
+                suggested_date = m.group(0)
+                break
 
     return MeetingIntent(
         has_intent=True,
         suggested_time=time_match.group(0) if time_match else None,
-        suggested_date=date_match.group(0) if date_match else None,
+        suggested_date=suggested_date,
         meeting_type=(
             "call"
             if any(w in text_lower for w in _CALL_WORDS)
@@ -83,10 +87,44 @@ _CONFIRM_WORDS = [
 ]
 
 _DAY_TOKENS = {
-    "понедельник": 0, "вторник": 1, "среда": 2, "среду": 2, "четверг": 3,
-    "пятница": 4, "пятницу": 4, "суббота": 5, "субботу": 5,
-    "воскресенье": 6,
+    "понедельник": 0, "понедельника": 0,
+    "вторник": 1, "вторника": 1,
+    "среда": 2, "среду": 2, "среды": 2,
+    "четверг": 3, "четверга": 3,
+    "пятница": 4, "пятницу": 4, "пятницы": 4,
+    "суббота": 5, "субботу": 5, "субботы": 5,
+    "воскресенье": 6, "воскресенья": 6,
 }
+
+
+_RESCHEDULE_DATE_BODY = (
+    r"(сегодня|завтра|послезавтра|"
+    r"понедельник[ауые]?|вторник[ауые]?|сред[ауые]?|четверг[ауые]?|"
+    r"пятниц[ауые]?|суббот[ауые]?|воскресень[ея]?|"
+    r"\d{1,2}[./]\d{1,2})"
+)
+
+
+def _reschedule_date_after(text: str, preposition: str) -> Optional[str]:
+    """In a 'перенес...' phrase, return the date that follows the given
+    preposition ("на" for the new date, "с" for the old)."""
+    if not text or "перенес" not in text.lower():
+        return None
+    m = re.search(
+        rf"\b{preposition}\s+{_RESCHEDULE_DATE_BODY}\b",
+        text.lower(),
+    )
+    return m.group(1) if m else None
+
+
+def reschedule_target_date(text: str) -> Optional[str]:
+    """The new date in 'перенеси ... на <date>'."""
+    return _reschedule_date_after(text, "на")
+
+
+def reschedule_source_date(text: str) -> Optional[str]:
+    """The old date in 'перенеси с <date> на ...'."""
+    return _reschedule_date_after(text, "с")
 
 
 def looks_like_confirmation(text: str) -> bool:

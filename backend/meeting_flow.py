@@ -33,6 +33,7 @@ from .meeting_detector import (
     detect_meeting_intent,
     extract_requested_time,
     matched_day_index,
+    reschedule_source_date,
 )
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ _CANCEL_PHRASES = (
     "удали все", "удалить все", "удалить встреч",
     "снимай встреч", "снять встреч", "убери встреч",
     "убери из календар", "отказаться от встреч",
+    "перенес",  # rescheduling also cancels the existing meeting
     "cancel",
 )
 
@@ -359,6 +361,21 @@ def _resolve_cancel_scope(text: str, now: datetime) -> dict:
         "отмени все", "отменим все", "отменить все",
     )
     if any(m in clause for m in all_markers):
+        return {"start": now, "end": horizon, "time": requested}
+    # Reschedule: "перенеси с X на Y" → cancel the meeting at X.
+    # "перенеси на Y" (no "с") → cancel whatever is currently scheduled
+    # in this chat (all upcoming), then a fresh negotiation opens on Y.
+    if "перенес" in clause:
+        source = reschedule_source_date(clause)
+        if source:
+            src_date = _resolve_date(source, 0, 0, now)
+            if src_date is not None:
+                d = datetime.combine(src_date, time(0, 0))
+                return {
+                    "start": d,
+                    "end": d + timedelta(days=1),
+                    "time": requested,
+                }
         return {"start": now, "end": horizon, "time": requested}
     if "послезавтра" in clause:
         d = today + timedelta(days=2)

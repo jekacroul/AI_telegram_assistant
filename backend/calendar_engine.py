@@ -115,7 +115,11 @@ class CalendarEngine:
         """Blocking connection routine — runs on a worker thread."""
         import caldav
 
-        client = caldav.DAVClient(url=url, username=username, password=password)
+        # iCloud is occasionally slow under load; 60s gives reads and the
+        # delete REPORT enough headroom to finish without false timeouts.
+        client = caldav.DAVClient(
+            url=url, username=username, password=password, timeout=60
+        )
         principal = client.principal()
         calendars = principal.calendars()
         if calendar_name:
@@ -146,7 +150,7 @@ class CalendarEngine:
                     self.password,
                     self.calendar_name,
                 ),
-                timeout=20.0,
+                timeout=75.0,
             )
             self._connected = ok
             self.last_error = err
