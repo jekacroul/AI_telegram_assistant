@@ -1388,6 +1388,34 @@ async def notify_meeting_created(event: dict, chat_name: str = "") -> None:
         log.error("notify_meeting_created failed: %s", e)
 
 
+async def notify_series_created(
+    events: list[dict], chat_name: str = "", sender_name: str = ""
+) -> None:
+    """Notify the owner that the assistant created a series of events."""
+    if not events:
+        return
+    bot, owner_id = await _owner_bot_and_id()
+    if not bot or owner_id is None:
+        return
+    async with SessionLocal() as session:
+        if (await get_setting(session, "caldav_notify", "1")) not in _TRUE:
+            return
+    who = sender_name or chat_name or "Собеседник"
+    lines = [
+        f"📌 {_esc(str(e.get('title', '')))} — {_esc(str(e.get('label', '')))}"
+        for e in events
+    ]
+    text = (
+        f"📅 <b>Создал серию встреч ({len(events)})</b>\n\n"
+        f"{_esc(who)} попросил серию встреч:\n" + "\n".join(lines)
+    )
+    try:
+        await bot.send_message(owner_id, text)
+        await _log_notification("meeting_series_created", None)
+    except Exception as e:  # noqa: BLE001
+        log.error("notify_series_created failed: %s", e)
+
+
 async def notify_meetings_cancelled(
     cancelled: list[dict],
     rescheduled: Optional[list[dict]] = None,

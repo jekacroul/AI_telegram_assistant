@@ -48,11 +48,15 @@ _PROPOSING_KEYWORDS = (
     "созвонимся", "созвон", "позвоним",
     "погуляем", "погулять", "гулять", "прогуляемся",
     "сходим", "пройдёмся", "пройдемся",
-    "увидимся", "повидаемся",
+    "увидимся", "повидаемся", "видеться", "видимся",
     "пойдём", "пойдем",
     "let's meet", "lets meet",
     "как насчёт", "как насчет",
 )
+
+
+_SERIES_MARKERS = ("каждый день", "ежедневно", "по будням", "каждый будний день")
+_WORKDAYS_ONLY_MARKERS = ("рабочий день", "будний день", "по будням")
 _CALL_HINT_WORDS = ("звон", "созвон", "call")
 
 log = logging.getLogger(__name__)
@@ -744,4 +748,224 @@ async def process_cancellation(
         }
     except Exception:  # noqa: BLE001
         log.exception("process_cancellation failed")
+        return None
+
+
+def _has_series_phrase(text: str) -> bool:
+    if not text:
+        return False
+    low = text.lower()
+    return any(p in low for p in _SERIES_MARKERS)
+
+
+def _resolve_series_end(text: str, today: "date") -> Optional["date"]:
+    """Find the closing date of a recurring proposal.
+
+    Recognised: "до конца недели", "до конца месяца", "на этой неделе",
+    "до пятницы", "до 25 числа", "до 25 мая", "до завтра". Returns None
+    when no closing hint is present (caller defaults to one week ahead)."""
+    if not text:
+        return None
+    low = text.lower()
+    if "до конца недели" in low or "конца недели" in low:
+        days_to_sunday = (6 - today.weekday()) % 7
+        return today + timedelta(days=days_to_sunday or 7)
+    if "до конца месяца" in low or "конца месяца" in low:
+        from calendar import monthrange
+        _, last_day = monthrange(today.year, today.month)
+        return today.replace(day=last_day)
+    if "на этой неделе" in low or "этой неделе" in low:
+        days_to_sunday = (6 - today.weekday()) % 7
+        return today + timedelta(days=days_to_sunday or 7)
+    if "до завтра" in low:
+        return today + timedelta(days=1)
+    m = re.search(
+        r"\bдо\s+(понедельник\w*|вторник\w*|сред\w*|четверг\w*|"
+        r"пятниц\w*|суббот\w*|воскресень\w*)",
+        low,
+    )
+    if m:
+        target = matched_day_index(m.group(1))
+        if target is not None:
+            days_ahead = (target - today.weekday()) % 7
+            return today + timedelta(days=days_ahead or 7)
+    m = re.search(r"\bдо\s+(.+?)(?:[.,!?]|$)", low)
+    if m:
+        spec = _parse_specific_date(m.group(1), today)
+        if spec:
+            return spec
+    return None
+
+
+def _series_dates(text: str, now: datetime) -> list:
+    """Build the list of dates for the proposed series. Starts today (or
+    tomorrow when the workday has already ended), runs to the resolved
+    end date, and skips weekends when the message says "по будням" /
+    "рабочий день"."""
+    today = now.date()
+    end = _resolve_series_end(text, today)
+    if end is None:
+        end = today + timedelta(days=6)
+    if end < today:
+        return []
+
+    work_end = calendar_engine.work_end or 20
+    start_date = today
+    # If the workday is essentially over today, start the series tomorrow.
+    if now.hour >= work_end:
+        start_date = today + timedelta(days=1)
+
+    low = text.lower()
+    skip_weekends = any(p in low for p in _WORKDAYS_ONLY_MARKERS)
+
+    dates: list = []
+    d = start_date
+    while d <= end:
+        if not (skip_weekends and d.weekday() >= 5):
+            dates.append(d)
+        d += timedelta(days=1)
+    return dates
+
+
+async def _pick_first_free_slot_on(d: "date") -> Optional[datetime]:
+    """First free slot of given length within the engine's working hours
+    on the given date. Returns None when nothing fits."""
+    work_start = calendar_engine.work_start or 9
+    work_end = calendar_engine.work_end or 20
+    duration = max(15, int(calendar_engine.slot_duration or 60))
+    now = datetime.now()
+
+    day_start = datetime.combine(d, time(work_start, 0))
+    day_end = datetime.combine(d, time(work_end, 0))
+
+    cursor = day_start
+    if cursor < now:
+        cursor = (
+            now.replace(minute=0, second=0, microsecond=0)
+            + timedelta(hours=1)
+        )
+        if cursor.date() != d:
+            return None
+        if cursor < day_start:
+            cursor = day_start
+
+    events = await calendar_engine.get_events(
+        day_start, day_end + timedelta(minutes=duration)
+    )
+
+    while cursor + timedelta(minutes=duration) <= day_end:
+        slot_end = cursor + timedelta(minutes=duration)
+        conflict = any(
+            isinstance(e["start"], datetime)
+            and isinstance(e["end"], datetime)
+            and not (slot_end <= e["start"] or cursor >= e["end"])
+            for e in events
+        )
+        if not conflict:
+            return cursor
+        cursor += timedelta(minutes=30)
+    return None
+
+
+async def process_series_proposal(
+    chat_id: int, sender_name: str, incoming_text: str
+) -> Optional[dict]:
+    """Create a recurring series of meetings — one per day in the resolved
+    range — when the message proposes "каждый день / до конца недели /
+    по будням" and shows a proposing verb. Skipped on cancel phrases so
+    "отмени каждый день" never accidentally books anything.
+    """
+    if not calendar_engine.is_connected:
+        return None
+    if not _has_series_phrase(incoming_text):
+        return None
+    if _has_cancel_phrase(incoming_text):
+        return None
+    low = incoming_text.lower()
+    if not any(kw in low for kw in _PROPOSING_KEYWORDS):
+        return None
+    try:
+        now = datetime.now()
+        dates = _series_dates(incoming_text, now)
+        if not dates:
+            return None
+        requested_time = extract_requested_time(low)
+        duration = max(15, int(calendar_engine.slot_duration or 60))
+        meeting_type = (
+            "call"
+            if any(w in low for w in _CALL_HINT_WORDS)
+            else "meeting"
+        )
+        title = _event_title(meeting_type, sender_name)
+
+        created: list[dict] = []
+        for d in dates:
+            if requested_time is not None:
+                h, m = requested_time
+                start = datetime.combine(d, time(h, m))
+                if start <= now:
+                    continue
+                # Conflict check.
+                window = await calendar_engine.get_events(
+                    start - timedelta(hours=3),
+                    start + timedelta(minutes=duration, hours=3),
+                )
+                conflict = any(
+                    isinstance(e["start"], datetime)
+                    and isinstance(e["end"], datetime)
+                    and not (
+                        start + timedelta(minutes=duration) <= e["start"]
+                        or start >= e["end"]
+                    )
+                    for e in window
+                )
+                if conflict:
+                    continue
+            else:
+                slot = await _pick_first_free_slot_on(d)
+                if slot is None:
+                    continue
+                start = slot
+            end = start + timedelta(minutes=duration)
+            uid = await calendar_engine.create_event(
+                title=title,
+                start=start,
+                end=end,
+                description="Серия встреч, создана AI-ассистентом.",
+            )
+            if not uid:
+                continue
+            async with SessionLocal() as session:
+                session.add(
+                    CreatedMeeting(
+                        chat_id=chat_id,
+                        calendar_uid=uid,
+                        title=title,
+                        start_time=start,
+                        end_time=end,
+                        created_by="auto",
+                    )
+                )
+                await session.commit()
+            info = {
+                "uid": uid,
+                "title": title,
+                "start": start,
+                "end": end,
+                "label": _slot_label(start, end),
+            }
+            created.append(info)
+            _remember_action(chat_id, "created", info)
+
+        if not created:
+            return None
+        log.info(
+            "created series of %d meeting(s) for chat %s", len(created), chat_id
+        )
+        return {
+            "created": created,
+            "sender_name": sender_name,
+        }
+    except Exception:  # noqa: BLE001
+        log.exception("process_series_proposal failed")
         return None

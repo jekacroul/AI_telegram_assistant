@@ -781,16 +781,35 @@ class TelegramService:
                 await self._maybe_reanalyze(chat_id=chat_id)
                 return
 
-            # Calendar: a short "да / в среду" may confirm a meeting the bot
-            # proposed earlier — turn it into a real event and notify the owner.
+            # Calendar: handle a recurring proposal first ("каждый день до
+            # конца недели"), so a single confirmation flow doesn't also
+            # try to create a one-off at the same time.
+            series_created = False
             try:
-                event = await meeting_flow.process_incoming_confirmation(
+                series = await meeting_flow.process_series_proposal(
                     chat_id, sender_name, reply_input_text
                 )
-                if event:
-                    await admin_bot.notify_meeting_created(event, chat_name)
+                if series and series.get("created"):
+                    series_created = True
+                    await admin_bot.notify_series_created(
+                        series["created"],
+                        chat_name=chat_name,
+                        sender_name=sender_name,
+                    )
             except Exception:  # noqa: BLE001
-                log.exception("meeting confirmation flow failed")
+                log.exception("meeting series flow failed")
+
+            # Calendar: a short "да / в среду" may confirm a meeting the bot
+            # proposed earlier — turn it into a real event and notify the owner.
+            if not series_created:
+                try:
+                    event = await meeting_flow.process_incoming_confirmation(
+                        chat_id, sender_name, reply_input_text
+                    )
+                    if event:
+                        await admin_bot.notify_meeting_created(event, chat_name)
+                except Exception:  # noqa: BLE001
+                    log.exception("meeting confirmation flow failed")
 
             # Calendar: an "отмени встречи" request actually deletes the
             # assistant-created events from the calendar (and drops any open
