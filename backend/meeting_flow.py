@@ -406,7 +406,15 @@ async def process_incoming_confirmation(
         duration = max(15, int(calendar_engine.slot_duration or 60))
         end = start + timedelta(minutes=duration)
 
-        # Don't book over an existing event.
+        # Don't book over an event we already created locally — iCloud may
+        # not have surfaced it on the read side yet.
+        if await _has_overlapping_created_meeting(start, end):
+            log.info(
+                "confirmation: already have a local meeting at %s; skipping",
+                start,
+            )
+            return None
+        # Don't book over an existing event on the calendar either.
         window = await calendar_engine.get_events(
             start - timedelta(hours=3), end + timedelta(hours=3)
         )
@@ -562,6 +570,26 @@ def _resolve_cancel_scope(text: str, now: datetime) -> dict:
     # for this chat. In practice the contact is asking to drop the meeting
     # currently being negotiated, not random other days.
     return {"start": now, "end": horizon, "time": requested}
+
+
+async def _has_overlapping_created_meeting(
+    start: datetime, end: datetime
+) -> bool:
+    """True when an assistant-created meeting already overlaps the given
+    window. Used as a local safety net so we don't book a duplicate while
+    iCloud has not yet finished propagating a previous PUT."""
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(
+                select(CreatedMeeting)
+                .where(
+                    CreatedMeeting.start_time < end,
+                    CreatedMeeting.end_time > start,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    return row is not None
 
 
 async def _cancel_pending_for_chat(chat_id: int) -> None:
@@ -853,15 +881,32 @@ async def _pick_first_free_slot_on(d: "date") -> Optional[datetime]:
         day_start, day_end + timedelta(minutes=duration)
     )
 
+    # Local assistant-created meetings on this day — used to avoid handing
+    # out a slot that already has a pending iCloud write.
+    async with SessionLocal() as session:
+        local_rows = (
+            await session.execute(
+                select(CreatedMeeting).where(
+                    CreatedMeeting.start_time >= day_start,
+                    CreatedMeeting.start_time < day_end + timedelta(days=1),
+                )
+            )
+        ).scalars().all()
+    local_intervals = [(r.start_time, r.end_time) for r in local_rows]
+
     while cursor + timedelta(minutes=duration) <= day_end:
         slot_end = cursor + timedelta(minutes=duration)
-        conflict = any(
+        conflict_remote = any(
             isinstance(e["start"], datetime)
             and isinstance(e["end"], datetime)
             and not (slot_end <= e["start"] or cursor >= e["end"])
             for e in events
         )
-        if not conflict:
+        conflict_local = any(
+            not (slot_end <= s or cursor >= e)
+            for s, e in local_intervals
+        )
+        if not conflict_remote and not conflict_local:
             return cursor
         cursor += timedelta(minutes=30)
     return None
@@ -905,17 +950,23 @@ async def process_series_proposal(
                 start = datetime.combine(d, time(h, m))
                 if start <= now:
                     continue
-                # Conflict check.
+                end_candidate = start + timedelta(minutes=duration)
+                # Skip if we already booked this slot locally — guards
+                # against duplicate creation on a re-issued request.
+                if await _has_overlapping_created_meeting(start, end_candidate):
+                    log.info(
+                        "series: slot %s already booked locally; skip", start
+                    )
+                    continue
                 window = await calendar_engine.get_events(
                     start - timedelta(hours=3),
-                    start + timedelta(minutes=duration, hours=3),
+                    end_candidate + timedelta(hours=3),
                 )
                 conflict = any(
                     isinstance(e["start"], datetime)
                     and isinstance(e["end"], datetime)
                     and not (
-                        start + timedelta(minutes=duration) <= e["start"]
-                        or start >= e["end"]
+                        end_candidate <= e["start"] or start >= e["end"]
                     )
                     for e in window
                 )
@@ -926,6 +977,14 @@ async def process_series_proposal(
                 if slot is None:
                     continue
                 start = slot
+                if await _has_overlapping_created_meeting(
+                    start, start + timedelta(minutes=duration)
+                ):
+                    log.info(
+                        "series: picked slot %s already booked locally; skip",
+                        start,
+                    )
+                    continue
             end = start + timedelta(minutes=duration)
             uid = await calendar_engine.create_event(
                 title=title,
@@ -962,6 +1021,26 @@ async def process_series_proposal(
         log.info(
             "created series of %d meeting(s) for chat %s", len(created), chat_id
         )
+        # Diagnostic: read back the calendar over the series range and log
+        # how many of our writes the server actually surfaces. A persistent
+        # mismatch points at iCloud silently dropping events.
+        try:
+            first = created[0]["start"]
+            last = created[-1]["end"]
+            visible = await calendar_engine.get_events(
+                first - timedelta(minutes=1), last + timedelta(minutes=1)
+            )
+            visible_uids = {e.get("uid") for e in visible if e.get("uid")}
+            missing = [c["uid"] for c in created if c["uid"] not in visible_uids]
+            log.info(
+                "series verification: created=%d, visible on server=%d, "
+                "missing=%s",
+                len(created),
+                len(visible_uids & {c["uid"] for c in created}),
+                missing,
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("series verification readback failed")
         return {
             "created": created,
             "sender_name": sender_name,
