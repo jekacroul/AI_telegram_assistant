@@ -933,7 +933,16 @@ async def process_series_proposal(
         now = datetime.now()
         dates = _series_dates(incoming_text, now)
         if not dates:
+            log.info(
+                "series: trigger matched but no dates resolved for chat %s",
+                chat_id,
+            )
             return None
+        log.info(
+            "series: chat=%s candidate dates=%s",
+            chat_id,
+            [d.isoformat() for d in dates],
+        )
         requested_time = extract_requested_time(low)
         duration = max(15, int(calendar_engine.slot_duration or 60))
         meeting_type = (
@@ -1017,6 +1026,13 @@ async def process_series_proposal(
             _remember_action(chat_id, "created", info)
 
         if not created:
+            log.warning(
+                "series: trigger matched and %d candidate date(s) resolved, "
+                "but nothing was booked — every slot was already taken "
+                "(locally or on the calendar) for chat %s",
+                len(dates),
+                chat_id,
+            )
             return None
         log.info(
             "created series of %d meeting(s) for chat %s", len(created), chat_id
