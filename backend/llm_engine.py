@@ -85,19 +85,33 @@ _MONTHS_RU_GEN = [
 
 def _current_date_block() -> str:
     """A short, explicit anchor for the model: today's weekday, date and
-    local time. The model needs this to interpret relative references like
-    "сегодня", "завтра", "до конца недели", "в пятницу"."""
+    local time. The block reads as a structured fact sheet with concrete
+    Q/A hints so the model cannot drift off and invent a date when asked
+    a simple "какое сегодня число"."""
     from datetime import datetime
 
     now = datetime.now()
+    weekday = _DAYS_RU_FULL[now.weekday()]
+    month_name = _MONTHS_RU_GEN[now.month - 1]
     return (
-        "Текущая дата и время: "
-        f"{_DAYS_RU_FULL[now.weekday()]}, "
-        f"{now.day} {_MONTHS_RU_GEN[now.month - 1]} {now.year} г., "
-        f"{now.strftime('%H:%M')}. "
-        "Опирайся на эту дату, когда собеседник говорит «сегодня», «завтра»,"
+        "=== ТЕКУЩИЕ ДАТА И ВРЕМЯ (источник истины, системные часы) ===\n"
+        f"СЕГОДНЯ: {now.day} {month_name} {now.year} г.,"
+        f" {weekday}, {now.strftime('%H:%M')}.\n"
+        f"• Число: {now.day}\n"
+        f"• Месяц: {month_name} ({now.month:02d})\n"
+        f"• Год: {now.year}\n"
+        f"• День недели: {weekday}\n"
+        f"• Время: {now.strftime('%H:%M')}\n\n"
+        "Когда собеседник задаёт прямой вопрос про дату/время — отвечай"
+        " именно этими значениями, не выдумывай:\n"
+        f"  «какое сегодня число / какая дата» → «{now.day} {month_name}»\n"
+        f"  «какой сегодня день недели» → «{weekday}»\n"
+        f"  «сколько сейчас времени» → «{now.strftime('%H:%M')}»\n"
+        "Эти же значения используй для интерпретации «сегодня», «завтра»,"
         " «послезавтра», «в пятницу», «до конца недели», «на этой неделе»"
-        " и т.п. — считай дни от неё, а не выдумывай.\n"
+        " — считай дни от них. Категорически нельзя подставлять числа"
+        " из старой переписки или из памяти модели.\n"
+        "================================================================\n"
     )
 
 
