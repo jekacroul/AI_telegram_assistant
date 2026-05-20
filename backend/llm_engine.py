@@ -504,7 +504,9 @@ class LLMClient:
             rag_context=rag_context,
             summary=summary,
         )
-        await self._inject_calendar_context(messages, incoming_text)
+        await self._inject_calendar_context(
+            messages, incoming_text, skip=bool(extra_system_context)
+        )
         if (
             extra_system_context
             and messages
@@ -560,14 +562,19 @@ class LLMClient:
 
     @staticmethod
     async def _inject_calendar_context(
-        messages: list[dict], incoming_text: str
+        messages: list[dict],
+        incoming_text: str,
+        skip: bool = False,
     ) -> None:
         """When the incoming message asks about availability or a meeting,
         append the real state of the calendar (today's and tomorrow's
         existing events plus the closest free slots) to the system prompt so
-        the model answers from facts instead of guessing. Silently does
-        nothing when the calendar is not connected or the message is not
-        about availability."""
+        the model answers from facts instead of guessing. Skipped when the
+        caller already has an authoritative action memo to inject — iCloud
+        reads can lag behind a just-performed create/cancel and produce a
+        contradictory snapshot."""
+        if skip:
+            return
         try:
             from datetime import datetime, timedelta
 
