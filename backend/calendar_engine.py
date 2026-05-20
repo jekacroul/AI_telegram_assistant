@@ -319,15 +319,18 @@ class CalendarEngine:
     ) -> None:
         from icalendar import Calendar, Event
 
-        # iCloud silently drops events whose DTSTART has no timezone (the
-        # standard calls it "floating time" but Apple treats it as invalid
-        # for display). Attach the local system timezone so start/end are
-        # serialised with an explicit TZID instead.
+        # Convert start/end to UTC before serialising. With a TZID parameter
+        # iCloud also requires a matching VTIMEZONE block in the calendar
+        # payload, and without it future-day events are silently dropped
+        # from the UI. UTC (the "Z" suffix) has no such requirement —
+        # iCloud renders the event in the viewer's local timezone.
         local_tz = datetime.now().astimezone().tzinfo
         if start.tzinfo is None:
             start = start.replace(tzinfo=local_tz)
         if end.tzinfo is None:
             end = end.replace(tzinfo=local_tz)
+        start_utc = start.astimezone(timezone.utc)
+        end_utc = end.astimezone(timezone.utc)
         now_utc = datetime.now(timezone.utc)
 
         cal = Calendar()
@@ -335,14 +338,17 @@ class CalendarEngine:
         cal.add("version", "2.0")
         event = Event()
         event.add("summary", title)
-        event.add("dtstart", start)
-        event.add("dtend", end)
-        # DTSTAMP / CREATED / LAST-MODIFIED are required by RFC 5545; without
-        # them the caldav library auto-injects DTSTAMP and warns about a
-        # non-compliant server.
+        event.add("dtstart", start_utc)
+        event.add("dtend", end_utc)
+        # DTSTAMP / CREATED / LAST-MODIFIED are required by RFC 5545.
         event.add("dtstamp", now_utc)
         event.add("created", now_utc)
         event.add("last-modified", now_utc)
+        # SEQUENCE / STATUS / TRANSP make the event a fully-formed busy
+        # block that iCloud accepts without quirks.
+        event.add("sequence", 0)
+        event.add("status", "CONFIRMED")
+        event.add("transp", "OPAQUE")
         event.add("description", description)
         if location:
             event.add("location", location)
