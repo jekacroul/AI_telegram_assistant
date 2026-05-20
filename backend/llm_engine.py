@@ -73,6 +73,34 @@ SYSTEM_TEMPLATE = (
 )
 
 
+_DAYS_RU_FULL = [
+    "Понедельник", "Вторник", "Среда", "Четверг",
+    "Пятница", "Суббота", "Воскресенье",
+]
+_MONTHS_RU_GEN = [
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+]
+
+
+def _current_date_block() -> str:
+    """A short, explicit anchor for the model: today's weekday, date and
+    local time. The model needs this to interpret relative references like
+    "сегодня", "завтра", "до конца недели", "в пятницу"."""
+    from datetime import datetime
+
+    now = datetime.now()
+    return (
+        "Текущая дата и время: "
+        f"{_DAYS_RU_FULL[now.weekday()]}, "
+        f"{now.day} {_MONTHS_RU_GEN[now.month - 1]} {now.year} г., "
+        f"{now.strftime('%H:%M')}. "
+        "Опирайся на эту дату, когда собеседник говорит «сегодня», «завтра»,"
+        " «послезавтра», «в пятницу», «до конца недели», «на этой неделе»"
+        " и т.п. — считай дни от неё, а не выдумывай.\n"
+    )
+
+
 SUMMARY_SYSTEM = (
     "Ты ведёшь краткое саммари своей личной переписки в Telegram. Тебе"
     " дают текущее саммари и новые сообщения. Верни обновлённое саммари —"
@@ -141,6 +169,7 @@ def build_system_prompt(
         rag_block=rag_block,
         summary_block=summary_block,
     )
+    base = _current_date_block() + base
     if is_voice:
         voice_note = (
             "\nСобеседник отправил голосовое сообщение."
