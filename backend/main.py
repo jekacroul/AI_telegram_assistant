@@ -38,6 +38,7 @@ from .bot import telegram_service
 from .config import ROOT_DIR, settings
 from .logging_setup import setup_logging
 from .database import (
+    CreatedMeeting,
     DatasetBuild,
     DialogBackup,
     DialogBackupMessage,
@@ -87,6 +88,13 @@ from .replication import (
 from .llm_engine import LLMUnavailableError, get_client
 from .quality_filter import is_good_response
 from .rag_engine import EMBED_MODEL_NAME, get_rag_context, rag_engine
+from . import meeting_detector
+from .calendar_engine import CalendarEngine, calendar_engine
+from .caldav_config import (
+    get_caldav_config,
+    refresh_calendar_connection,
+    save_caldav_config,
+)
 from .notifications import SETTING_LAST_PRIVATE_CHAT_ID
 from .schedule import (
     DEFAULT_SCHEDULE_DAYS,
@@ -222,6 +230,8 @@ async def lifespan(app: FastAPI):
     if settings.llama_server_auto_start and settings.llama_base_model_gguf:
         asyncio.create_task(_auto_start_llama_server())
     asyncio.create_task(_startup_rag_index())
+    asyncio.create_task(_startup_calendar_connect())
+    await _startup_load_meeting_keywords()
     yield
     await replication_scheduler.stop()
     await dialog_backup_scheduler.stop()
@@ -336,6 +346,31 @@ async def _startup_rag_index() -> None:
         log.exception("RAG startup indexing failed")
 
 
+async def _startup_calendar_connect() -> None:
+    """Connect to the CalDAV server at startup when the integration is on."""
+    try:
+        connected = await refresh_calendar_connection()
+        if connected:
+            log.info("CalDAV: подключено при старте")
+    except Exception:  # noqa: BLE001
+        log.exception("CalDAV startup connect failed")
+
+
+async def _startup_load_meeting_keywords() -> None:
+    """Push user-defined meeting keywords into the in-memory cache."""
+    try:
+        async with SessionLocal() as session:
+            raw = await get_setting(session, "meeting_phrases", "[]")
+        try:
+            phrases = json.loads(raw)
+        except (ValueError, TypeError):
+            phrases = []
+        if isinstance(phrases, list):
+            meeting_detector.set_user_keywords(phrases)
+    except Exception:  # noqa: BLE001
+        log.exception("loading meeting_phrases failed")
+
+
 app = FastAPI(title="Telegram Local AI Assistant", lifespan=lifespan)
 app.mount("/media", StaticFiles(directory=str(settings.media_dir)), name="media")
 app.add_middleware(
@@ -418,6 +453,7 @@ class SettingsIn(BaseModel):
     summary_enabled: Optional[bool] = None
     reply_settle_seconds: Optional[int] = Field(default=None, ge=0, le=120)
     reply_history_limit: Optional[int] = Field(default=None, ge=2, le=80)
+    reply_temperatures: Optional[list[float]] = None
 
 
 class QuickReplyIn(BaseModel):
@@ -553,6 +589,19 @@ async def save_settings(
         await set_setting(
             session, "reply_history_limit", str(payload.reply_history_limit)
         )
+    if payload.reply_temperatures is not None:
+        temps = payload.reply_temperatures
+        if len(temps) != 3 or any(
+            not isinstance(t, (int, float)) or t < 0 or t > 2 for t in temps
+        ):
+            raise HTTPException(
+                400, "reply_temperatures must be 3 numbers in [0, 2]"
+            )
+        await set_setting(
+            session,
+            "reply_temperatures",
+            json.dumps([float(t) for t in temps]),
+        )
     return {"ok": True}
 
 
@@ -587,6 +636,18 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
         )
     except ValueError:
         reply_history_limit = 20
+    try:
+        temps_raw = await get_setting(
+            session, "reply_temperatures", "[0.7, 0.85, 1.0]"
+        )
+        reply_temperatures = json.loads(temps_raw)
+        if (
+            not isinstance(reply_temperatures, list)
+            or len(reply_temperatures) != 3
+        ):
+            reply_temperatures = [0.7, 0.85, 1.0]
+    except (ValueError, TypeError):
+        reply_temperatures = [0.7, 0.85, 1.0]
     return {
         "auto_reply": auto_reply,
         "monitored_chats": monitored,
@@ -598,6 +659,7 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> dict:
         "summary_enabled": summary_enabled,
         "reply_settle_seconds": reply_settle_seconds,
         "reply_history_limit": reply_history_limit,
+        "reply_temperatures": reply_temperatures,
     }
 
 
@@ -1848,6 +1910,276 @@ async def save_rag_settings(
             str(payload.cross_chat_min_similarity),
         )
     return await _rag_settings_dict(session)
+
+
+# --------------------------------------------------------------------------
+# Calendar (CalDAV)
+# --------------------------------------------------------------------------
+def _event_to_dict(event: dict) -> dict:
+    start = event.get("start")
+    end = event.get("end")
+    return {
+        "title": event.get("title", ""),
+        "uid": event.get("uid", ""),
+        "start": start.isoformat() if hasattr(start, "isoformat") else None,
+        "end": end.isoformat() if hasattr(end, "isoformat") else None,
+    }
+
+
+def _relative_label(start: datetime) -> str:
+    """Human-readable relative time for an upcoming event ('через 2 часа')."""
+    delta = start - datetime.now()
+    secs = delta.total_seconds()
+    if secs < 0:
+        return "сейчас"
+    if secs < 3600:
+        return f"через {max(1, int(secs // 60))} мин"
+    if secs < 86400:
+        return f"через {int(secs // 3600)} ч"
+    days = int(secs // 86400)
+    return f"через {days} дн" if days > 1 else "завтра"
+
+
+@app.get("/api/calendar/status")
+async def calendar_status() -> dict:
+    status = await calendar_engine.get_status()
+    next_event = status.get("next_event")
+    next_payload = None
+    if next_event:
+        start = next_event.get("start")
+        next_payload = {
+            "title": next_event.get("title", ""),
+            "start": start.strftime("%H:%M") if hasattr(start, "strftime") else "",
+        }
+    return {
+        "connected": status.get("connected", False),
+        "calendar": status.get("calendar"),
+        "events_today": status.get("events_today", 0),
+        "next_event": next_payload,
+        "error": status.get("error", ""),
+    }
+
+
+@app.get("/api/calendar/events")
+async def calendar_events(days: int = 7) -> list[dict]:
+    days = max(1, min(60, days))
+    start = datetime.now()
+    events = await calendar_engine.get_events(
+        start, start + timedelta(days=days)
+    )
+    return [_event_to_dict(e) for e in events]
+
+
+@app.get("/api/calendar/free-slots")
+async def calendar_free_slots(days: int = 7, duration: int = 60) -> list[dict]:
+    days = max(1, min(60, days))
+    duration = max(15, min(240, duration))
+    slots = await calendar_engine.get_free_slots(
+        days_ahead=days, slot_duration_minutes=duration
+    )
+    return [
+        {
+            "start": s["start"].isoformat(),
+            "end": s["end"].isoformat(),
+            "label": s["label"],
+        }
+        for s in slots
+    ]
+
+
+@app.get("/api/calendar/upcoming")
+async def calendar_upcoming() -> list[dict]:
+    events = await calendar_engine.get_events(
+        datetime.now(), datetime.now() + timedelta(days=30)
+    )
+    out: list[dict] = []
+    for e in events[:5]:
+        d = _event_to_dict(e)
+        d["relative"] = _relative_label(e["start"])
+        out.append(d)
+    return out
+
+
+@app.post("/api/calendar/event")
+async def calendar_create_event(
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    if not calendar_engine.is_connected:
+        raise HTTPException(400, "Календарь не подключён")
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title is required")
+    try:
+        start = datetime.fromisoformat(payload["start"])
+        end = datetime.fromisoformat(payload["end"])
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, "start/end must be ISO datetimes") from exc
+    if start.tzinfo is not None:
+        start = start.replace(tzinfo=None)
+    if end.tzinfo is not None:
+        end = end.replace(tzinfo=None)
+    uid = await calendar_engine.create_event(
+        title=title,
+        start=start,
+        end=end,
+        description=payload.get("description", ""),
+        location=payload.get("location", ""),
+    )
+    if not uid:
+        raise HTTPException(500, "Не удалось создать событие")
+    session.add(
+        CreatedMeeting(
+            chat_id=0,
+            calendar_uid=uid,
+            title=title,
+            start_time=start,
+            end_time=end,
+            created_by="manual",
+        )
+    )
+    await session.commit()
+    return {"ok": True, "uid": uid}
+
+
+@app.post("/api/calendar/connect-test")
+async def calendar_connect_test() -> dict:
+    """Test the CalDAV connection using the credentials from the environment."""
+    probe = CalendarEngine()  # initialised from .env credentials
+    ok = await probe.connect()
+    if not ok:
+        return {"success": False, "error": probe.last_error}
+    today_start = datetime.now().replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    events = await probe.get_events(
+        today_start, today_start + timedelta(days=1)
+    )
+    return {
+        "success": True,
+        "calendar_name": probe._calendar_display_name(),
+        "events_count": len(events),
+    }
+
+
+@app.get("/api/settings/calendar")
+async def get_calendar_settings(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    cfg = await get_caldav_config(session)
+    status = await calendar_engine.get_status()
+    # Credentials live in .env — expose only non-sensitive context.
+    cfg["caldav_has_password"] = bool(cfg.pop("caldav_password", ""))
+    cfg["connected"] = status.get("connected", False)
+    cfg["calendar"] = status.get("calendar")
+    return cfg
+
+
+@app.post("/api/settings/calendar")
+async def save_calendar_settings(
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await save_caldav_config(session, payload)
+    connected = await refresh_calendar_connection()
+    cfg = await get_caldav_config(session)
+    cfg["caldav_has_password"] = bool(cfg.pop("caldav_password", ""))
+    cfg["connected"] = connected
+    return cfg
+
+
+# --------------------------------------------------------------------------
+# Meeting keyword phrases (manual + auto-suggested missed messages)
+# --------------------------------------------------------------------------
+@app.get("/api/meeting/keywords")
+async def list_meeting_keywords(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    raw = await get_setting(session, "meeting_phrases", "[]")
+    try:
+        user = json.loads(raw)
+    except (ValueError, TypeError):
+        user = []
+    if not isinstance(user, list):
+        user = []
+    return {
+        "builtin": meeting_detector.get_builtin_keywords(),
+        "user": [p for p in user if isinstance(p, str)],
+    }
+
+
+@app.post("/api/meeting/keywords")
+async def save_meeting_keywords(
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    raw_phrases = payload.get("phrases", [])
+    if not isinstance(raw_phrases, list):
+        raise HTTPException(400, "phrases must be a list of strings")
+    cleaned: list[str] = []
+    for p in raw_phrases:
+        if not isinstance(p, str):
+            continue
+        s = p.strip().lower()
+        if s and s not in cleaned and len(s) <= 80:
+            cleaned.append(s)
+    await set_setting(
+        session, "meeting_phrases", json.dumps(cleaned, ensure_ascii=False)
+    )
+    meeting_detector.set_user_keywords(cleaned)
+    return {
+        "builtin": meeting_detector.get_builtin_keywords(),
+        "user": cleaned,
+    }
+
+
+@app.get("/api/meeting/missed-candidates")
+async def list_missed_candidates(
+    limit: int = 20,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Recent incoming messages that mention a clock time but did not
+    trigger meeting intent — likely missed triggers worth promoting to
+    a keyword. The list is computed live from the messages table."""
+    from .meeting_detector import detect_meeting_intent, extract_requested_time
+
+    limit = max(1, min(50, limit))
+    cutoff = datetime.utcnow() - timedelta(days=14)
+    rows = (
+        await session.execute(
+            select(Message)
+            .where(
+                Message.is_mine == False,  # noqa: E712
+                Message.timestamp >= cutoff,
+                Message.deleted == False,  # noqa: E712
+            )
+            .order_by(Message.timestamp.desc())
+            .limit(500)
+        )
+    ).scalars().all()
+    candidates: list[dict] = []
+    seen: set[str] = set()
+    for m in rows:
+        text = (m.text or "").strip()
+        if not text or text in seen:
+            continue
+        if extract_requested_time(text) is None:
+            continue
+        if await detect_meeting_intent(text):
+            continue
+        seen.add(text)
+        candidates.append(
+            {
+                "id": m.id,
+                "chat_name": m.chat_name,
+                "sender_name": m.sender_name,
+                "text": text[:200],
+                "timestamp": _iso_utc(m.timestamp),
+            }
+        )
+        if len(candidates) >= limit:
+            break
+    return candidates
 
 
 @app.get("/api/style/profile")

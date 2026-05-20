@@ -228,6 +228,33 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  calendarStatus: () => request("/api/calendar/status"),
+  calendarEvents: (days = 7) =>
+    request(`/api/calendar/events?days=${days}`),
+  calendarFreeSlots: (days = 7, duration = 60) =>
+    request(`/api/calendar/free-slots?days=${days}&duration=${duration}`),
+  calendarUpcoming: () => request("/api/calendar/upcoming"),
+  calendarCreateEvent: (data) =>
+    request("/api/calendar/event", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  calendarConnectTest: () =>
+    request("/api/calendar/connect-test", { method: "POST" }),
+  getCalendarSettings: () => request("/api/settings/calendar"),
+  saveCalendarSettings: (data) =>
+    request("/api/settings/calendar", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  meetingKeywords: () => request("/api/meeting/keywords"),
+  saveMeetingKeywords: (phrases) =>
+    request("/api/meeting/keywords", {
+      method: "POST",
+      body: JSON.stringify({ phrases }),
+    }),
+  missedMeetingCandidates: (limit = 20) =>
+    request(`/api/meeting/missed-candidates?limit=${limit}`),
 };
 
 export function streamEvents(path, onEvent) {

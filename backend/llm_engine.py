@@ -73,6 +73,48 @@ SYSTEM_TEMPLATE = (
 )
 
 
+_DAYS_RU_FULL = [
+    "Понедельник", "Вторник", "Среда", "Четверг",
+    "Пятница", "Суббота", "Воскресенье",
+]
+_MONTHS_RU_GEN = [
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+]
+
+
+def _current_date_block() -> str:
+    """A short, explicit anchor for the model: today's weekday, date and
+    local time. The block reads as a structured fact sheet with concrete
+    Q/A hints so the model cannot drift off and invent a date when asked
+    a simple "какое сегодня число"."""
+    from datetime import datetime
+
+    now = datetime.now()
+    weekday = _DAYS_RU_FULL[now.weekday()]
+    month_name = _MONTHS_RU_GEN[now.month - 1]
+    return (
+        "=== ТЕКУЩИЕ ДАТА И ВРЕМЯ (источник истины, системные часы) ===\n"
+        f"СЕГОДНЯ: {now.day} {month_name} {now.year} г.,"
+        f" {weekday}, {now.strftime('%H:%M')}.\n"
+        f"• Число: {now.day}\n"
+        f"• Месяц: {month_name} ({now.month:02d})\n"
+        f"• Год: {now.year}\n"
+        f"• День недели: {weekday}\n"
+        f"• Время: {now.strftime('%H:%M')}\n\n"
+        "Когда собеседник задаёт прямой вопрос про дату/время — отвечай"
+        " именно этими значениями, не выдумывай:\n"
+        f"  «какое сегодня число / какая дата» → «{now.day} {month_name}»\n"
+        f"  «какой сегодня день недели» → «{weekday}»\n"
+        f"  «сколько сейчас времени» → «{now.strftime('%H:%M')}»\n"
+        "Эти же значения используй для интерпретации «сегодня», «завтра»,"
+        " «послезавтра», «в пятницу», «до конца недели», «на этой неделе»"
+        " — считай дни от них. Категорически нельзя подставлять числа"
+        " из старой переписки или из памяти модели.\n"
+        "================================================================\n"
+    )
+
+
 SUMMARY_SYSTEM = (
     "Ты ведёшь краткое саммари своей личной переписки в Telegram. Тебе"
     " дают текущее саммари и новые сообщения. Верни обновлённое саммари —"
@@ -141,6 +183,7 @@ def build_system_prompt(
         rag_block=rag_block,
         summary_block=summary_block,
     )
+    base = _current_date_block() + base
     if is_voice:
         voice_note = (
             "\nСобеседник отправил голосовое сообщение."
@@ -490,6 +533,8 @@ class LLMClient:
         is_voice: bool = False,
         rag_context: Optional[str] = None,
         summary: Optional[str] = None,
+        extra_system_context: Optional[str] = None,
+        temperatures: Optional[list[float]] = None,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
         messages = build_chat_messages(
@@ -503,6 +548,15 @@ class LLMClient:
             rag_context=rag_context,
             summary=summary,
         )
+        await self._inject_calendar_context(
+            messages, incoming_text, skip=bool(extra_system_context)
+        )
+        if (
+            extra_system_context
+            and messages
+            and messages[0].get("role") == "system"
+        ):
+            messages[0]["content"] += "\n\n" + extra_system_context
         # Generate 3 variants by sampling the model independently at
         # different temperatures, instead of asking it for a numbered list
         # in a single call — a chat-clone model produces one reply, not a
@@ -511,11 +565,15 @@ class LLMClient:
         # Sampled sequentially (not concurrently): a local single-slot server
         # may return 500 on parallel requests. A small output budget keeps
         # prompt + completion inside the model's context window.
-        temperatures = (0.7, 0.85, 1.0)
+        sample_temps = (
+            tuple(temperatures)
+            if temperatures and len(temperatures) >= 1
+            else (0.7, 0.85, 1.0)
+        )
         variants: list[str] = []
         seen: set[str] = set()
         errors: list[Exception] = []
-        for temp in temperatures:
+        for temp in sample_temps:
             try:
                 raw = await self.generate_chat(
                     messages, temperature=temp, num_predict=REPLY_MAX_TOKENS
@@ -549,6 +607,88 @@ class LLMClient:
         while len(variants) < 3:
             variants.append(variants[-1] if variants else "…")
         return variants[:3]
+
+    @staticmethod
+    async def _inject_calendar_context(
+        messages: list[dict],
+        incoming_text: str,
+        skip: bool = False,
+    ) -> None:
+        """When the incoming message asks about availability or a meeting,
+        append the real state of the calendar (today's and tomorrow's
+        existing events plus the closest free slots) to the system prompt so
+        the model answers from facts instead of guessing. Skipped when the
+        caller already has an authoritative action memo to inject — iCloud
+        reads can lag behind a just-performed create/cancel and produce a
+        contradictory snapshot."""
+        if skip:
+            return
+        try:
+            from datetime import datetime, timedelta
+
+            from .calendar_engine import (
+                MONTHS_RU,
+                calendar_engine,
+            )
+            from .meeting_detector import detect_meeting_intent
+
+            if not calendar_engine.is_connected:
+                return
+            intent = await detect_meeting_intent(incoming_text)
+            if not intent or not intent.has_intent:
+                return
+
+            today = datetime.now().replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            tomorrow = today + timedelta(days=1)
+            day_after = today + timedelta(days=2)
+            events = await calendar_engine.get_events(today, day_after)
+            slots = await calendar_engine.get_free_slots()
+
+            def _fmt_day(d: datetime) -> str:
+                return f"{d.day} {MONTHS_RU[d.month - 1]}"
+
+            def _fmt_event(e: dict) -> str:
+                return (
+                    f"- {e['start'].strftime('%H:%M')}"
+                    f"–{e['end'].strftime('%H:%M')}: {e['title']}"
+                )
+
+            today_events = [e for e in events if e["start"].date() == today.date()]
+            tomorrow_events = [
+                e for e in events if e["start"].date() == tomorrow.date()
+            ]
+
+            lines = ["📅 Реальное состояние моего календаря:"]
+            lines.append(f"Сегодня ({_fmt_day(today)}):")
+            if today_events:
+                lines.extend(_fmt_event(e) for e in today_events)
+            else:
+                lines.append("- встреч нет")
+            lines.append(f"Завтра ({_fmt_day(tomorrow)}):")
+            if tomorrow_events:
+                lines.extend(_fmt_event(e) for e in tomorrow_events)
+            else:
+                lines.append("- встреч нет")
+            if slots:
+                lines.append("Ближайшие свободные слоты:")
+                lines.extend(f"- {s['label']}" for s in slots)
+
+            inject = (
+                "\n\nСобеседник спрашивает про моё время или встречу."
+                " Опирайся только на данные ниже — это реальный календарь."
+                " Если он предлагает время, которое уже занято по списку"
+                " событий — честно скажи, что в это время занят, и"
+                " предложи альтернативу из свободных слотов. Не выдумывай"
+                " свободные часы и не игнорируй существующие события.\n"
+                + "\n".join(lines)
+                + "\nОтвечай естественно, как в живом чате, без сухих списков."
+            )
+            if messages and messages[0].get("role") == "system":
+                messages[0]["content"] += inject
+        except Exception:  # noqa: BLE001
+            log.exception("calendar context injection failed")
 
     async def summarize(
         self,

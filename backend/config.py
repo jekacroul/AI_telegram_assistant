@@ -59,6 +59,17 @@ class Settings(BaseSettings):
     media_path: str = Field(default="./media/", alias="MEDIA_PATH")
     owner_chat_id: str = Field(default="", alias="OWNER_CHAT_ID")
     admin_bot_enabled: bool = Field(default=True, alias="ADMIN_BOT_ENABLED")
+    caldav_url: str = Field(
+        default="https://caldav.icloud.com", alias="CALDAV_URL"
+    )
+    caldav_username: str = Field(default="", alias="CALDAV_USERNAME")
+    caldav_password: str = Field(default="", alias="CALDAV_PASSWORD")
+    caldav_enabled: bool = Field(default=False, alias="CALDAV_ENABLED")
+    caldav_calendar_name: str = Field(default="", alias="CALDAV_CALENDAR_NAME")
+    caldav_lookahead_days: int = Field(default=7, alias="CALDAV_LOOKAHEAD_DAYS")
+    caldav_slot_duration: int = Field(default=60, alias="CALDAV_SLOT_DURATION")
+    caldav_work_start: int = Field(default=9, alias="CALDAV_WORK_START")
+    caldav_work_end: int = Field(default=20, alias="CALDAV_WORK_END")
 
     @property
     def display_name(self) -> str:

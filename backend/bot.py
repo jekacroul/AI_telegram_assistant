@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -31,7 +32,7 @@ from aiogram.types import BusinessMessagesDeleted, Message as TgMessage
 from aiogram.types import Update
 from sqlalchemy import select, update
 
-from . import admin_bot
+from . import admin_bot, meeting_flow
 from .config import settings
 from .database import (
     ChatSummary,
@@ -137,6 +138,26 @@ def _coerce_int(value: object, default: int) -> int:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+async def _load_reply_temperatures(session) -> list[float]:
+    """Return the configured per-variant temperatures, falling back to the
+    defaults when the setting is missing or malformed."""
+    raw = await get_setting(session, "reply_temperatures", "[0.7, 0.85, 1.0]")
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return [0.7, 0.85, 1.0]
+    if not isinstance(parsed, list) or len(parsed) != 3:
+        return [0.7, 0.85, 1.0]
+    out: list[float] = []
+    for v in parsed:
+        try:
+            t = float(v)
+        except (TypeError, ValueError):
+            return [0.7, 0.85, 1.0]
+        out.append(max(0.0, min(2.0, t)))
+    return out
 
 
 def _split_reply_messages(text: str) -> list[str]:
@@ -781,6 +802,55 @@ class TelegramService:
                 await self._maybe_reanalyze(chat_id=chat_id)
                 return
 
+            # Calendar: handle a recurring proposal first ("каждый день до
+            # конца недели"), so a single confirmation flow doesn't also
+            # try to create a one-off at the same time.
+            series_created = False
+            try:
+                series = await meeting_flow.process_series_proposal(
+                    chat_id, sender_name, reply_input_text
+                )
+                if series and series.get("created"):
+                    series_created = True
+                    await admin_bot.notify_series_created(
+                        series["created"],
+                        chat_name=chat_name,
+                        sender_name=sender_name,
+                    )
+            except Exception:  # noqa: BLE001
+                log.exception("meeting series flow failed")
+
+            # Calendar: a short "да / в среду" may confirm a meeting the bot
+            # proposed earlier — turn it into a real event and notify the owner.
+            if not series_created:
+                try:
+                    event = await meeting_flow.process_incoming_confirmation(
+                        chat_id, sender_name, reply_input_text
+                    )
+                    if event:
+                        await admin_bot.notify_meeting_created(event, chat_name)
+                except Exception:  # noqa: BLE001
+                    log.exception("meeting confirmation flow failed")
+
+            # Calendar: an "отмени встречи" request actually deletes the
+            # assistant-created events from the calendar (and drops any open
+            # negotiation), instead of the bot only saying it will.
+            try:
+                cancelled = await meeting_flow.process_cancellation(
+                    chat_id, sender_name, reply_input_text
+                )
+                if cancelled and (
+                    cancelled.get("cancelled") or cancelled.get("rescheduled")
+                ):
+                    await admin_bot.notify_meetings_cancelled(
+                        cancelled.get("cancelled", []),
+                        rescheduled=cancelled.get("rescheduled", []),
+                        chat_name=chat_name,
+                        sender_name=sender_name,
+                    )
+            except Exception:  # noqa: BLE001
+                log.exception("meeting cancellation flow failed")
+
             if not should_reply:
                 log.info(
                     "handle_incoming: no reply, should_reply=False "
@@ -934,12 +1004,17 @@ class TelegramService:
             quality_enabled = (
                 await get_setting(session, "quality_filter_enabled", "1")
             ) in ("1", "true", "True")
+            temperatures = await _load_reply_temperatures(session)
             try:
                 rag_context, _ = await get_rag_context(session, text, chat_id)
             except Exception:  # noqa: BLE001
                 log.exception("RAG context retrieval failed; replying without it")
                 rag_context = ""
         client = get_client()
+        # Memo of calendar actions we just performed for this chat — pulled
+        # once so retries keep seeing it.
+        recent_actions = meeting_flow.pop_recent_actions(chat_id)
+        extra_system_context = meeting_flow.format_recent_actions(recent_actions)
         if not quality_enabled:
             variants = await client.generate_reply(
                 incoming_text=text,
@@ -949,6 +1024,8 @@ class TelegramService:
                 is_voice=is_voice,
                 rag_context=rag_context,
                 summary=summary,
+                extra_system_context=extra_system_context,
+                temperatures=temperatures,
             )
             return (variants, "ok") if variants else ([], "no_variants")
         last_reason = "no_variants"
@@ -962,6 +1039,8 @@ class TelegramService:
                 is_voice=is_voice,
                 rag_context=rag_context,
                 summary=summary,
+                extra_system_context=extra_system_context,
+                temperatures=temperatures,
             )
             accepted: list[str] = []
             async with SessionLocal() as session:
@@ -1107,6 +1186,11 @@ class TelegramService:
 
             await self._record_reply(
                 msg_id, chosen, sender_name, chat_id, chat_name
+            )
+            # If the contact asked for a meeting, remember the slots offered
+            # so a later confirmation can be matched to a concrete time.
+            await meeting_flow.maybe_record_pending_meeting(
+                chat_id, msg_id, sender_name, reply_input_text
             )
             await admin_bot.notify_auto_reply(
                 chat_name,
