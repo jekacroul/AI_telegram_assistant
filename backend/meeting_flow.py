@@ -34,7 +34,26 @@ from .meeting_detector import (
     extract_requested_time,
     matched_day_index,
     reschedule_source_date,
+    reschedule_target_date,
 )
+
+
+# A self-contained proposal in one message ("давай встречу в 18", "встретимся
+# в 14 завтра") should create the event directly even without a prior
+# pending negotiation. To avoid booking off random "у меня встреча в 18"
+# mentions, the message must contain one of these proposing markers.
+_PROPOSING_KEYWORDS = (
+    "давай",
+    "встретим", "встрет",
+    "созвонимся", "созвон", "позвоним",
+    "погуляем", "погулять", "гулять", "прогуляемся",
+    "сходим", "пройдёмся", "пройдемся",
+    "увидимся", "повидаемся",
+    "пойдём", "пойдем",
+    "let's meet", "lets meet",
+    "как насчёт", "как насчет",
+)
+_CALL_HINT_WORDS = ("звон", "созвон", "call")
 
 log = logging.getLogger(__name__)
 
@@ -229,12 +248,34 @@ async def process_incoming_confirmation(
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if not pending:
-                return None
-            pending_id = pending.id
-            meeting_type, date_hint, _slots = _decode_proposal(
-                pending.proposed_slots_json
-            )
+            pending_id = pending.id if pending else None
+            if pending is not None:
+                meeting_type, date_hint, _slots = _decode_proposal(
+                    pending.proposed_slots_json
+                )
+            else:
+                # No open negotiation — accept the message as a self-contained
+                # proposal only if it carries a proposing verb (or a reschedule
+                # with an explicit new date). This guards against booking off
+                # bare mentions like "у меня встреча в 18".
+                low = incoming_text.lower()
+                if "перенес" in low:
+                    target = reschedule_target_date(incoming_text)
+                    date_hint = target or ""
+                    meeting_type = "meeting"
+                elif _has_cancel_phrase(incoming_text):
+                    # The cancellation flow runs separately for this message.
+                    # Don't also create something at the named time.
+                    return None
+                elif any(kw in low for kw in _PROPOSING_KEYWORDS):
+                    date_hint = ""
+                    meeting_type = (
+                        "call"
+                        if any(w in low for w in _CALL_HINT_WORDS)
+                        else "meeting"
+                    )
+                else:
+                    return None
 
         now = datetime.now()
         start = _resolve_start(incoming_text, date_hint, hour, minute, now)
