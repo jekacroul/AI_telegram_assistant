@@ -1389,10 +1389,15 @@ async def notify_meeting_created(event: dict, chat_name: str = "") -> None:
 
 
 async def notify_meetings_cancelled(
-    cancelled: list[dict], chat_name: str = "", sender_name: str = ""
+    cancelled: list[dict],
+    rescheduled: Optional[list[dict]] = None,
+    chat_name: str = "",
+    sender_name: str = "",
 ) -> None:
-    """Notify the owner that the assistant deleted one or more events."""
-    if not cancelled:
+    """Notify the owner that the assistant deleted and/or rescheduled events."""
+    cancelled = cancelled or []
+    rescheduled = rescheduled or []
+    if not cancelled and not rescheduled:
         return
     bot, owner_id = await _owner_bot_and_id()
     if not bot or owner_id is None:
@@ -1401,15 +1406,25 @@ async def notify_meetings_cancelled(
         if (await get_setting(session, "caldav_notify", "1")) not in _TRUE:
             return
     who = sender_name or chat_name or "Собеседник"
-    lines = [
-        f"📌 {_esc(str(c.get('title', '')))} — "
-        f"{_esc(str(c.get('label', '')))}"
-        for c in cancelled
-    ]
-    text = (
-        "🗑 <b>Удалил встречи из календаря</b>\n\n"
-        f"{_esc(who)} попросил отменить:\n" + "\n".join(lines)
-    )
+    blocks: list[str] = []
+    if rescheduled:
+        block = ["📅 <b>Перенёс встречи</b>", f"{_esc(who)} попросил перенести:"]
+        for r in rescheduled:
+            block.append(
+                f"📌 {_esc(str(r.get('title', '')))}\n"
+                f"   было: {_esc(str(r.get('old_label', '')))}\n"
+                f"   стало: {_esc(str(r.get('label', '')))}"
+            )
+        blocks.append("\n".join(block))
+    if cancelled:
+        header = "🗑 <b>Также удалил</b>" if rescheduled else "🗑 <b>Удалил встречи из календаря</b>"
+        prefix = "" if rescheduled else f"{_esc(who)} попросил отменить:\n"
+        block = [header, prefix + "\n".join(
+            f"📌 {_esc(str(c.get('title', '')))} — {_esc(str(c.get('label', '')))}"
+            for c in cancelled
+        )]
+        blocks.append("\n".join(b for b in block if b))
+    text = "\n\n".join(blocks)
     try:
         await bot.send_message(owner_id, text)
         await _log_notification("meeting_cancelled", None)

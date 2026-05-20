@@ -490,6 +490,7 @@ class LLMClient:
         is_voice: bool = False,
         rag_context: Optional[str] = None,
         summary: Optional[str] = None,
+        extra_system_context: Optional[str] = None,
     ) -> list[str]:
         effective_name = user_name or settings.user_name
         messages = build_chat_messages(
@@ -504,6 +505,12 @@ class LLMClient:
             summary=summary,
         )
         await self._inject_calendar_context(messages, incoming_text)
+        if (
+            extra_system_context
+            and messages
+            and messages[0].get("role") == "system"
+        ):
+            messages[0]["content"] += "\n\n" + extra_system_context
         # Generate 3 variants by sampling the model independently at
         # different temperatures, instead of asking it for a numbered list
         # in a single call — a chat-clone model produces one reply, not a

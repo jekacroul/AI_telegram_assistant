@@ -799,9 +799,12 @@ class TelegramService:
                 cancelled = await meeting_flow.process_cancellation(
                     chat_id, sender_name, reply_input_text
                 )
-                if cancelled and cancelled.get("cancelled"):
+                if cancelled and (
+                    cancelled.get("cancelled") or cancelled.get("rescheduled")
+                ):
                     await admin_bot.notify_meetings_cancelled(
-                        cancelled["cancelled"],
+                        cancelled.get("cancelled", []),
+                        rescheduled=cancelled.get("rescheduled", []),
                         chat_name=chat_name,
                         sender_name=sender_name,
                     )
@@ -967,6 +970,10 @@ class TelegramService:
                 log.exception("RAG context retrieval failed; replying without it")
                 rag_context = ""
         client = get_client()
+        # Memo of calendar actions we just performed for this chat — pulled
+        # once so retries keep seeing it.
+        recent_actions = meeting_flow.pop_recent_actions(chat_id)
+        extra_system_context = meeting_flow.format_recent_actions(recent_actions)
         if not quality_enabled:
             variants = await client.generate_reply(
                 incoming_text=text,
@@ -976,6 +983,7 @@ class TelegramService:
                 is_voice=is_voice,
                 rag_context=rag_context,
                 summary=summary,
+                extra_system_context=extra_system_context,
             )
             return (variants, "ok") if variants else ([], "no_variants")
         last_reason = "no_variants"
@@ -989,6 +997,7 @@ class TelegramService:
                 is_voice=is_voice,
                 rag_context=rag_context,
                 summary=summary,
+                extra_system_context=extra_system_context,
             )
             accepted: list[str] = []
             async with SessionLocal() as session:

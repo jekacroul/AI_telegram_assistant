@@ -61,6 +61,52 @@ log = logging.getLogger(__name__)
 # no longer matched against incoming times.
 _PENDING_TTL = timedelta(hours=24)
 
+# Short-lived per-chat memory of calendar actions the assistant just
+# performed. The LLM reply for the same incoming message picks it up so
+# the bot can acknowledge the booking instead of re-asking for a time.
+_RECENT_ACTION_TTL = timedelta(minutes=10)
+_recent_actions: dict[int, list[dict]] = {}
+
+
+def _remember_action(chat_id: int, kind: str, payload: dict) -> None:
+    _recent_actions.setdefault(chat_id, []).append(
+        {"kind": kind, "payload": payload, "at": datetime.utcnow()}
+    )
+
+
+def pop_recent_actions(chat_id: int) -> list[dict]:
+    """Return and clear the recent calendar actions for a chat that are
+    still within the TTL. Stale entries are dropped."""
+    items = _recent_actions.pop(chat_id, [])
+    cutoff = datetime.utcnow() - _RECENT_ACTION_TTL
+    return [i for i in items if i["at"] >= cutoff]
+
+
+def format_recent_actions(actions: list[dict]) -> Optional[str]:
+    """Render a per-chat action memo for inclusion in the system prompt."""
+    if not actions:
+        return None
+    lines = ["Только что я выполнил действия в календаре:"]
+    for action in actions:
+        kind = action.get("kind")
+        p = action.get("payload") or {}
+        if kind == "created":
+            lines.append(f"- ✅ Создал встречу: {p.get('label', '')}")
+        elif kind == "cancelled":
+            lines.append(f"- 🗑 Отменил встречу: {p.get('label', '')}")
+        elif kind == "rescheduled":
+            lines.append(
+                f"- 📅 Перенёс встречу: было {p.get('old_label', '')}"
+                f" → стало {p.get('label', '')}"
+            )
+    lines.append(
+        "В ответе собеседнику естественно подтверди эти действия (например,"
+        " «договорились, записал на …», «перенёс на …», «отменил»). Не"
+        " переспрашивай время и не предлагай его заново — действие уже"
+        " выполнено и зафиксировано в календаре."
+    )
+    return "\n".join(lines)
+
 # Substrings that signal a request to cancel meetings. "отмени" / "отменя"
 # cover almost every conjugated form of отменить/отменять; "удали встреч" /
 # "удали событ" require the object so generic "удали из чата" doesn't match.
@@ -348,7 +394,7 @@ async def process_incoming_confirmation(
             start,
             chat_id,
         )
-        return {
+        event_info = {
             "uid": uid,
             "title": title,
             "label": label,
@@ -356,6 +402,8 @@ async def process_incoming_confirmation(
             "end": end,
             "sender_name": sender_name,
         }
+        _remember_action(chat_id, "created", event_info)
+        return event_info
     except Exception:  # noqa: BLE001
         log.exception("process_incoming_confirmation failed")
         return None
@@ -510,14 +558,19 @@ async def process_cancellation(
                 chat_id,
                 scope,
             )
-            return {"cancelled": [], "requested": True}
+            return {
+                "cancelled": [],
+                "rescheduled": [],
+                "requested": True,
+                "sender_name": sender_name,
+            }
 
-        cancelled: list[dict] = []
+        deleted: list[dict] = []
         for uid, title, start, end in scope_rows:
             ok = await calendar_engine.delete_event(uid, around=start)
             log.info("cancel event uid=%s '%s' -> %s", uid, title, ok)
             if ok:
-                cancelled.append(
+                deleted.append(
                     {
                         "title": title,
                         "start": start,
@@ -526,8 +579,96 @@ async def process_cancellation(
                         "label": _slot_label(start, end),
                     }
                 )
+
+        # Reschedule branch: "перенеси ... на <date>" without an explicit
+        # time keeps the original time on the new day, so the user does not
+        # need to repeat "в 18". A reschedule with an explicit time is
+        # handled by ``process_incoming_confirmation`` instead — skip here.
+        rescheduled: list[dict] = []
+        target_str = reschedule_target_date(incoming_text)
+        requested_time = extract_requested_time(incoming_text)
+        if target_str and requested_time is None and deleted:
+            target_date_obj = _resolve_date(target_str, 0, 0, now)
+            if target_date_obj is not None:
+                for old in deleted:
+                    duration = old["end"] - old["start"]
+                    new_start = datetime.combine(
+                        target_date_obj, old["start"].time()
+                    )
+                    new_end = new_start + duration
+                    if new_start <= now:
+                        continue
+                    window = await calendar_engine.get_events(
+                        new_start - timedelta(hours=3),
+                        new_end + timedelta(hours=3),
+                    )
+                    has_conflict = any(
+                        isinstance(e["start"], datetime)
+                        and isinstance(e["end"], datetime)
+                        and not (new_end <= e["start"] or new_start >= e["end"])
+                        for e in window
+                    )
+                    if has_conflict:
+                        log.info(
+                            "reschedule for '%s' conflicts at %s; skipping",
+                            old["title"],
+                            new_start,
+                        )
+                        continue
+                    new_uid = await calendar_engine.create_event(
+                        title=old["title"],
+                        start=new_start,
+                        end=new_end,
+                        description="Перенос встречи AI-ассистентом.",
+                    )
+                    if not new_uid:
+                        continue
+                    async with SessionLocal() as session:
+                        session.add(
+                            CreatedMeeting(
+                                chat_id=chat_id,
+                                calendar_uid=new_uid,
+                                title=old["title"],
+                                start_time=new_start,
+                                end_time=new_end,
+                                created_by="auto",
+                            )
+                        )
+                        await session.commit()
+                    rescheduled.append(
+                        {
+                            "title": old["title"],
+                            "old_start": old["start"],
+                            "old_end": old["end"],
+                            "old_label": old["label"],
+                            "start": new_start,
+                            "end": new_end,
+                            "label": _slot_label(new_start, new_end),
+                            "uid": new_uid,
+                        }
+                    )
+
+        # Anything that was successfully re-created counts as rescheduled,
+        # not as a bare cancellation.
+        rescheduled_uids = {r.get("title"): r for r in rescheduled}
+        cancelled_only = [
+            d
+            for d in deleted
+            if not any(
+                r["title"] == d["title"]
+                and r["old_start"] == d["start"]
+                for r in rescheduled
+            )
+        ]
+
+        for action in rescheduled:
+            _remember_action(chat_id, "rescheduled", action)
+        for action in cancelled_only:
+            _remember_action(chat_id, "cancelled", action)
+
         return {
-            "cancelled": cancelled,
+            "cancelled": cancelled_only,
+            "rescheduled": rescheduled,
             "requested": True,
             "sender_name": sender_name,
         }
