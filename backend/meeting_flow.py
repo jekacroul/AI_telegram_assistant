@@ -579,6 +579,31 @@ def _resolve_cancel_scope(text: str, now: datetime) -> dict:
     if specific is not None:
         d = datetime.combine(specific, time(0, 0))
         return {"start": d, "end": d + timedelta(days=1), "time": requested}
+    # Last-resort: a bare day-of-month number ("отмени встречу 23"). Only
+    # interpret it as a date when no clock time was extracted from the
+    # clause — otherwise "в 23" / "23:00" would be misread as a date.
+    if requested is None:
+        m = re.search(r"\b(\d{1,2})\b", clause)
+        if m:
+            day = int(m.group(1))
+            if 1 <= day <= 31:
+                for offset in range(0, 4):
+                    year = today.year
+                    month = today.month + offset
+                    while month > 12:
+                        month -= 12
+                        year += 1
+                    try:
+                        candidate = date(year, month, day)
+                    except ValueError:
+                        continue
+                    if candidate >= today.date():
+                        d = datetime.combine(candidate, time(0, 0))
+                        return {
+                            "start": d,
+                            "end": d + timedelta(days=1),
+                            "time": requested,
+                        }
     # No specific date in the cancel clause — apply to all upcoming events
     # for this chat. In practice the contact is asking to drop the meeting
     # currently being negotiated, not random other days.
