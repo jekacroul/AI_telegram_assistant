@@ -356,19 +356,57 @@ class CalendarEngine:
             log.error("Failed to create event: %s", e)
             return None
 
-    def _delete_event_sync(self, uid: str) -> bool:
-        event = self.calendar.event_by_uid(uid)
-        if event is None:
-            return False
-        event.delete()
-        return True
+    def _delete_event_sync(
+        self, uid: str, around: Optional[datetime] = None
+    ) -> bool:
+        """Try the direct UID lookup first; on any failure (some servers do
+        not expose UID-search reliably), scan events in a window around
+        ``around`` and match the VEVENT's UID property by hand."""
+        from icalendar import Calendar as ICal
 
-    async def delete_event(self, uid: str) -> bool:
-        """Delete a calendar event by UID. Returns True if removed."""
+        try:
+            event = self.calendar.event_by_uid(uid)
+            if event is not None:
+                event.delete()
+                return True
+        except Exception as exc:  # noqa: BLE001
+            log.info("event_by_uid('%s') failed (%s); falling back to scan", uid, exc)
+
+        if around is not None:
+            window_start = around - timedelta(days=1)
+            window_end = around + timedelta(days=1)
+        else:
+            window_start = datetime.now() - timedelta(days=30)
+            window_end = datetime.now() + timedelta(days=180)
+        try:
+            events = self._raw_search(window_start, window_end)
+        except Exception as exc:  # noqa: BLE001
+            log.error("scan for uid='%s' failed: %s", uid, exc)
+            return False
+        for event in events:
+            try:
+                cal = ICal.from_ical(event.data)
+            except Exception:  # noqa: BLE001
+                continue
+            for component in cal.walk():
+                if (
+                    component.name == "VEVENT"
+                    and str(component.get("uid", "")) == uid
+                ):
+                    event.delete()
+                    return True
+        log.warning("delete_event: uid '%s' not found in calendar", uid)
+        return False
+
+    async def delete_event(
+        self, uid: str, around: Optional[datetime] = None
+    ) -> bool:
+        """Delete a calendar event by UID. ``around`` narrows the fallback
+        search window when the direct UID lookup is not supported."""
         if not self._connected or not uid:
             return False
         try:
-            return await asyncio.to_thread(self._delete_event_sync, uid)
+            return await asyncio.to_thread(self._delete_event_sync, uid, around)
         except Exception as e:  # noqa: BLE001
             log.error("Failed to delete event %s: %s", uid, e)
             return False

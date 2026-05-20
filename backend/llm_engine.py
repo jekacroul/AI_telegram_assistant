@@ -555,11 +555,19 @@ class LLMClient:
     async def _inject_calendar_context(
         messages: list[dict], incoming_text: str
     ) -> None:
-        """When the incoming message asks for a meeting and the calendar is
-        connected, append the owner's free slots to the system prompt so the
-        model can propose real times. Silently does nothing otherwise."""
+        """When the incoming message asks about availability or a meeting,
+        append the real state of the calendar (today's and tomorrow's
+        existing events plus the closest free slots) to the system prompt so
+        the model answers from facts instead of guessing. Silently does
+        nothing when the calendar is not connected or the message is not
+        about availability."""
         try:
-            from .calendar_engine import calendar_engine
+            from datetime import datetime, timedelta
+
+            from .calendar_engine import (
+                MONTHS_RU,
+                calendar_engine,
+            )
             from .meeting_detector import detect_meeting_intent
 
             if not calendar_engine.is_connected:
@@ -567,19 +575,53 @@ class LLMClient:
             intent = await detect_meeting_intent(incoming_text)
             if not intent or not intent.has_intent:
                 return
-            slots = await calendar_engine.get_free_slots()
-            if not slots:
-                return
-            slot_lines = "\n".join(
-                f"{i + 1}. {s['label']}" for i, s in enumerate(slots)
+
+            today = datetime.now().replace(
+                hour=0, minute=0, second=0, microsecond=0
             )
+            tomorrow = today + timedelta(days=1)
+            day_after = today + timedelta(days=2)
+            events = await calendar_engine.get_events(today, day_after)
+            slots = await calendar_engine.get_free_slots()
+
+            def _fmt_day(d: datetime) -> str:
+                return f"{d.day} {MONTHS_RU[d.month - 1]}"
+
+            def _fmt_event(e: dict) -> str:
+                return (
+                    f"- {e['start'].strftime('%H:%M')}"
+                    f"–{e['end'].strftime('%H:%M')}: {e['title']}"
+                )
+
+            today_events = [e for e in events if e["start"].date() == today.date()]
+            tomorrow_events = [
+                e for e in events if e["start"].date() == tomorrow.date()
+            ]
+
+            lines = ["📅 Реальное состояние моего календаря:"]
+            lines.append(f"Сегодня ({_fmt_day(today)}):")
+            if today_events:
+                lines.extend(_fmt_event(e) for e in today_events)
+            else:
+                lines.append("- встреч нет")
+            lines.append(f"Завтра ({_fmt_day(tomorrow)}):")
+            if tomorrow_events:
+                lines.extend(_fmt_event(e) for e in tomorrow_events)
+            else:
+                lines.append("- встреч нет")
+            if slots:
+                lines.append("Ближайшие свободные слоты:")
+                lines.extend(f"- {s['label']}" for s in slots)
+
             inject = (
-                "\n\nСобеседник предлагает встречу или звонок. Вот мои"
-                " свободные слоты в календаре — предложи 2-3 варианта в"
-                " ответе.\n"
-                f"📅 Свободные слоты в календаре:\n{slot_lines}\n"
-                "Отвечай естественно, как в живом чате, не перечисляй слоты"
-                " сухим нумерованным списком."
+                "\n\nСобеседник спрашивает про моё время или встречу."
+                " Опирайся только на данные ниже — это реальный календарь."
+                " Если он предлагает время, которое уже занято по списку"
+                " событий — честно скажи, что в это время занят, и"
+                " предложи альтернативу из свободных слотов. Не выдумывай"
+                " свободные часы и не игнорируй существующие события.\n"
+                + "\n".join(lines)
+                + "\nОтвечай естественно, как в живом чате, без сухих списков."
             )
             if messages and messages[0].get("role") == "system":
                 messages[0]["content"] += inject

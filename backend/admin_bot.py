@@ -30,6 +30,7 @@ from sqlalchemy import func, select
 from .config import settings
 from .database import (
     AdminNotification,
+    CreatedMeeting,
     Message as DbMessage,
     QualityLog,
     SessionLocal,
@@ -787,7 +788,21 @@ async def _handle_calendar(cq: CallbackQuery, parts: list[str]) -> None:
         )
     elif action == "del" and len(parts) >= 3:
         uid = ":".join(parts[2:])
-        ok = await calendar_engine.delete_event(uid)
+        around = None
+        try:
+            async with SessionLocal() as session:
+                row = (
+                    await session.execute(
+                        select(CreatedMeeting).where(
+                            CreatedMeeting.calendar_uid == uid
+                        )
+                    )
+                ).scalar_one_or_none()
+                if row:
+                    around = row.start_time
+        except Exception:  # noqa: BLE001
+            log.exception("lookup CreatedMeeting failed for uid=%s", uid)
+        ok = await calendar_engine.delete_event(uid, around=around)
         await _edit_or_send(
             cq,
             "🗑 Событие удалено из календаря" if ok
