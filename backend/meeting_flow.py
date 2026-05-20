@@ -121,6 +121,70 @@ def format_recent_actions(actions: list[dict]) -> Optional[str]:
 # Substrings that signal a request to cancel meetings. "отмени" / "отменя"
 # cover almost every conjugated form of отменить/отменять; "удали встреч" /
 # "удали событ" require the object so generic "удали из чата" doesn't match.
+_MONTH_NAMES_GENITIVE = {
+    "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
+    "мая": 5, "июня": 6, "июля": 7, "августа": 8,
+    "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+}
+
+
+def _parse_specific_date(text: str, today: "date") -> Optional["date"]:
+    """Match an explicit calendar date in the text — '20 мая', '20 числа',
+    '20-го', '20.05', '20/5' — and return it as the first occurrence on or
+    after ``today``. Returns None when no such date is mentioned."""
+    if not text:
+        return None
+    low = text.lower()
+
+    # Most specific first: explicit day + month name (e.g. "20 мая").
+    months = "|".join(_MONTH_NAMES_GENITIVE.keys())
+    m = re.search(rf"\b(\d{{1,2}})\s*(?:-?го\s+)?({months})\b", low)
+    if m:
+        day = int(m.group(1))
+        month = _MONTH_NAMES_GENITIVE[m.group(2)]
+        for year in (today.year, today.year + 1):
+            try:
+                cand = date(year, month, day)
+            except ValueError:
+                continue
+            if cand >= today:
+                return cand
+        return None
+
+    # Numeric "DD.MM" / "DD/MM".
+    m = re.search(r"\b(\d{1,2})[./](\d{1,2})\b", low)
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        for year in (today.year, today.year + 1):
+            try:
+                cand = date(year, month, day)
+            except ValueError:
+                continue
+            if cand >= today:
+                return cand
+        return None
+
+    # Day-of-month only: "20 числа", "20-го" — current month, else roll over.
+    m = re.search(r"\b(\d{1,2})\s*(?:числа|[-‐−]?го)\b", low)
+    if m:
+        day = int(m.group(1))
+        for offset in range(0, 4):
+            year = today.year
+            month = today.month + offset
+            while month > 12:
+                month -= 12
+                year += 1
+            try:
+                cand = date(year, month, day)
+            except ValueError:
+                continue
+            if cand >= today:
+                return cand
+        return None
+
+    return None
+
+
 _CANCEL_PHRASES = (
     "отмени", "отменя",
     "удали встреч", "удали событ", "удалите встреч",
@@ -187,17 +251,7 @@ def _resolve_date(
             if at > now:
                 return candidate
         return None
-    m = re.search(r"\b(\d{1,2})[./](\d{1,2})\b", low)
-    if m:
-        day, month = int(m.group(1)), int(m.group(2))
-        for year in (today.year, today.year + 1):
-            try:
-                cand = date(year, month, day)
-            except ValueError:
-                continue
-            if cand >= today:
-                return cand
-    return None
+    return _parse_specific_date(text, today)
 
 
 def _resolve_start(
@@ -495,6 +549,11 @@ def _resolve_cancel_scope(text: str, now: datetime) -> dict:
                     "end": d + timedelta(days=1),
                     "time": requested,
                 }
+    # Explicit calendar date: "20 числа", "20 мая", "20.05".
+    specific = _parse_specific_date(clause, today.date())
+    if specific is not None:
+        d = datetime.combine(specific, time(0, 0))
+        return {"start": d, "end": d + timedelta(days=1), "time": requested}
     # No specific date in the cancel clause — apply to all upcoming events
     # for this chat. In practice the contact is asking to drop the meeting
     # currently being negotiated, not random other days.
