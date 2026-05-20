@@ -325,28 +325,50 @@ def _has_cancel_phrase(text: str) -> bool:
     return any(p in low for p in _CANCEL_PHRASES)
 
 
+# Splits a message into clauses on punctuation or coordinating conjunctions
+# ("и" / "а") so a date in a different clause doesn't bleed into the cancel
+# scope. Used to keep "отмени встречу) и перенеси на послезавтра" from
+# pointing the cancellation at the wrong day.
+_CLAUSE_SPLIT_RE = re.compile(r"[.!?;)\n]|(?<=\s)(?:и|а)(?=\s)")
+
+
+def _cancel_clause(text: str) -> str:
+    if not text:
+        return ""
+    low = text.lower()
+    parts = _CLAUSE_SPLIT_RE.split(low)
+    for part in parts:
+        if any(kw in part for kw in _CANCEL_PHRASES):
+            return part.strip()
+    return low
+
+
 def _resolve_cancel_scope(text: str, now: datetime) -> dict:
     """Pick the (start, end, time) window of events to cancel from the
-    message: 'все встречи' → all upcoming; date hints narrow to that day;
-    a named time further restricts within the day."""
-    low = (text or "").lower()
-    requested = extract_requested_time(low)
+    cancel clause: 'все встречи' → all upcoming; date hints narrow to that
+    day; a named time further restricts within the day. With no date hint
+    in the cancel clause the default is *all upcoming* events for the chat
+    — the contact is talking about the meeting being negotiated, not
+    arbitrary other days."""
+    clause = _cancel_clause(text)
+    requested = extract_requested_time(clause)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    horizon = now + timedelta(days=60)
     all_markers = (
         "все встреч", "все событ", "все мои встреч",
         "отмени все", "отменим все", "отменить все",
     )
-    if any(m in low for m in all_markers):
-        return {"start": now, "end": now + timedelta(days=60), "time": requested}
-    if "послезавтра" in low:
+    if any(m in clause for m in all_markers):
+        return {"start": now, "end": horizon, "time": requested}
+    if "послезавтра" in clause:
         d = today + timedelta(days=2)
         return {"start": d, "end": d + timedelta(days=1), "time": requested}
-    if "завтра" in low:
+    if "завтра" in clause:
         d = today + timedelta(days=1)
         return {"start": d, "end": d + timedelta(days=1), "time": requested}
-    if "сегодня" in low:
+    if "сегодня" in clause:
         return {"start": today, "end": today + timedelta(days=1), "time": requested}
-    day_idx = matched_day_index(low)
+    day_idx = matched_day_index(clause)
     if day_idx is not None:
         for offset in range(0, 8):
             d = today + timedelta(days=offset)
@@ -356,7 +378,10 @@ def _resolve_cancel_scope(text: str, now: datetime) -> dict:
                     "end": d + timedelta(days=1),
                     "time": requested,
                 }
-    return {"start": today, "end": today + timedelta(days=1), "time": requested}
+    # No specific date in the cancel clause — apply to all upcoming events
+    # for this chat. In practice the contact is asking to drop the meeting
+    # currently being negotiated, not random other days.
+    return {"start": now, "end": horizon, "time": requested}
 
 
 async def _cancel_pending_for_chat(chat_id: int) -> None:
