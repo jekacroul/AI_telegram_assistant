@@ -41,6 +41,18 @@ log = logging.getLogger(__name__)
 # no longer matched against incoming times.
 _PENDING_TTL = timedelta(hours=24)
 
+# Substrings that signal a request to cancel meetings. "отмени" / "отменя"
+# cover almost every conjugated form of отменить/отменять; "удали встреч" /
+# "удали событ" require the object so generic "удали из чата" doesn't match.
+_CANCEL_PHRASES = (
+    "отмени", "отменя",
+    "удали встреч", "удали событ", "удалите встреч",
+    "удали все", "удалить все", "удалить встреч",
+    "снимай встреч", "снять встреч", "убери встреч",
+    "убери из календар", "отказаться от встреч",
+    "cancel",
+)
+
 
 def _encode_proposal(meeting_type: str, date_hint: str, slots: list[dict]) -> str:
     return json.dumps(
@@ -303,4 +315,139 @@ async def process_incoming_confirmation(
         }
     except Exception:  # noqa: BLE001
         log.exception("process_incoming_confirmation failed")
+        return None
+
+
+def _has_cancel_phrase(text: str) -> bool:
+    if not text:
+        return False
+    low = text.lower()
+    return any(p in low for p in _CANCEL_PHRASES)
+
+
+def _resolve_cancel_scope(text: str, now: datetime) -> dict:
+    """Pick the (start, end, time) window of events to cancel from the
+    message: 'все встречи' → all upcoming; date hints narrow to that day;
+    a named time further restricts within the day."""
+    low = (text or "").lower()
+    requested = extract_requested_time(low)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    all_markers = (
+        "все встреч", "все событ", "все мои встреч",
+        "отмени все", "отменим все", "отменить все",
+    )
+    if any(m in low for m in all_markers):
+        return {"start": now, "end": now + timedelta(days=60), "time": requested}
+    if "послезавтра" in low:
+        d = today + timedelta(days=2)
+        return {"start": d, "end": d + timedelta(days=1), "time": requested}
+    if "завтра" in low:
+        d = today + timedelta(days=1)
+        return {"start": d, "end": d + timedelta(days=1), "time": requested}
+    if "сегодня" in low:
+        return {"start": today, "end": today + timedelta(days=1), "time": requested}
+    day_idx = matched_day_index(low)
+    if day_idx is not None:
+        for offset in range(0, 8):
+            d = today + timedelta(days=offset)
+            if d.weekday() == day_idx:
+                return {
+                    "start": d,
+                    "end": d + timedelta(days=1),
+                    "time": requested,
+                }
+    return {"start": today, "end": today + timedelta(days=1), "time": requested}
+
+
+async def _cancel_pending_for_chat(chat_id: int) -> None:
+    """Drop any open meeting negotiations for the chat so subsequent times
+    don't accidentally auto-create new events."""
+    async with SessionLocal() as session:
+        pendings = (
+            await session.execute(
+                select(PendingMeeting).where(
+                    PendingMeeting.chat_id == chat_id,
+                    PendingMeeting.status == "pending",
+                )
+            )
+        ).scalars().all()
+        for p in pendings:
+            p.status = "cancelled"
+        if pendings:
+            await session.commit()
+
+
+async def process_cancellation(
+    chat_id: int, sender_name: str, incoming_text: str
+) -> Optional[dict]:
+    """If the incoming message asks to cancel meetings, delete the matching
+    assistant-created events from the calendar.
+
+    Scope is limited to events the assistant created for this chat (the
+    ``created_meetings`` table) — manually-added third-party events are
+    never touched. Returns a dict with the cancelled events on success,
+    None when the message is not a cancellation.
+    """
+    if not calendar_engine.is_connected:
+        return None
+    if not _has_cancel_phrase(incoming_text):
+        return None
+    try:
+        now = datetime.now()
+        scope = _resolve_cancel_scope(incoming_text, now)
+        async with SessionLocal() as session:
+            rows = (
+                await session.execute(
+                    select(CreatedMeeting)
+                    .where(
+                        CreatedMeeting.chat_id == chat_id,
+                        CreatedMeeting.start_time >= scope["start"],
+                        CreatedMeeting.start_time < scope["end"],
+                    )
+                    .order_by(CreatedMeeting.start_time)
+                )
+            ).scalars().all()
+            scope_rows = [
+                (r.calendar_uid, r.title, r.start_time, r.end_time) for r in rows
+            ]
+
+        if scope["time"] is not None:
+            h, m = scope["time"]
+            scope_rows = [
+                r for r in scope_rows if r[2].hour == h and r[2].minute == m
+            ]
+
+        # Always drop pending negotiations on a cancel request — even when
+        # there were no scheduled events yet, the user clearly wants out.
+        await _cancel_pending_for_chat(chat_id)
+
+        if not scope_rows:
+            log.info(
+                "cancellation: no matching events for chat %s (scope=%s)",
+                chat_id,
+                scope,
+            )
+            return {"cancelled": [], "requested": True}
+
+        cancelled: list[dict] = []
+        for uid, title, start, end in scope_rows:
+            ok = await calendar_engine.delete_event(uid, around=start)
+            log.info("cancel event uid=%s '%s' -> %s", uid, title, ok)
+            if ok:
+                cancelled.append(
+                    {
+                        "title": title,
+                        "start": start,
+                        "end": end,
+                        "uid": uid,
+                        "label": _slot_label(start, end),
+                    }
+                )
+        return {
+            "cancelled": cancelled,
+            "requested": True,
+            "sender_name": sender_name,
+        }
+    except Exception:  # noqa: BLE001
+        log.exception("process_cancellation failed")
         return None

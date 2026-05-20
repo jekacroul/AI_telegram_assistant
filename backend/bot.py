@@ -792,6 +792,22 @@ class TelegramService:
             except Exception:  # noqa: BLE001
                 log.exception("meeting confirmation flow failed")
 
+            # Calendar: an "отмени встречи" request actually deletes the
+            # assistant-created events from the calendar (and drops any open
+            # negotiation), instead of the bot only saying it will.
+            try:
+                cancelled = await meeting_flow.process_cancellation(
+                    chat_id, sender_name, reply_input_text
+                )
+                if cancelled and cancelled.get("cancelled"):
+                    await admin_bot.notify_meetings_cancelled(
+                        cancelled["cancelled"],
+                        chat_name=chat_name,
+                        sender_name=sender_name,
+                    )
+            except Exception:  # noqa: BLE001
+                log.exception("meeting cancellation flow failed")
+
             if not should_reply:
                 log.info(
                     "handle_incoming: no reply, should_reply=False "
