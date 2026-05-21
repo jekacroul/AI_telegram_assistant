@@ -822,6 +822,7 @@ class TelegramService:
 
             # Calendar: a short "да / в среду" may confirm a meeting the bot
             # proposed earlier — turn it into a real event and notify the owner.
+            event = None
             if not series_created:
                 try:
                     event = await meeting_flow.process_incoming_confirmation(
@@ -835,6 +836,7 @@ class TelegramService:
             # Calendar: an "отмени встречи" request actually deletes the
             # assistant-created events from the calendar (and drops any open
             # negotiation), instead of the bot only saying it will.
+            cancelled = None
             try:
                 cancelled = await meeting_flow.process_cancellation(
                     chat_id, sender_name, reply_input_text
@@ -850,6 +852,23 @@ class TelegramService:
                     )
             except Exception:  # noqa: BLE001
                 log.exception("meeting cancellation flow failed")
+
+            # Open a pending meeting negotiation as soon as the message
+            # arrives — not inside the debounced reply task, which is
+            # cancelled on every new message of a burst. Otherwise a
+            # follow-up naming a time ("давай в 15") in the same burst
+            # would never find an open negotiation and no event is booked.
+            if (
+                not series_created
+                and not event
+                and not (cancelled and cancelled.get("requested"))
+            ):
+                try:
+                    await meeting_flow.maybe_record_pending_meeting(
+                        chat_id, msg_id, sender_name, reply_input_text
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception("record pending meeting failed")
 
             if not should_reply:
                 log.info(
@@ -1186,11 +1205,6 @@ class TelegramService:
 
             await self._record_reply(
                 msg_id, chosen, sender_name, chat_id, chat_name
-            )
-            # If the contact asked for a meeting, remember the slots offered
-            # so a later confirmation can be matched to a concrete time.
-            await meeting_flow.maybe_record_pending_meeting(
-                chat_id, msg_id, sender_name, reply_input_text
             )
             await admin_bot.notify_auto_reply(
                 chat_name,
