@@ -32,6 +32,7 @@ from .database import CreatedMeeting, PendingMeeting, SessionLocal
 from .meeting_detector import (
     detect_meeting_intent,
     extract_requested_time,
+    extract_time_range,
     matched_day_index,
     reschedule_source_date,
     reschedule_target_date,
@@ -243,6 +244,72 @@ def _event_title(meeting_type: str, sender_name: str) -> str:
     return f"{'Звонок' if meeting_type == 'call' else 'Встреча'} с {who}"
 
 
+# Activity words → a title noun, so "погуляем" / "запиши пиво" produce a
+# meaningful event name instead of the generic "Встреча".
+_ACTIVITY_TITLES = (
+    (("прогул", "погул", "гуля", "пройтись", "пройдём", "пройдем"), "Прогулка"),
+    (("пиво", "пива", "пивк", "пивас", "пивч", "по пиву"), "Пиво"),
+    (("кофе",), "Кофе"),
+    (("обед", "пообед"), "Обед"),
+    (("ужин", "поужин"), "Ужин"),
+    (("завтрак", "позавтрак"), "Завтрак"),
+    (("кино", "фильм"), "Кино"),
+    (("тренировк", "качалк", "спортзал", "в зал"), "Тренировка"),
+)
+
+# Imperative "record this" verbs. Paired with an extracted time they let a
+# message like "запиши пиво с 18 до 19" book an event outright, with no
+# prior negotiation and no separate proposing verb.
+_RECORD_COMMANDS = (
+    "запиш", "запланир", "забронир",
+    "добавь в календар", "поставь в календар", "внеси в календар",
+    "добавь встреч", "поставь встреч", "создай встреч", "создай событ",
+)
+
+_RECORD_TITLE_RE = re.compile(
+    r"\b(?:запиш\w*|добав\w*|постав\w*|внеси|созда\w*|запланиру\w*|заброниру\w*)"
+    r"\s+(?:мне\s+|нам\s+|пожалуйста,?\s+)*"
+    r"([а-яёa-z]{3,})"
+)
+
+
+def _has_record_command(text: str) -> bool:
+    if not text:
+        return False
+    low = text.lower()
+    return any(c in low for c in _RECORD_COMMANDS)
+
+
+def _activity_noun(text: str) -> Optional[str]:
+    low = (text or "").lower()
+    for stems, noun in _ACTIVITY_TITLES:
+        if any(s in low for s in stems):
+            return noun
+    return None
+
+
+def _resolve_title(incoming_text: str, meeting_type: str, sender_name: str) -> str:
+    """Pick an event title: a recognised activity ("Прогулка с …"), the
+    word after an explicit "запиши …" command, or the generic
+    meeting/call title as a last resort."""
+    who = sender_name or "собеседником"
+    noun = _activity_noun(incoming_text)
+    if noun:
+        return f"{noun} с {who}"
+    m = _RECORD_TITLE_RE.search((incoming_text or "").lower())
+    if m:
+        word = m.group(1)
+        stop = {
+            "сегодня", "завтра", "послезавтра", "это", "мне", "нам",
+            "там", "тут", "себе", "что", "как", "пожалуйста",
+        }
+        if word not in stop and not word.startswith(
+            ("встреч", "событ", "напомин", "созвон", "звонок")
+        ):
+            return f"{word.capitalize()} с {who}"
+    return _event_title(meeting_type, sender_name)
+
+
 def _resolve_date(
     text: str, hour: int, minute: int, now: datetime
 ) -> Optional[date]:
@@ -354,10 +421,17 @@ async def process_incoming_confirmation(
     """
     if not calendar_engine.is_connected:
         return None
-    requested = extract_requested_time(incoming_text)
-    if requested is None:
-        return None
-    hour, minute = requested
+    # An explicit span ("с 18 до 19") sets the end directly; otherwise a
+    # single named time is paired with the configured slot duration.
+    time_range = extract_time_range(incoming_text)
+    if time_range is not None:
+        (hour, minute), end_clock = time_range
+    else:
+        requested = extract_requested_time(incoming_text)
+        if requested is None:
+            return None
+        hour, minute = requested
+        end_clock = None
     try:
         async with SessionLocal() as session:
             cfg = await get_caldav_config(session)
@@ -395,7 +469,10 @@ async def process_incoming_confirmation(
                     # The cancellation flow runs separately for this message.
                     # Don't also create something at the named time.
                     return None
-                elif any(kw in low for kw in _PROPOSING_KEYWORDS):
+                elif (
+                    any(kw in low for kw in _PROPOSING_KEYWORDS)
+                    or _has_record_command(low)
+                ):
                     date_hint = ""
                     meeting_type = (
                         "call"
@@ -416,8 +493,17 @@ async def process_incoming_confirmation(
                 chat_id,
             )
             return None
-        duration = max(15, int(calendar_engine.slot_duration or 60))
-        end = start + timedelta(minutes=duration)
+        if end_clock is not None:
+            end_hour, end_minute = end_clock
+            end = datetime.combine(
+                start.date(), time(hour=end_hour, minute=end_minute)
+            )
+            # A range like "с 23 до 1" crosses midnight.
+            if end <= start:
+                end += timedelta(days=1)
+        else:
+            duration = max(15, int(calendar_engine.slot_duration or 60))
+            end = start + timedelta(minutes=duration)
 
         # Don't book over an event we already created locally — iCloud may
         # not have surfaced it on the read side yet.
@@ -446,7 +532,7 @@ async def process_incoming_confirmation(
             )
             return None
 
-        title = _event_title(meeting_type, sender_name)
+        title = _resolve_title(incoming_text, meeting_type, sender_name)
         uid = await calendar_engine.create_event(
             title=title,
             start=start,
@@ -965,7 +1051,9 @@ async def process_series_proposal(
     if _has_cancel_phrase(incoming_text):
         return None
     low = incoming_text.lower()
-    if not any(kw in low for kw in _PROPOSING_KEYWORDS):
+    if not any(kw in low for kw in _PROPOSING_KEYWORDS) and not (
+        _has_record_command(low)
+    ):
         return None
     try:
         now = datetime.now()
@@ -988,7 +1076,7 @@ async def process_series_proposal(
             if any(w in low for w in _CALL_HINT_WORDS)
             else "meeting"
         )
-        title = _event_title(meeting_type, sender_name)
+        title = _resolve_title(incoming_text, meeting_type, sender_name)
 
         created: list[dict] = []
         for d in dates:

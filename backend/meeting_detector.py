@@ -284,3 +284,39 @@ def extract_requested_time(text: str) -> Optional[tuple[int, int]]:
             return (hour, minute)
     return None
 
+
+# An explicit time span: "с 18 до 19", "с 12:00 до 12:05", "с трёх до
+# пяти". A trailing "час(ов)" after the start is tolerated.
+_RANGE_RE = re.compile(
+    rf"\bс\s+{_HOUR_TOKEN}(?:[:.](\d{{2}}))?\s*(?:час\w*\s+)?"
+    rf"до\s+{_HOUR_TOKEN}(?:[:.](\d{{2}}))?"
+)
+
+
+def extract_time_range(
+    text: str,
+) -> Optional[tuple[tuple[int, int], tuple[int, int]]]:
+    """Return ((start_h, start_m), (end_h, end_m)) for an explicit span
+    like "с 18 до 19" or "с 12:00 до 12:05". A part-of-day word applies to
+    both ends ("с 6 до 8 вечера" → 18:00–20:00). Returns None when the
+    text names no such range."""
+    if not text:
+        return None
+    low = text.lower()
+    m = _RANGE_RE.search(low)
+    if not m:
+        return None
+    start_h = _token_to_hour(m.group(1))
+    end_h = _token_to_hour(m.group(3))
+    if start_h is None or end_h is None:
+        return None
+    start_m = int(m.group(2)) if m.group(2) else 0
+    end_m = int(m.group(4)) if m.group(4) else 0
+    start_h = _apply_daypart(start_h, low)
+    end_h = _apply_daypart(end_h, low)
+    if not (0 <= start_h <= 23 and 0 <= end_h <= 23):
+        return None
+    if not (0 <= start_m <= 59 and 0 <= end_m <= 59):
+        return None
+    return ((start_h, start_m), (end_h, end_m))
+
