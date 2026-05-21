@@ -193,32 +193,93 @@ def matched_day_index(text: str) -> Optional[int]:
     return None
 
 
+# Hours spelled out in words ("в три" → 3, "в двенадцать" → 12).
+_HOUR_WORD_MAP = {
+    "час": 1,
+    "два": 2, "две": 2,
+    "три": 3,
+    "четыре": 4,
+    "пять": 5,
+    "шесть": 6,
+    "семь": 7,
+    "восемь": 8,
+    "девять": 9,
+    "десять": 10,
+    "одиннадцать": 11,
+    "двенадцать": 12,
+}
+# Longest-first so "двенадцать" is matched before its prefix "два".
+_HOUR_WORD_ALT = "|".join(
+    sorted((re.escape(w) for w in _HOUR_WORD_MAP), key=len, reverse=True)
+)
+# A clock hour written as 1–2 digits or spelled out in words.
+_HOUR_TOKEN = rf"(\d{{1,2}}|{_HOUR_WORD_ALT})"
+
 # Ordered most-specific first: an explicit "HH:MM" beats a bare "в HH".
 _REQ_TIME_PATTERNS = [
     re.compile(r"\b(\d{1,2})[:.](\d{2})\b"),
-    re.compile(r"\bв\s+(\d{1,2})\s*час"),
-    re.compile(r"\b(\d{1,2})\s*час"),
-    re.compile(r"\bв\s+(\d{1,2})\b"),
+    re.compile(rf"\bв\s+{_HOUR_TOKEN}\s*час"),
+    re.compile(rf"\b{_HOUR_TOKEN}\s*час"),
+    re.compile(rf"\bв\s+{_HOUR_TOKEN}\b"),
 ]
+
+# Part-of-day words that move a 1–12 hour into 24-hour form.
+_DAYPART_RE = re.compile(
+    r"\b(утра|утром|дня|днём|днем|вечера|вечером|ночи|ночью)\b"
+)
+
+
+def _token_to_hour(token: str) -> Optional[int]:
+    token = token.strip()
+    if token.isdigit():
+        return int(token)
+    return _HOUR_WORD_MAP.get(token)
+
+
+def _apply_daypart(hour: int, text: str) -> int:
+    """Shift a 1–12 hour into 24-hour form using a part-of-day word
+    ("6 вечера" → 18, "час дня" → 13). Hours already in 24-hour form, and
+    times with no part-of-day word, are returned unchanged."""
+    if hour > 12:
+        return hour
+    m = _DAYPART_RE.search(text)
+    if not m:
+        return hour
+    if m.group(1) in ("утра", "утром", "ночи", "ночью"):
+        return 0 if hour == 12 else hour
+    # дня / вечера — afternoon and evening map 1–11 onto 13–23.
+    return hour if hour == 12 else hour + 12
 
 
 def extract_requested_time(text: str) -> Optional[tuple[int, int]]:
     """Return an explicit clock time (hour, minute) named in the text.
 
-    Recognises "в 12 часов", "в 12", "12:00", "15.30" and similar. Minute
-    defaults to 0 when not stated. Returns None when no time is mentioned.
+    Recognises digits ("в 12 часов", "в 12", "12:00", "15.30"), hours
+    spelled out in words ("в три", "в двенадцать", "в час дня") and the
+    nouns "полдень" / "полночь". A part-of-day word shifts a 1–12 hour
+    into 24-hour form ("в 6 вечера" → 18:00). Minute defaults to 0 when
+    not stated. Returns None when no time is mentioned.
     """
     if not text:
         return None
     low = text.lower()
+
+    if re.search(r"\bполдень\b|\bполдня\b", low):
+        return (12, 0)
+    if re.search(r"\bполночь\b", low):
+        return (0, 0)
+
     for pattern in _REQ_TIME_PATTERNS:
         m = pattern.search(low)
         if not m:
             continue
-        hour = int(m.group(1))
+        hour = _token_to_hour(m.group(1))
+        if hour is None:
+            continue
         minute = 0
         if pattern.groups >= 2 and m.group(2):
             minute = int(m.group(2))
+        hour = _apply_daypart(hour, low)
         if 0 <= hour <= 23 and 0 <= minute <= 59:
             return (hour, minute)
     return None
