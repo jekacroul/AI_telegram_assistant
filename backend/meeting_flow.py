@@ -432,10 +432,26 @@ async def process_incoming_confirmation(
             return None
         hour, minute = requested
         end_clock = None
+    # A concrete time was named: log every outcome from here on so a
+    # missing event can be traced in the bot log.
+    log.info(
+        "confirmation: chat %s named time %02d:%02d (end=%s) in %r",
+        chat_id,
+        hour,
+        minute,
+        end_clock,
+        incoming_text,
+    )
     try:
         async with SessionLocal() as session:
             cfg = await get_caldav_config(session)
             if not cfg["caldav_auto_create"]:
+                log.warning(
+                    "confirmation: time named but caldav_auto_create is OFF "
+                    "— no event created (chat %s). Enable it in the calendar "
+                    "settings of the dashboard.",
+                    chat_id,
+                )
                 return None
             cutoff = datetime.utcnow() - _PENDING_TTL
             pending = (
@@ -480,6 +496,11 @@ async def process_incoming_confirmation(
                         else "meeting"
                     )
                 else:
+                    log.info(
+                        "confirmation: time named but no open negotiation and "
+                        "no proposing/record verb — not booking (chat %s)",
+                        chat_id,
+                    )
                     return None
 
         now = datetime.now()
@@ -565,11 +586,28 @@ async def process_incoming_confirmation(
             await session.commit()
 
         log.info(
-            "auto-created calendar event '%s' at %s for chat %s",
+            "auto-created calendar event '%s' at %s for chat %s (uid=%s)",
             title,
             start,
             chat_id,
+            uid,
         )
+        # Diagnostic: read the event back so a silent iCloud drop (PUT
+        # accepted, event never surfaced) is visible in the log.
+        try:
+            back = await calendar_engine.get_events(
+                start - timedelta(minutes=1), end + timedelta(minutes=1)
+            )
+            visible = any(e.get("uid") == uid for e in back)
+            log.info(
+                "confirmation verification: uid=%s visible on server=%s "
+                "(%d event(s) read back for the slot)",
+                uid,
+                visible,
+                len(back),
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("confirmation verification readback failed")
         event_info = {
             "uid": uid,
             "title": title,
