@@ -43,7 +43,7 @@ from .database import (
     set_setting,
 )
 from .delay import get_delay_settings
-from .dialog_backup import mark_messages_deleted
+from .dialog_backup import mark_messages_deleted, record_message
 from .notifications import SETTING_LAST_PRIVATE_CHAT_ID
 from .schedule import is_within_schedule
 
@@ -543,6 +543,8 @@ class TelegramService:
                 await session.commit()
                 await session.refresh(row)
                 msg_id = row.id
+
+                await record_message(msg_id)
 
                 # Index into RAG vector memory. Fire-and-forget so reply
                 # generation is never blocked by embedding work.
@@ -1385,18 +1387,20 @@ class TelegramService:
                     chat_name = original.chat_name
                     original.replied = True
                     original.reply_text = text
-            session.add(
-                Message(
-                    chat_id=chat_id,
-                    chat_name=chat_name,
-                    sender_id=0,
-                    sender_name=settings.display_name,
-                    is_mine=True,
-                    text=text,
-                    timestamp=datetime.utcnow(),
-                )
+            sent_row = Message(
+                chat_id=chat_id,
+                chat_name=chat_name,
+                sender_id=0,
+                sender_name=settings.display_name,
+                is_mine=True,
+                text=text,
+                timestamp=datetime.utcnow(),
             )
+            session.add(sent_row)
             await session.commit()
+            await session.refresh(sent_row)
+            sent_pk = sent_row.id
+        await record_message(sent_pk)
         await message_bus.publish(
             "sent",
             {

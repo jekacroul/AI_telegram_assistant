@@ -135,12 +135,9 @@ export const api = {
     }),
   listModels: () => request("/api/llm/models"),
   dialogsChats: () => request("/api/dialogs/chats"),
-  dialogsVersions: (chat_id) => request(`/api/dialogs/${chat_id}/versions`),
-  dialogsBackup: (backup_id) => request(`/api/dialogs/backup/${backup_id}`),
-  dialogsBackupExportUrl: (backup_id) =>
-    apiUrl(`/api/dialogs/backup/${backup_id}/export`),
-  deleteDialogsBackup: (backup_id) =>
-    request(`/api/dialogs/backup/${backup_id}`, { method: "DELETE" }),
+  dialogsBackup: (chat_id) => request(`/api/dialogs/${chat_id}/backup`),
+  dialogsBackupExportUrl: (chat_id) =>
+    apiUrl(`/api/dialogs/${chat_id}/backup/export`),
   deleteDialogsHistory: (chat_id) =>
     request(`/api/dialogs/${chat_id}/history`, { method: "DELETE" }),
   dialogsSettings: () => request("/api/dialogs/settings"),
@@ -149,8 +146,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  dialogsRunBackup: () =>
-    request("/api/dialogs/run-backup", { method: "POST" }),
   getAdminSettings: () => request("/api/admin/settings"),
   saveAdminSettings: (data) =>
     request("/api/admin/settings", {
