@@ -65,11 +65,8 @@ from .dataset_builder import (
 )
 from .delay import delay_to_dict, get_delay_settings, save_delay_settings
 from .dialog_backup import (
-    SETTING_INTERVAL,
-    SETTING_LAST_RUN,
+    _format_backup_text,
     get_excluded_chats,
-    get_interval_minutes,
-    scheduler as dialog_backup_scheduler,
     set_excluded_chats,
 )
 from .event_bus import message_bus, replication_bus, training_bus
@@ -225,7 +222,6 @@ async def lifespan(app: FastAPI):
     else:
         log.warning("TELEGRAM_BOT_TOKEN is not set; bot will be inactive")
     await _startup_reconcile_queue()
-    dialog_backup_scheduler.start()
     replication_scheduler.start()
     if settings.llama_server_auto_start and settings.llama_base_model_gguf:
         asyncio.create_task(_auto_start_llama_server())
@@ -234,7 +230,6 @@ async def lifespan(app: FastAPI):
     await _startup_load_meeting_keywords()
     yield
     await replication_scheduler.stop()
-    await dialog_backup_scheduler.stop()
     await telegram_service.shutdown()
     await llama_server.stop()
 
@@ -2334,16 +2329,14 @@ async def dialogs_chats(session: AsyncSession = Depends(get_session)) -> list[di
     backups_result = await session.execute(
         select(
             DialogBackup.chat_id,
-            func.count(DialogBackup.id).label("versions"),
-            func.max(DialogBackup.version).label("latest_version"),
-            func.max(DialogBackup.created_at).label("latest_backup_at"),
-        ).group_by(DialogBackup.chat_id)
+            DialogBackup.message_count,
+            DialogBackup.updated_at,
+        )
     )
     by_chat = {
         r.chat_id: {
-            "versions": r.versions,
-            "latest_version": r.latest_version,
-            "latest_backup_at": _iso_utc(r.latest_backup_at),
+            "backup_message_count": r.message_count,
+            "backup_updated_at": _iso_utc(r.updated_at),
         }
         for r in backups_result.all()
     }
@@ -2357,50 +2350,28 @@ async def dialogs_chats(session: AsyncSession = Depends(get_session)) -> list[di
             "message_count": c.count,
             "last_message_at": _iso_utc(c.last),
             "excluded": c.chat_id in excluded,
-            "versions": by_chat.get(c.chat_id, {}).get("versions", 0),
-            "latest_version": by_chat.get(c.chat_id, {}).get("latest_version"),
-            "latest_backup_at": by_chat.get(c.chat_id, {}).get("latest_backup_at"),
+            "backup_message_count": by_chat.get(c.chat_id, {}).get(
+                "backup_message_count", 0
+            ),
+            "backup_updated_at": by_chat.get(c.chat_id, {}).get("backup_updated_at"),
         }
         for c in chats
     ]
 
 
-@app.get("/api/dialogs/{chat_id}/versions")
-async def dialogs_versions(
-    chat_id: int, session: AsyncSession = Depends(get_session)
-) -> list[dict]:
-    result = await session.execute(
-        select(DialogBackup)
-        .where(DialogBackup.chat_id == chat_id)
-        .order_by(desc(DialogBackup.version))
-    )
-    rows = result.scalars().all()
-    return [
-        {
-            "id": b.id,
-            "chat_id": b.chat_id,
-            "chat_name": b.chat_name,
-            "version": b.version,
-            "created_at": _iso_utc(b.created_at),
-            "message_count": b.message_count,
-        }
-        for b in rows
-    ]
-
-
-@app.get("/api/dialogs/backup/{backup_id}")
+@app.get("/api/dialogs/{chat_id}/backup")
 async def dialogs_backup_content(
-    backup_id: int, session: AsyncSession = Depends(get_session)
+    chat_id: int, session: AsyncSession = Depends(get_session)
 ) -> dict:
     backup_q = await session.execute(
-        select(DialogBackup).where(DialogBackup.id == backup_id)
+        select(DialogBackup).where(DialogBackup.chat_id == chat_id)
     )
     backup = backup_q.scalar_one_or_none()
     if not backup:
         raise HTTPException(404, "backup not found")
     msg_q = await session.execute(
         select(DialogBackupMessage)
-        .where(DialogBackupMessage.backup_id == backup_id)
+        .where(DialogBackupMessage.backup_id == backup.id)
         .order_by(DialogBackupMessage.timestamp, DialogBackupMessage.id)
     )
     rows = msg_q.scalars().all()
@@ -2409,8 +2380,8 @@ async def dialogs_backup_content(
             "id": backup.id,
             "chat_id": backup.chat_id,
             "chat_name": backup.chat_name,
-            "version": backup.version,
             "created_at": _iso_utc(backup.created_at),
+            "updated_at": _iso_utc(backup.updated_at),
             "message_count": backup.message_count,
         },
         "messages": [
@@ -2422,6 +2393,7 @@ async def dialogs_backup_content(
                 "text": "" if (m.text in MEDIA_PLACEHOLDERS and m.media_path) else m.text,
                 "timestamp": _iso_utc(m.timestamp),
                 "message_id": m.message_id,
+                "edited": m.edited,
                 "media_type": m.media_type,
                 "media_path": m.media_path,
                 "media_private": m.media_private,
@@ -2431,35 +2403,7 @@ async def dialogs_backup_content(
     }
 
 
-def _format_dialog_backup_text(
-    backup: DialogBackup, messages: list[DialogBackupMessage]
-) -> str:
-    chat_title = backup.chat_name or f"chat {backup.chat_id}"
-    lines = [
-        f"Диалог: {chat_title}",
-        f"chat_id: {backup.chat_id}",
-        f"Версия: v{backup.version}",
-        f"Создано: {_iso_utc(backup.created_at) or ''}",
-        f"Сообщений: {backup.message_count}",
-        "",
-        "=" * 48,
-        "",
-    ]
-    for message in messages:
-        author = (
-            settings.display_name
-            if message.is_mine
-            else (message.sender_name or "собеседник")
-        )
-        sent_at = _iso_utc(message.timestamp) or ""
-        text = (message.text or "").strip()
-        lines.append(f"[{sent_at}] {author}:")
-        lines.append(text)
-        lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _download_filename(backup: DialogBackup) -> str:
+def _backup_filename(backup: DialogBackup) -> str:
     safe_chat = re.sub(
         r"[^A-Za-z0-9А-Яа-я_.-]+",
         "_",
@@ -2467,28 +2411,28 @@ def _download_filename(backup: DialogBackup) -> str:
     ).strip("_")
     if not safe_chat:
         safe_chat = f"chat_{backup.chat_id}"
-    return f"dialog_{safe_chat}_v{backup.version}.txt"
+    return f"dialog_{safe_chat}.txt"
 
 
-@app.get("/api/dialogs/backup/{backup_id}/export")
+@app.get("/api/dialogs/{chat_id}/backup/export")
 async def dialogs_backup_export(
-    backup_id: int, session: AsyncSession = Depends(get_session)
+    chat_id: int, session: AsyncSession = Depends(get_session)
 ) -> PlainTextResponse:
     backup_q = await session.execute(
-        select(DialogBackup).where(DialogBackup.id == backup_id)
+        select(DialogBackup).where(DialogBackup.chat_id == chat_id)
     )
     backup = backup_q.scalar_one_or_none()
     if not backup:
         raise HTTPException(404, "backup not found")
     msg_q = await session.execute(
         select(DialogBackupMessage)
-        .where(DialogBackupMessage.backup_id == backup_id)
+        .where(DialogBackupMessage.backup_id == backup.id)
         .order_by(DialogBackupMessage.timestamp, DialogBackupMessage.id)
     )
     messages = list(msg_q.scalars().all())
-    filename = _download_filename(backup)
+    filename = _backup_filename(backup)
     return PlainTextResponse(
-        _format_dialog_backup_text(backup, messages),
+        _format_backup_text(backup, messages, settings.display_name),
         media_type="text/plain; charset=utf-8",
         headers={
             "Content-Disposition": (
@@ -2499,42 +2443,23 @@ async def dialogs_backup_export(
     )
 
 
-@app.delete("/api/dialogs/backup/{backup_id}")
-async def dialogs_delete_backup(
-    backup_id: int, session: AsyncSession = Depends(get_session)
-) -> dict:
-    backup_q = await session.execute(
-        select(DialogBackup).where(DialogBackup.id == backup_id)
-    )
-    backup = backup_q.scalar_one_or_none()
-    if not backup:
-        raise HTTPException(404, "backup not found")
-    chat_id = backup.chat_id
-    await session.execute(
-        delete(DialogBackupMessage).where(DialogBackupMessage.backup_id == backup_id)
-    )
-    await session.delete(backup)
-    await session.commit()
-    return {"ok": True, "chat_id": chat_id}
-
-
 @app.delete("/api/dialogs/{chat_id}/history")
 async def dialogs_delete_chat_history(
     chat_id: int, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    backups_q = await session.execute(
-        select(DialogBackup.id).where(DialogBackup.chat_id == chat_id)
+    backup_q = await session.execute(
+        select(DialogBackup).where(DialogBackup.chat_id == chat_id)
     )
-    backup_ids = [row.id for row in backups_q.all()]
-    if backup_ids:
+    backup = backup_q.scalar_one_or_none()
+    deleted_backup = 0
+    if backup is not None:
         await session.execute(
             delete(DialogBackupMessage).where(
-                DialogBackupMessage.backup_id.in_(backup_ids)
+                DialogBackupMessage.backup_id == backup.id
             )
         )
-        await session.execute(
-            delete(DialogBackup).where(DialogBackup.id.in_(backup_ids))
-        )
+        await session.delete(backup)
+        deleted_backup = 1
 
     messages_result = await session.execute(
         delete(Message).where(Message.chat_id == chat_id)
@@ -2542,7 +2467,7 @@ async def dialogs_delete_chat_history(
     await session.commit()
     return {
         "ok": True,
-        "deleted_versions": len(backup_ids),
+        "deleted_backup": deleted_backup,
         "deleted_messages": messages_result.rowcount or 0,
     }
 
@@ -2550,27 +2475,11 @@ async def dialogs_delete_chat_history(
 @app.get("/api/dialogs/settings")
 async def dialogs_settings(session: AsyncSession = Depends(get_session)) -> dict:
     excluded = sorted(await get_excluded_chats(session))
-    interval = await get_interval_minutes(session)
-    last_run = await get_setting(session, SETTING_LAST_RUN, "")
-    last_run_iso: Optional[str] = None
-    if last_run:
-        try:
-            last_run_iso = _iso_utc(datetime.fromisoformat(last_run))
-        except ValueError:
-            last_run_iso = last_run
-    return {
-        "excluded_chats": list(excluded),
-        "interval_minutes": interval,
-        "last_run_at": last_run_iso,
-        "running": dialog_backup_scheduler.last_result is not None,
-        "last_error": dialog_backup_scheduler.last_error,
-    }
+    return {"excluded_chats": list(excluded)}
 
 
 class DialogSettingsIn(BaseModel):
     excluded_chats: Optional[list[int]] = None
-    interval_minutes: Optional[int] = None
-    interval_hours: Optional[int] = None
 
 
 @app.post("/api/dialogs/settings")
@@ -2579,27 +2488,7 @@ async def save_dialogs_settings(
 ) -> dict:
     if payload.excluded_chats is not None:
         await set_excluded_chats(session, payload.excluded_chats)
-    interval_value = payload.interval_minutes
-    if interval_value is None and payload.interval_hours is not None:
-        interval_value = int(payload.interval_hours) * 60
-    if interval_value is not None:
-        value = max(1, int(interval_value))
-        await set_setting(session, SETTING_INTERVAL, str(value))
-        dialog_backup_scheduler.trigger()
     return {"ok": True}
-
-
-@app.post("/api/dialogs/run-backup")
-async def dialogs_run_backup() -> dict:
-    result = await dialog_backup_scheduler.run_now()
-    return {
-        "started_at": _iso_utc(result.started_at),
-        "finished_at": _iso_utc(result.finished_at),
-        "chats_processed": result.chats_processed,
-        "new_versions": result.new_versions,
-        "skipped": result.skipped,
-        "excluded": result.excluded,
-    }
 
 
 class ReplicationSettingsIn(BaseModel):

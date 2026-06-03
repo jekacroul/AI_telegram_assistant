@@ -97,14 +97,15 @@ class DialogBackup(Base):
     __tablename__ = "dialog_backups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_id: Mapped[int] = mapped_column(Integer, index=True)
+    chat_id: Mapped[int] = mapped_column(Integer, index=True, unique=True)
     chat_name: Mapped[str] = mapped_column(String(255), default="")
-    version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, index=True
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
     message_count: Mapped[int] = mapped_column(Integer, default=0)
-    signature: Mapped[str] = mapped_column(String(64), default="")
 
 
 class DialogBackupMessage(Base):
@@ -121,6 +122,7 @@ class DialogBackupMessage(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    edited: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     media_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     media_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     media_private: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -408,6 +410,42 @@ def _apply_lightweight_migrations(sync_conn) -> None:
     if "media_private" not in backup_columns:
         sync_conn.exec_driver_sql(
             "ALTER TABLE dialog_backup_messages ADD COLUMN media_private BOOLEAN DEFAULT 0 NOT NULL"
+        )
+    if "edited" not in backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backup_messages ADD COLUMN edited BOOLEAN DEFAULT 0 NOT NULL"
+        )
+
+    dialog_backup_columns = {col["name"] for col in inspector.get_columns("dialog_backups")}
+    if "updated_at" not in dialog_backup_columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE dialog_backups ADD COLUMN updated_at DATETIME"
+        )
+        sync_conn.exec_driver_sql(
+            "UPDATE dialog_backups SET updated_at = created_at WHERE updated_at IS NULL"
+        )
+
+    # Collapse legacy versioned backups: keep only the highest-version row
+    # per chat, drop everything older (and its messages).
+    if "version" in dialog_backup_columns:
+        sync_conn.exec_driver_sql(
+            """
+            DELETE FROM dialog_backup_messages
+            WHERE backup_id IN (
+                SELECT b.id FROM dialog_backups b
+                WHERE b.id NOT IN (
+                    SELECT MAX(id) FROM dialog_backups GROUP BY chat_id
+                )
+            )
+            """
+        )
+        sync_conn.exec_driver_sql(
+            """
+            DELETE FROM dialog_backups
+            WHERE id NOT IN (
+                SELECT MAX(id) FROM dialog_backups GROUP BY chat_id
+            )
+            """
         )
 
     tables = set(inspector.get_table_names())

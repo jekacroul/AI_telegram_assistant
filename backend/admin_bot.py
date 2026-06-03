@@ -260,7 +260,7 @@ def data_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [_btn("💾 Репликация БД", "rep:status")],
-            [_btn("🗂 Бэкап диалогов", "dlg:chats")],
+            [_btn("🗂 Сохранённые чаты", "dlg:chats")],
             [_btn("🔍 RAG-память", "rag:menu")],
             [_btn("← Назад", "m:main")],
         ]
@@ -548,7 +548,7 @@ def _help_text() -> str:
         "/training — обучение моделей\n"
         "/replication — репликация БД\n"
         "/rag — RAG-память\n"
-        "/dialogs — бэкап диалогов\n"
+        "/dialogs — сохранённые чаты\n"
         "/quick — быстрые ответы\n"
         "/style — профиль стиля\n"
         "/help — эта справка\n\n"
@@ -2845,10 +2845,8 @@ async def _handle_replication(
 # --------------------------------------------------------------------------
 async def _handle_dialogs(cq: CallbackQuery, parts: list[str]) -> None:
     from .dialog_backup import (
-        SETTING_INTERVAL,
+        _format_backup_text,
         get_excluded_chats,
-        get_interval_minutes,
-        scheduler as dlg_scheduler,
         set_excluded_chats,
     )
 
@@ -2870,86 +2868,57 @@ async def _handle_dialogs(cq: CallbackQuery, parts: list[str]) -> None:
             backups = await session.execute(
                 select(
                     DialogBackup.chat_id,
-                    func.count(DialogBackup.id).label("versions"),
-                ).group_by(DialogBackup.chat_id)
+                    DialogBackup.message_count,
+                    DialogBackup.updated_at,
+                )
             )
-            ver_by_chat = {r.chat_id: r.versions for r in backups.all()}
+            backup_by_chat = {
+                r.chat_id: (r.message_count, r.updated_at) for r in backups.all()
+            }
             excluded = await get_excluded_chats(session)
-        lines = ["🗂 <b>Бэкап диалогов</b>", "──────────────────"]
-        rows: list[list[InlineKeyboardButton]] = [
-            [_btn("▶️ Сделать бэкап сейчас", "dlg:runbackup")],
-            [_btn("⚙️ Настройки бэкапа", "dlg:settings")],
-        ]
+        lines = ["🗂 <b>Сохранённые чаты</b>", "──────────────────"]
+        rows: list[list[InlineKeyboardButton]] = []
         for c in chats:
             name = c.chat_name or f"chat {c.chat_id}"
-            v = ver_by_chat.get(c.chat_id, 0)
+            saved, updated_at = backup_by_chat.get(c.chat_id, (0, None))
             excl = "🚫" if c.chat_id in excluded else ""
-            lines.append(
-                f"{excl}• {_esc(name)} — {c.count} сообщ., версий: {v}"
+            when = (
+                _fmt_local(updated_at, "Europe/Moscow", "%d.%m %H:%M")
+                if updated_at
+                else "—"
             )
-            rows.append([_btn(f"{excl}{name[:40]} (v{v})",
-                              f"dlg:versions:{c.chat_id}")])
+            lines.append(
+                f"{excl}• {_esc(name)} — сохр. {saved} ({when})"
+            )
+            rows.append([_btn(f"{excl}{name[:40]}", f"dlg:chat:{c.chat_id}")])
         await _edit_or_send(cq, _clip("\n".join(lines)), _nav(rows, "m:data"))
-    elif action == "runbackup":
-        await cq.message.answer("⏳ Делаю бэкап диалогов…")
-        res = await dlg_scheduler.run_now()
-        await cq.message.answer(
-            "✅ Бэкап готов\n"
-            f"├ Чатов обработано: {res.chats_processed}\n"
-            f"├ Новых версий: {res.new_versions}\n"
-            f"├ Без изменений: {res.skipped}\n"
-            f"└ Исключено: {res.excluded}"
-        )
-    elif action == "settings":
-        async with SessionLocal() as session:
-            interval = await get_interval_minutes(session)
-        text = (
-            "⚙️ <b>Настройки бэкапа диалогов</b>\n"
-            "──────────────────\n"
-            f"Интервал: {interval} мин ({interval // 60} ч)\n"
-        )
-        if dlg_scheduler.last_error:
-            text += f"Последняя ошибка: {_esc(dlg_scheduler.last_error)}\n"
-        rows = [
-            [
-                _btn("6 ч", "dlg:int:360"),
-                _btn("12 ч", "dlg:int:720"),
-                _btn("24 ч", "dlg:int:1440"),
-                _btn("48 ч", "dlg:int:2880"),
-            ],
-        ]
-        await _edit_or_send(cq, text, _nav(rows, "dlg:chats"))
-    elif action == "int" and len(parts) >= 3:
-        async with SessionLocal() as session:
-            await set_setting(session, SETTING_INTERVAL, str(int(parts[2])))
-        dlg_scheduler.trigger()
-        await cq.message.answer(f"✅ Интервал бэкапа: {int(parts[2]) // 60} ч")
-        await _handle_dialogs(cq, ["dlg", "settings"])
-    elif action == "versions" and len(parts) >= 3:
+    elif action == "chat" and len(parts) >= 3:
         chat_id = int(parts[2])
         async with SessionLocal() as session:
-            rows_db = (await session.execute(
-                select(DialogBackup)
-                .where(DialogBackup.chat_id == chat_id)
-                .order_by(desc(DialogBackup.version))
-            )).scalars().all()
+            backup = (await session.execute(
+                select(DialogBackup).where(DialogBackup.chat_id == chat_id)
+            )).scalar_one_or_none()
             excluded = await get_excluded_chats(session)
         excl = chat_id in excluded
-        lines = [f"🗂 <b>Версии бэкапа · чат {chat_id}</b>", "──────────────────"]
+        name = (backup.chat_name if backup else None) or f"chat {chat_id}"
+        lines = [
+            f"🗂 <b>Сохранённый чат · {_esc(name)}</b>",
+            "──────────────────",
+        ]
         rows: list[list[InlineKeyboardButton]] = [[
             _btn(
-                "✅ В бэкапе" if not excl else "🚫 Исключён",
+                "✅ Сохранять" if not excl else "🚫 Не сохранять",
                 f"dlg:exc:{chat_id}",
             )
         ]]
-        if not rows_db:
-            lines.append("Версий пока нет.")
-        for b in rows_db[:15]:
+        if backup:
+            lines.append(f"Сообщений сохранено: {backup.message_count}")
             lines.append(
-                f"v{b.version} — {b.message_count} сообщ. "
-                f"({_fmt_local(b.created_at, 'Europe/Moscow', '%d.%m %H:%M')})"
+                f"Обновлено: {_fmt_local(backup.updated_at, 'Europe/Moscow', '%d.%m %H:%M')}"
             )
-            rows.append([_btn(f"📄 Скачать v{b.version}", f"dlg:get:{b.id}")])
+            rows.append([_btn("📄 Скачать TXT", f"dlg:get:{chat_id}")])
+        else:
+            lines.append("Сохранений пока нет.")
         await _edit_or_send(cq, "\n".join(lines), _nav(rows, "dlg:chats"))
     elif action == "exc" and len(parts) >= 3:
         chat_id = int(parts[2])
@@ -2960,45 +2929,35 @@ async def _handle_dialogs(cq: CallbackQuery, parts: list[str]) -> None:
             else:
                 excluded.add(chat_id)
             await set_excluded_chats(session, list(excluded))
-        await _handle_dialogs(cq, ["dlg", "versions", str(chat_id)])
+        await _handle_dialogs(cq, ["dlg", "chat", str(chat_id)])
     elif action == "get" and len(parts) >= 3:
         await _send_backup_document(cq, int(parts[2]))
 
 
-async def _send_backup_document(cq: CallbackQuery, backup_id: int) -> None:
+async def _send_backup_document(cq: CallbackQuery, chat_id: int) -> None:
     from aiogram.types import BufferedInputFile
+    from .dialog_backup import _format_backup_text
 
     async with SessionLocal() as session:
         backup = (await session.execute(
-            select(DialogBackup).where(DialogBackup.id == backup_id)
+            select(DialogBackup).where(DialogBackup.chat_id == chat_id)
         )).scalar_one_or_none()
         if not backup:
-            await cq.message.answer("Бэкап не найден")
+            await cq.message.answer("Сохранение не найдено")
             return
         msgs = (await session.execute(
             select(DialogBackupMessage)
-            .where(DialogBackupMessage.backup_id == backup_id)
+            .where(DialogBackupMessage.backup_id == backup.id)
             .order_by(DialogBackupMessage.timestamp, DialogBackupMessage.id)
         )).scalars().all()
     chat_title = backup.chat_name or f"chat {backup.chat_id}"
-    out = [
-        f"Диалог: {chat_title}",
-        f"chat_id: {backup.chat_id}",
-        f"Версия: v{backup.version}",
-        f"Сообщений: {backup.message_count}",
-        "=" * 40,
-        "",
-    ]
-    for m in msgs:
-        author = settings.display_name if m.is_mine else (m.sender_name or "собеседник")
-        out.append(f"[{m.timestamp}] {author}:")
-        out.append((m.text or "").strip())
-        out.append("")
-    data = "\n".join(out).encode("utf-8")
-    fname = f"dialog_{backup.chat_id}_v{backup.version}.txt"
+    data = _format_backup_text(backup, list(msgs), settings.display_name).encode(
+        "utf-8"
+    )
+    fname = f"dialog_{backup.chat_id}.txt"
     await cq.message.answer_document(
         BufferedInputFile(data, filename=fname),
-        caption=f"🗂 {chat_title} · v{backup.version}",
+        caption=f"🗂 {chat_title}",
     )
 
 
@@ -3731,7 +3690,7 @@ async def cmd_dialogs(message: Message) -> None:
     if not await _guard(message, "/dialogs"):
         return
     await message.answer(
-        "🗂 <b>Бэкап диалогов</b>",
+        "🗂 <b>Сохранённые чаты</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [_btn("Открыть раздел", "dlg:chats")],
         ]),

@@ -80,21 +80,12 @@ function Avatar({ name, id, size = "w-10 h-10" }) {
 export default function Dialogs() {
   const { t } = useLang();
   const [chats, setChats] = useState([]);
-  const [settings, setSettings] = useState({
-    excluded_chats: [],
-    interval_minutes: 1440,
-    last_run_at: null,
-  });
+  const [settings, setSettings] = useState({ excluded_chats: [] });
   const [selectedChatId, setSelectedChatId] = useState(null);
-  const [versions, setVersions] = useState([]);
-  const [selectedBackup, setSelectedBackup] = useState(null);
   const [backupData, setBackupData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [intervalDraft, setIntervalDraft] = useState("1440");
-  const [savingInterval, setSavingInterval] = useState(false);
-  const [intervalSaved, setIntervalSaved] = useState(false);
   const [mediaPreview, setMediaPreview] = useState(null);
   const messagesRef = useRef(null);
 
@@ -105,37 +96,32 @@ export default function Dialogs() {
 
   const loadChats = useCallback(async () => {
     try {
-      const [c, s] = await Promise.all([api.dialogsChats(), api.dialogsSettings()]);
+      const [c, s] = await Promise.all([
+        api.dialogsChats(),
+        api.dialogsSettings(),
+      ]);
       setChats(c);
       setSettings(s);
-      setIntervalDraft(String(s.interval_minutes ?? 1440));
     } catch (e) {
       setError(e.message || String(e));
     }
   }, []);
 
-  const loadVersions = useCallback(async (chatId) => {
+  const loadBackup = useCallback(async (chatId) => {
     if (chatId == null) {
-      setVersions([]);
-      setSelectedBackup(null);
       setBackupData(null);
       return;
     }
     setLoading(true);
     try {
-      const v = await api.dialogsVersions(chatId);
-      setVersions(v);
-      if (v.length > 0) {
-        const top = v[0];
-        setSelectedBackup(top.id);
-        const data = await api.dialogsBackup(top.id);
-        setBackupData(data);
-      } else {
-        setSelectedBackup(null);
-        setBackupData(null);
-      }
+      const data = await api.dialogsBackup(chatId);
+      setBackupData(data);
     } catch (e) {
-      setError(e.message || String(e));
+      if (/404/.test(e.message || "")) {
+        setBackupData(null);
+      } else {
+        setError(e.message || String(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -146,26 +132,13 @@ export default function Dialogs() {
   }, [loadChats]);
 
   useEffect(() => {
-    loadVersions(selectedChatId);
-  }, [selectedChatId, loadVersions]);
+    loadBackup(selectedChatId);
+  }, [selectedChatId, loadBackup]);
 
   useEffect(() => {
     const el = messagesRef.current;
     if (el && !loading) el.scrollTop = el.scrollHeight;
   }, [backupData, loading]);
-
-  async function selectBackup(id) {
-    setSelectedBackup(id);
-    setLoading(true);
-    try {
-      const data = await api.dialogsBackup(id);
-      setBackupData(data);
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   async function toggleExcluded(chatId) {
     const set = new Set(excludedSet);
@@ -181,59 +154,6 @@ export default function Dialogs() {
     }
   }
 
-  async function runBackup() {
-    setBusy(true);
-    setError("");
-    try {
-      await api.dialogsRunBackup();
-      await loadChats();
-      if (selectedChatId != null) await loadVersions(selectedChatId);
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveInterval() {
-    const parsed = parseInt(intervalDraft, 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      setError(t("dialogs.intervalInvalid"));
-      return;
-    }
-    setSavingInterval(true);
-    setError("");
-    try {
-      await api.saveDialogsSettings({ interval_minutes: parsed });
-      setSettings((s) => ({ ...s, interval_minutes: parsed }));
-      setIntervalDraft(String(parsed));
-      setIntervalSaved(true);
-      setTimeout(() => setIntervalSaved(false), 1500);
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setSavingInterval(false);
-    }
-  }
-
-  async function deleteSelectedBackup() {
-    if (!selectedBackup) return;
-    const version = versions.find((v) => v.id === selectedBackup);
-    const label = version ? `v${version.version}` : t("dialogs.selectedVersion");
-    if (!window.confirm(t("dialogs.confirmDeleteBackup", { label }))) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api.deleteDialogsBackup(selectedBackup);
-      await loadChats();
-      if (selectedChatId != null) await loadVersions(selectedChatId);
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function deleteChatHistory() {
     if (selectedChatId == null || !selectedChat) return;
     const name = selectedChat.chat_name || `chat ${selectedChat.chat_id}`;
@@ -245,8 +165,6 @@ export default function Dialogs() {
     try {
       await api.deleteDialogsHistory(selectedChatId);
       setSelectedChatId(null);
-      setVersions([]);
-      setSelectedBackup(null);
       setBackupData(null);
       await loadChats();
     } catch (e) {
@@ -256,71 +174,18 @@ export default function Dialogs() {
     }
   }
 
-  function exportSelectedBackup() {
-    if (!selectedBackup) return;
-    window.location.href = api.dialogsBackupExportUrl(selectedBackup);
+  function exportBackup() {
+    if (selectedChatId == null) return;
+    window.location.href = api.dialogsBackupExportUrl(selectedChatId);
   }
 
-  const intervalDirty =
-    String(settings.interval_minutes ?? "") !== intervalDraft.trim();
-
   const selectedChat = chats.find((c) => c.chat_id === selectedChatId);
-  const selectedVersion = versions.find((v) => v.id === selectedBackup);
 
   return (
     <Page>
-      <Tile
-        title={t("nav.dialogs")}
-        icon={MessagesSquare}
-        actions={
-          <button
-            onClick={runBackup}
-            disabled={busy}
-            className="btn-primary disabled:opacity-50"
-          >
-            {busy ? t("dialogs.backupRunning") : t("dialogs.runBackup")}
-          </button>
-        }
-      >
-        <div className="flex flex-col gap-1">
-          <div className="text-sm text-zinc-700 dark:text-slate-200">
-            {t("dialogs.intro")}
-          </div>
-          <div className="text-xs text-muted">
-            {t("dialogs.lastRun", {
-              date: formatDate(settings.last_run_at) || t("common.dash"),
-            })}
-          </div>
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-xs text-muted">
-              {t("dialogs.intervalMin")}
-            </span>
-            <input
-              type="number"
-              min={1}
-              className="input w-24 py-1 text-xs"
-              value={intervalDraft}
-              onChange={(e) => setIntervalDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && intervalDirty) saveInterval();
-              }}
-            />
-            <button
-              className="btn-ghost disabled:opacity-50"
-              onClick={saveInterval}
-              disabled={!intervalDirty || savingInterval}
-            >
-              {savingInterval ? t("common.saving") : t("common.save")}
-            </button>
-            {intervalSaved && (
-              <span className="text-xs text-good">{t("common.saved")}</span>
-            )}
-            {intervalDirty && !savingInterval && !intervalSaved && (
-              <span className="text-xs text-muted">
-                {t("dialogs.notSaved")}
-              </span>
-            )}
-          </div>
+      <Tile title={t("nav.dialogs")} icon={MessagesSquare}>
+        <div className="text-sm text-zinc-700 dark:text-slate-200">
+          {t("dialogs.intro")}
         </div>
       </Tile>
 
@@ -367,8 +232,9 @@ export default function Dialogs() {
                       <span className="text-accent">@{c.chat_username}</span>
                     )}
                     {c.chat_username ? " · " : ""}
-                    {t("dialogs.msgsAbbr", { count: c.message_count })}
-                    {c.versions > 0 ? ` · v${c.latest_version}` : ""}
+                    {t("dialogs.savedAbbr", {
+                      count: c.backup_message_count || 0,
+                    })}
                   </div>
                 </div>
                 <button
@@ -413,45 +279,23 @@ export default function Dialogs() {
                     {selectedChat.chat_username
                       ? `@${selectedChat.chat_username}`
                       : `chat_id: ${selectedChat.chat_id}`}
+                    {selectedChat.backup_updated_at && (
+                      <>
+                        {" · "}
+                        {t("dialogs.updatedAt", {
+                          date: formatDate(selectedChat.backup_updated_at),
+                        })}
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-muted">
-                    {t("dialogs.version")}
-                  </label>
-                  <select
-                    className="input flex-none py-1 text-sm"
-                    style={{ width: "5rem" }}
-                    value={selectedBackup || ""}
-                    onChange={(e) => selectBackup(Number(e.target.value))}
-                    disabled={versions.length === 0 || busy}
-                    title={
-                      selectedVersion ? formatDate(selectedVersion.created_at) : ""
-                    }
-                  >
-                    {versions.length === 0 && (
-                      <option value="">{t("dialogs.noBackups")}</option>
-                    )}
-                    {versions.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        v{v.version}
-                      </option>
-                    ))}
-                  </select>
                   <button
                     className="btn-secondary disabled:opacity-50"
-                    onClick={exportSelectedBackup}
-                    disabled={!selectedBackup || busy}
+                    onClick={exportBackup}
+                    disabled={!backupData || busy}
                   >
                     {t("dialogs.downloadTxt")}
-                  </button>
-                  <button
-                    className="btn-secondary disabled:opacity-50"
-                    onClick={deleteSelectedBackup}
-                    disabled={!selectedBackup || busy}
-                    title={t("dialogs.deleteVersionTitle")}
-                  >
-                    {t("dialogs.deleteVersion")}
                   </button>
                   <button
                     className="btn-secondary text-bad disabled:opacity-50"
@@ -478,7 +322,7 @@ export default function Dialogs() {
                     {t("dialogs.emptyBackup")}
                   </div>
                 )}
-                {!loading && !backupData && versions.length === 0 && (
+                {!loading && !backupData && (
                   <div className="text-xs text-muted">
                     {t("dialogs.noBackupsHint")}
                   </div>
@@ -567,13 +411,18 @@ export default function Dialogs() {
                               </div>
                             )}
                             <div
-                              className={`text-[10px] mt-0.5 text-right ${
+                              className={`text-[10px] mt-0.5 text-right flex items-center justify-end gap-1 ${
                                 m.is_mine
                                   ? "text-accent-fg/60"
                                   : "text-muted"
                               }`}
                             >
-                              {formatTime(m.timestamp)}
+                              {m.edited && (
+                                <span className="italic">
+                                  {t("dialogs.edited")}
+                                </span>
+                              )}
+                              <span>{formatTime(m.timestamp)}</span>
                             </div>
                           </div>
                         </div>
