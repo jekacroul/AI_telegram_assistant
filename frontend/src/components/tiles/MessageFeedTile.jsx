@@ -138,8 +138,20 @@ export default function MessageFeedTile({ dragHandleProps, messages = [], onSele
                 </div>
                 <div className="flex items-center gap-2 mt-0.5">
                   {m.is_voice ? (
-                    <span className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400">
-                      <Mic size={11} /> {t("tiles.voice")}
+                    <span className="flex items-center gap-1 text-[11px] min-w-0">
+                      <Mic
+                        size={11}
+                        className="text-sky-600 dark:text-sky-400 flex-shrink-0"
+                      />
+                      {m.transcription ? (
+                        <span className="text-zinc-500 dark:text-slate-400 truncate">
+                          {m.transcription}
+                        </span>
+                      ) : (
+                        <span className="text-sky-600 dark:text-sky-400">
+                          {t("tiles.voice")}
+                        </span>
+                      )}
                     </span>
                   ) : hasMedia ? (
                     <span className="flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400">
