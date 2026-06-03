@@ -68,6 +68,26 @@ _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _configured = False
 
 
+class _UvicornAccessErrorOnlyFilter(logging.Filter):
+    """Drop uvicorn access log records for non-error responses.
+
+    Uvicorn emits access records with args of the form
+    (client_addr, method, full_path, http_version, status_code). We keep
+    only records whose status code is >= 400 so successful 2xx/3xx
+    responses don't flood the logs.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not args:
+            return True
+        try:
+            status_code = int(args[-1])
+        except (ValueError, TypeError, IndexError):
+            return True
+        return status_code >= 400
+
+
 def setup_logging(logs_dir: Path, level: int = logging.INFO) -> None:
     """Configure root logger with hourly file + stderr handlers. Idempotent."""
     global _configured
@@ -103,6 +123,9 @@ def setup_logging(logs_dir: Path, level: int = logging.INFO) -> None:
 
     logging.getLogger("uvicorn").propagate = True
     logging.getLogger("uvicorn.error").propagate = True
-    logging.getLogger("uvicorn.access").propagate = True
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.propagate = True
+    if not any(isinstance(f, _UvicornAccessErrorOnlyFilter) for f in access_logger.filters):
+        access_logger.addFilter(_UvicornAccessErrorOnlyFilter())
 
     _configured = True
