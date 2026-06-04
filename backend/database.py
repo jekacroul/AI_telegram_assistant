@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    event,
     inspect,
     select,
 )
@@ -312,8 +313,36 @@ class CreatedMeeting(Base):
     created_by: Mapped[str] = mapped_column(String(16), default="auto")
 
 
-engine = create_async_engine(settings.db_url, echo=False, future=True)
+_is_sqlite = settings.db_url.startswith("sqlite")
+
+# ``timeout`` is the sqlite3 driver-level busy timeout (seconds): when the
+# database file is locked by another connection, the driver waits up to this
+# long for the lock to clear instead of raising "database is locked"
+# immediately. Required because RAG startup indexing writes concurrently with
+# the bot saving messages and the queue reconcile.
+engine = create_async_engine(
+    settings.db_url,
+    echo=False,
+    future=True,
+    connect_args={"timeout": 30} if _is_sqlite else {},
+)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+if _is_sqlite:
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, _connection_record):  # noqa: ANN001
+        """Enable WAL so readers don't block the single writer, and set a
+        generous busy timeout so concurrent writers wait instead of failing
+        with 'database is locked'."""
+        cursor = dbapi_conn.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cursor.close()
 
 
 async def init_db() -> None:
