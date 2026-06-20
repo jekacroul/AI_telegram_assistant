@@ -2830,4 +2830,13 @@ if frontend_dist.exists():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False)
+    # log_config=None keeps our setup_logging() configuration (incl. the
+    # uvicorn.access filter that drops 2xx/3xx requests) instead of letting
+    # uvicorn override it with its default LOGGING_CONFIG.
+    uvicorn.run(
+        "backend.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        log_config=None,
+    )
